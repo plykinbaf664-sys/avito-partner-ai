@@ -1,36 +1,76 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI Partner Qualification
 
-## Getting Started
+Локальный foundation системы первичной обработки и квалификации входящих
+партнёров для бизнеса посуточной аренды.
 
-First, run the development server:
+## Требования
+
+- Node.js 24
+- npm
+
+## Запуск
 
 ```bash
+npm install
+npm run db:migrate
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Локальная SQLite-база по умолчанию создаётся в `data/local.db`. Путь можно
+переопределить через `DATABASE_URL`; список переменных находится в
+`.env.example`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Проверки
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
 
-## Learn More
+## База данных
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm run db:generate  # создать миграцию после изменения schema.ts
+npm run db:migrate   # применить миграции
+npm run db:studio    # открыть локальный Drizzle Studio
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Архитектура
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `src/domain` — модели, состояния и детерминированная qualification policy;
+- `src/application` — порты и workflow обработки входящего события;
+- `src/infrastructure` — SQLite/Drizzle schema и repository adapters;
+- `src/integrations` — изолированные Anthropic и Fake LLM adapters;
+- `src/shared` — общие технические примитивы;
+- `drizzle` — версионируемые SQL-миграции.
 
-## Deploy on Vercel
+Domain не импортирует SQLite, Drizzle, Anthropic или каналы доставки. Avito,
+Telegram, production database, authentication, CRM и полноценный AI-диалог в
+текущий этап не входят.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Локальная проверка inbound extraction
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+1. Скопируйте `.env.example` в `.env.local` и задайте `ANTHROPIC_API_KEY` и
+   `ANTHROPIC_MODEL`.
+2. Примените миграции и запустите приложение:
+
+```bash
+npm run db:migrate
+npm run dev
+```
+
+3. Отправьте channel-neutral запрос:
+
+```bash
+curl -X POST http://localhost:3000/api/inbound \
+  -H "Content-Type: application/json" \
+  -d '{"source":"mock","externalEventId":"event-123","externalLeadId":"lead-123","messageId":"message-123","text":"Я из Волгограда, есть 500 тысяч, могу начать через месяц"}'
+```
+
+Endpoint возвращает extraction, qualification, serviceability, состояние
+диалога, известные/недостающие факты и минимальные latency/idempotency metrics.
+Повторный `source + externalEventId` не создаёт второе сообщение и не вызывает
+LLM повторно. При временной недоступности Anthropic endpoint отвечает `503`, а
+incoming event и message остаются сохранёнными для retry.
