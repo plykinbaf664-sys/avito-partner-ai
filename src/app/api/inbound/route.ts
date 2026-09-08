@@ -1,5 +1,8 @@
 import { createInboundPostHandler } from "./route-handler";
-import { createRuntimeInboundProcessor } from "./runtime";
+import {
+  createRuntimeInboundProcessor,
+  createRuntimeInboundRequestVerifier,
+} from "./runtime";
 
 export const runtime = "nodejs";
 
@@ -10,4 +13,7 @@ function getProcessor(): ReturnType<typeof createRuntimeInboundProcessor> {
   return processor;
 }
 
-export const POST = createInboundPostHandler((input) => getProcessor()(input));
+export const POST = createInboundPostHandler(
+  (input) => getProcessor()(input),
+  createRuntimeInboundRequestVerifier(),
+);

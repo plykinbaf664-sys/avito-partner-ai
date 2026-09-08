@@ -15,6 +15,8 @@ export interface IncomingEvent {
   payload: unknown;
   status: IncomingEventStatus;
   error: string | null;
+  processingAttempts: number;
+  processingRetryable: boolean | null;
   extraction: ExtractedMessage | null;
   llmModel: string | null;
   llmInputTokens: number | null;

@@ -1,6 +1,7 @@
 import {
   index,
   integer,
+  real,
   sqliteTable,
   text,
   uniqueIndex,
@@ -11,13 +12,17 @@ import { informationNeeds } from "@/domain/conversation/information-needs";
 import { incomingEventStatuses } from "@/domain/event/incoming-event";
 import { deliveryStatuses } from "@/domain/delivery/delivery-state";
 import {
+  additionalExpensesReadinessValues,
   businessBarriers,
+  businessModelReadinessValues,
+  capitalScopes,
   launchTimings,
   managementReadinessValues,
   primaryGoals,
   type ExtractedMessage,
 } from "@/domain/extraction/extracted-message";
 import { qualificationStatuses } from "@/domain/lead/qualification-status";
+import { leadSegments } from "@/domain/lead/lead-segment";
 import { serviceabilityStatuses } from "@/domain/lead/serviceability";
 import { messageDirections } from "@/domain/message/message";
 import type { ManagerSummary } from "@/domain/handoff/manager-summary";
@@ -38,6 +43,33 @@ export const leads = sqliteTable(
     budgetConfirmed: integer("budget_confirmed", { mode: "boolean" })
       .notNull()
       .default(false),
+    availableCapital: integer("available_capital"),
+    availableCapitalConfirmed: integer("available_capital_confirmed", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(false),
+    entryBudget: integer("entry_budget"),
+    additionalLaunchCapital: integer("additional_launch_capital"),
+    capitalScope: text("capital_scope", { enum: capitalScopes })
+      .notNull()
+      .default("UNKNOWN"),
+    additionalExpensesReadiness: text("additional_expenses_readiness", {
+      enum: additionalExpensesReadinessValues,
+    })
+      .notNull()
+      .default("UNKNOWN"),
+    businessModelReadiness: text("business_model_readiness", {
+      enum: businessModelReadinessValues,
+    })
+      .notNull()
+      .default("UNKNOWN"),
+    segment: text("segment", { enum: leadSegments })
+      .notNull()
+      .default("UNDETERMINED"),
+    segmentConfidence: real("segment_confidence")
+      .notNull()
+      .default(0),
     legacyPotentialUnits: integer("potential_units"),
     startingUnits: integer("starting_units"),
     scalingPotentialUnits: integer("scaling_potential_units"),
@@ -145,6 +177,8 @@ export const incomingEvents = sqliteTable(
       .notNull()
       .default("RECEIVED"),
     error: text("error"),
+    processingAttempts: integer("processing_attempts").notNull().default(0),
+    processingRetryable: integer("processing_retryable", { mode: "boolean" }),
     extraction: text("extraction", { mode: "json" }).$type<ExtractedMessage>(),
     llmModel: text("llm_model"),
     llmInputTokens: integer("llm_input_tokens"),

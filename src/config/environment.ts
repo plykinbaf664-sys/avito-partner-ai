@@ -8,7 +8,8 @@ const nonEmptyOptional = z.preprocess(
 );
 
 const baseEnvironmentSchema = z.object({
-  DATABASE_URL: z.string().trim().min(1).default("file:./data/local.db"),
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  DATABASE_URL: nonEmptyOptional,
   AVITO_CLIENT_ID: nonEmptyOptional,
   AVITO_CLIENT_SECRET: nonEmptyOptional,
 });
@@ -39,11 +40,25 @@ function parseEnvironment<T>(
 }
 
 export function readBaseEnvironment(environment: EnvironmentInput) {
-  return parseEnvironment(baseEnvironmentSchema, environment);
+  const parsed = parseEnvironment(baseEnvironmentSchema, environment);
+  if (parsed.NODE_ENV === "production" && !parsed.DATABASE_URL) {
+    throw new InvalidEnvironmentError(["DATABASE_URL"]);
+  }
+  return {
+    ...parsed,
+    DATABASE_URL: parsed.DATABASE_URL ?? "file:./data/local.db",
+  };
 }
 
 export function readInboundEnvironment(environment: EnvironmentInput) {
-  return parseEnvironment(inboundEnvironmentSchema, environment);
+  const parsed = parseEnvironment(inboundEnvironmentSchema, environment);
+  if (parsed.NODE_ENV === "production" && !parsed.DATABASE_URL) {
+    throw new InvalidEnvironmentError(["DATABASE_URL"]);
+  }
+  return {
+    ...parsed,
+    DATABASE_URL: parsed.DATABASE_URL ?? "file:./data/local.db",
+  };
 }
 
 export function validateAvitoEnvironment(environment: EnvironmentInput): void {

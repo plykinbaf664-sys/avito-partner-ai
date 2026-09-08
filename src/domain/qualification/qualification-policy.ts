@@ -1,29 +1,33 @@
 import type { Lead } from "../lead/lead";
 import type { QualificationStatus } from "../lead/qualification-status";
+import { SEGMENTATION_REFERENCE } from "../lead/lead-segment";
+import { assessFinancialReadiness } from "./financial-readiness";
 
 export const PARTNER_QUALIFICATION_POLICY = Object.freeze({
-  minimumBudget: 150_000,
-  noFitBudgetBelow: 100_000,
-  priorityPotentialUnits: 5,
+  smallBusinessEntryCapitalReference:
+    SEGMENTATION_REFERENCE.smallBusinessEntryCapital,
+  investorCapitalReference: SEGMENTATION_REFERENCE.investorCapital,
+  investorScaleReference: SEGMENTATION_REFERENCE.investorScaleUnits,
 });
 
 export const hardBlockingReasonCodes = [
-  "INSUFFICIENT_BUDGET",
   "NO_LAUNCH_INTENT",
-  "NO_OPERATIONAL_READINESS",
-  "UNSUPPORTED_REGION",
+  "NO_MANAGEMENT_INTERACTION",
   "DECLINED_BY_LEAD",
   "REQUIRES_INCOME_GUARANTEE",
   "INCOMPATIBLE_BUSINESS_MODEL",
+  "UNWILLING_TO_FUND_REQUIRED_EXPENSES",
 ] as const;
 
 export type HardBlockingReasonCode =
   (typeof hardBlockingReasonCodes)[number];
 
 export const weakSignalCodes = [
-  "BORDERLINE_BUDGET",
+  "ENTRY_CAPITAL_BELOW_REFERENCE",
+  "ADDITIONAL_CAPITAL_UNCLEAR",
   "WEAK_LAUNCH_INTENT",
   "LIMITED_OPERATIONAL_CAPACITY",
+  "REGION_NEEDS_REVIEW",
 ] as const;
 
 export type WeakSignalCode = (typeof weakSignalCodes)[number];
@@ -31,17 +35,20 @@ export type WeakSignalCode = (typeof weakSignalCodes)[number];
 export type QualificationReasonCode =
   | HardBlockingReasonCode
   | WeakSignalCode
-  | "BUDGET_UNKNOWN"
-  | "BUDGET_NOT_CONFIRMED"
+  | "CAPITAL_UNKNOWN"
+  | "CAPITAL_NOT_CONFIRMED"
+  | "SEGMENT_UNDETERMINED"
   | "LAUNCH_INTENT_UNKNOWN"
   | "OPERATIONAL_READINESS_UNKNOWN"
   | "CITY_UNKNOWN"
-  | "REGION_NEEDS_REVIEW"
   | "STARTING_UNITS_UNKNOWN"
+  | "INVESTOR_SCALE_UNKNOWN"
   | "GOAL_UNKNOWN"
-  | "BASE_REQUIREMENTS_MET"
-  | "HOT_READINESS_CONFIRMED"
-  | "PRIORITY_SCALE_CONFIRMED"
+  | "BUSINESS_MODEL_READINESS_UNKNOWN"
+  | "ADDITIONAL_EXPENSES_CONTEXT_UNKNOWN"
+  | "SMALL_BUSINESS_READY"
+  | "INVESTOR_READY"
+  | "INVESTOR_SCALE_CONFIRMED"
   | "USER_REQUESTED_HUMAN"
   | "UNKNOWN_BUSINESS_QUESTION";
 
@@ -56,10 +63,19 @@ export type QualificationNextAction =
 
 export type QualificationFacts = Pick<
   Lead,
+  | "segment"
+  | "segmentConfidence"
   | "city"
   | "serviceability"
   | "budget"
   | "budgetConfirmed"
+  | "availableCapital"
+  | "availableCapitalConfirmed"
+  | "entryBudget"
+  | "additionalLaunchCapital"
+  | "capitalScope"
+  | "additionalExpensesReadiness"
+  | "businessModelReadiness"
   | "startingUnits"
   | "scalingPotentialUnits"
   | "hasFreeTime"
@@ -94,36 +110,45 @@ function unique<T>(values: T[]): T[] {
   return [...new Set(values)];
 }
 
+function capitalFacts(facts: QualificationFacts) {
+  const legacyCapital =
+    facts.budget !== null && facts.budgetConfirmed ? facts.budget : null;
+  return {
+    availableCapital: facts.availableCapital ?? legacyCapital,
+    entryCapital:
+      facts.entryBudget ?? facts.availableCapital ?? legacyCapital,
+  };
+}
+
 export function evaluateQualification(
   facts: QualificationFacts,
   context: QualificationContext = {},
 ): QualificationDecision {
+  const financialAssessment = assessFinancialReadiness(facts);
   const blockingReasons: HardBlockingReasonCode[] = [];
-
   if (facts.buyingIntent === "DECLINED") {
     blockingReasons.push("DECLINED_BY_LEAD");
-  }
-  if (
-    facts.budget !== null &&
-    facts.budgetConfirmed &&
-    facts.budget < PARTNER_QUALIFICATION_POLICY.noFitBudgetBelow
-  ) {
-    blockingReasons.push("INSUFFICIENT_BUDGET");
   }
   if (facts.launchTiming === "NO_PLANS") {
     blockingReasons.push("NO_LAUNCH_INTENT");
   }
   if (facts.managementReadiness === "NOT_READY") {
-    blockingReasons.push("NO_OPERATIONAL_READINESS");
-  }
-  if (facts.serviceability === "UNSUPPORTED") {
-    blockingReasons.push("UNSUPPORTED_REGION");
+    blockingReasons.push("NO_MANAGEMENT_INTERACTION");
   }
   if (facts.requiresGuaranteedIncome === true) {
     blockingReasons.push("REQUIRES_INCOME_GUARANTEE");
   }
-  if (facts.rejectsBusinessModel === true) {
+  if (
+    facts.rejectsBusinessModel === true ||
+    facts.businessModelReadiness === "REJECTS"
+  ) {
     blockingReasons.push("INCOMPATIBLE_BUSINESS_MODEL");
+  }
+  if (
+    financialAssessment.financialBarrier ===
+    "UNWILLING_TO_FUND_REQUIRED_EXPENSES"
+  ) {
+    blockingReasons.push("UNWILLING_TO_FUND_REQUIRED_EXPENSES");
   }
 
   if (blockingReasons.length > 0) {
@@ -153,29 +178,43 @@ export function evaluateQualification(
     };
   }
 
+  const { availableCapital, entryCapital } = capitalFacts(facts);
   const weakSignals: WeakSignalCode[] = [];
   if (
-    facts.budget !== null &&
-    facts.budgetConfirmed &&
-    facts.budget >= PARTNER_QUALIFICATION_POLICY.noFitBudgetBelow &&
-    facts.budget < PARTNER_QUALIFICATION_POLICY.minimumBudget
+    facts.segment === "SMALL_BUSINESS" &&
+    entryCapital !== null &&
+    entryCapital < PARTNER_QUALIFICATION_POLICY.smallBusinessEntryCapitalReference
   ) {
-    weakSignals.push("BORDERLINE_BUDGET");
+    weakSignals.push("ENTRY_CAPITAL_BELOW_REFERENCE");
+  }
+  if (
+    facts.segment === "SMALL_BUSINESS" &&
+    financialAssessment.financialReadiness === "BORDERLINE"
+  ) {
+    weakSignals.push("ADDITIONAL_CAPITAL_UNCLEAR");
   }
   if (facts.launchTiming === "LATER") {
     weakSignals.push("WEAK_LAUNCH_INTENT");
   }
-  if (
-    facts.hasFreeTime === false ||
-    facts.managementReadiness === "LIMITED"
-  ) {
+  if (facts.hasFreeTime === false || facts.managementReadiness === "LIMITED") {
     weakSignals.push("LIMITED_OPERATIONAL_CAPACITY");
+  }
+  if (facts.city !== null && facts.serviceability === "NEEDS_REVIEW") {
+    weakSignals.push("REGION_NEEDS_REVIEW");
   }
 
   const informationGaps: QualificationReasonCode[] = [];
-  if (facts.budget === null) informationGaps.push("BUDGET_UNKNOWN");
-  else if (!facts.budgetConfirmed) {
-    informationGaps.push("BUDGET_NOT_CONFIRMED");
+  if (availableCapital === null && facts.entryBudget === null) {
+    informationGaps.push("CAPITAL_UNKNOWN");
+  } else if (
+    facts.availableCapital !== null &&
+    !facts.availableCapitalConfirmed &&
+    facts.entryBudget === null
+  ) {
+    informationGaps.push("CAPITAL_NOT_CONFIRMED");
+  }
+  if (facts.segment === "UNDETERMINED") {
+    informationGaps.push("SEGMENT_UNDETERMINED");
   }
   if (facts.launchTiming === null || facts.launchTiming === "UNKNOWN") {
     informationGaps.push("LAUNCH_INTENT_UNKNOWN");
@@ -187,11 +226,33 @@ export function evaluateQualification(
     informationGaps.push("OPERATIONAL_READINESS_UNKNOWN");
   }
   if (facts.city === null) informationGaps.push("CITY_UNKNOWN");
-  if (facts.startingUnits === null) {
+  if (
+    facts.segment === "INVESTOR" &&
+    facts.startingUnits === null &&
+    facts.scalingPotentialUnits === null
+  ) {
+    informationGaps.push("INVESTOR_SCALE_UNKNOWN");
+  } else if (
+    facts.segment !== "INVESTOR" &&
+    facts.startingUnits === null
+  ) {
     informationGaps.push("STARTING_UNITS_UNKNOWN");
   }
   if (facts.primaryGoal === null || facts.primaryGoal === "UNKNOWN") {
     informationGaps.push("GOAL_UNKNOWN");
+  }
+  if (
+    facts.segment === "SMALL_BUSINESS" &&
+    facts.businessModelReadiness === "UNKNOWN"
+  ) {
+    informationGaps.push("BUSINESS_MODEL_READINESS_UNKNOWN");
+  }
+  if (
+    facts.segment === "SMALL_BUSINESS" &&
+    financialAssessment.financialReadiness !== "HIGH" &&
+    financialAssessment.financialReadiness !== "READY"
+  ) {
+    informationGaps.push("ADDITIONAL_EXPENSES_CONTEXT_UNKNOWN");
   }
 
   if (informationGaps.length > 0) {
@@ -206,81 +267,52 @@ export function evaluateQualification(
     };
   }
 
-  const hasPriorityScale =
-    (facts.startingUnits !== null &&
-      facts.startingUnits >= PARTNER_QUALIFICATION_POLICY.priorityPotentialUnits) ||
-    (facts.scalingPotentialUnits !== null &&
-      facts.scalingPotentialUnits >=
-        PARTNER_QUALIFICATION_POLICY.priorityPotentialUnits);
-  if (weakSignals.length > 0) {
-    const borderlineBudgetHasEnoughGrounds =
-      !weakSignals.includes("BORDERLINE_BUDGET") ||
-      hasPriorityScale ||
-      ((facts.launchTiming === "READY_NOW" ||
-        facts.launchTiming === "WITHIN_MONTH") &&
-        facts.managementReadiness === "READY");
-    if (!borderlineBudgetHasEnoughGrounds) {
-      return {
-        status: "BORDERLINE",
-        reason: weakSignals[0],
-        reasonCodes: unique(weakSignals),
-        blockingReasons: [],
-        weakSignals: unique(weakSignals),
-        shouldHandoffToManager: false,
-        nextAction: "CONTINUE_QUALIFICATION",
-      };
-    }
+  const unresolvedFinancialRisk = weakSignals.some((signal) =>
+    ["ENTRY_CAPITAL_BELOW_REFERENCE", "ADDITIONAL_CAPITAL_UNCLEAR"].includes(
+      signal,
+    ),
+  );
+  if (unresolvedFinancialRisk) {
     return {
-      status: "WARM",
+      status: "BORDERLINE",
       reason: weakSignals[0],
-      reasonCodes: unique(["BASE_REQUIREMENTS_MET", ...weakSignals]),
+      reasonCodes: unique(weakSignals),
+      blockingReasons: [],
+      weakSignals: unique(weakSignals),
+      shouldHandoffToManager: false,
+      nextAction: "CONTINUE_QUALIFICATION",
+    };
+  }
+
+  if (facts.segment === "INVESTOR") {
+    const strongInvestorProfile =
+      (availableCapital ?? 0) >=
+        PARTNER_QUALIFICATION_POLICY.investorCapitalReference &&
+      ((facts.startingUnits ?? 0) >= 7 ||
+        (facts.scalingPotentialUnits ?? 0) >=
+          PARTNER_QUALIFICATION_POLICY.investorScaleReference);
+    return {
+      status: strongInvestorProfile ? "PRIORITY" : "HOT",
+      reason: strongInvestorProfile
+        ? "INVESTOR_SCALE_CONFIRMED"
+        : "INVESTOR_READY",
+      reasonCodes: unique([
+        strongInvestorProfile ? "INVESTOR_SCALE_CONFIRMED" : "INVESTOR_READY",
+        ...weakSignals,
+      ]),
       blockingReasons: [],
       weakSignals: unique(weakSignals),
       shouldHandoffToManager: true,
       nextAction: "HANDOFF_TO_MANAGER",
     };
   }
-  if (facts.serviceability === "NEEDS_REVIEW") {
-    return {
-      status: "WARM",
-      reason: "REGION_NEEDS_REVIEW",
-      reasonCodes: ["BASE_REQUIREMENTS_MET", "REGION_NEEDS_REVIEW"],
-      blockingReasons: [],
-      weakSignals: [],
-      shouldHandoffToManager: true,
-      nextAction: "HANDOFF_TO_MANAGER",
-    };
-  }
-  if (hasPriorityScale) {
-    return {
-      status: "PRIORITY",
-      reason: "PRIORITY_SCALE_CONFIRMED",
-      reasonCodes: ["BASE_REQUIREMENTS_MET", "PRIORITY_SCALE_CONFIRMED"],
-      blockingReasons: [],
-      weakSignals: [],
-      shouldHandoffToManager: true,
-      nextAction: "HANDOFF_TO_MANAGER",
-    };
-  }
-
-  if (facts.startingUnits !== null && facts.startingUnits > 0) {
-    return {
-      status: "HOT",
-      reason: "HOT_READINESS_CONFIRMED",
-      reasonCodes: ["BASE_REQUIREMENTS_MET", "HOT_READINESS_CONFIRMED"],
-      blockingReasons: [],
-      weakSignals: [],
-      shouldHandoffToManager: true,
-      nextAction: "HANDOFF_TO_MANAGER",
-    };
-  }
 
   return {
-    status: "QUALIFIED",
-    reason: "BASE_REQUIREMENTS_MET",
-    reasonCodes: ["BASE_REQUIREMENTS_MET"],
+    status: weakSignals.length > 0 ? "WARM" : "HOT",
+    reason: weakSignals[0] ?? "SMALL_BUSINESS_READY",
+    reasonCodes: unique(["SMALL_BUSINESS_READY", ...weakSignals]),
     blockingReasons: [],
-    weakSignals: [],
+    weakSignals: unique(weakSignals),
     shouldHandoffToManager: true,
     nextAction: "HANDOFF_TO_MANAGER",
   };

@@ -70,9 +70,10 @@ export interface IncomingEventRepository {
     id: string,
     startedAt: Date,
     staleBefore: Date,
+    maxAttempts: number,
   ): Promise<{ claimed: boolean; recoveredStale: boolean }>;
   markProcessed(id: string, details: ProcessedEventDetails): Promise<void>;
-  markFailed(id: string, error: string): Promise<void>;
+  markFailed(id: string, error: string, retryable: boolean): Promise<void>;
 }
 
 export interface RepositoryContext {

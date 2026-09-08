@@ -61,10 +61,44 @@ export const managementReadinessValues = [
 export type ManagementReadiness =
   (typeof managementReadinessValues)[number];
 
+export const capitalScopes = [
+  "ENTRY_ONLY",
+  "TOTAL_LIMIT",
+  "ADDITIONAL_AVAILABLE",
+  "UNKNOWN",
+] as const;
+export type CapitalScope = (typeof capitalScopes)[number];
+
+export const additionalExpensesReadinessValues = [
+  "READY",
+  "LIMITED",
+  "NOT_READY",
+  "UNKNOWN",
+] as const;
+export type AdditionalExpensesReadiness =
+  (typeof additionalExpensesReadinessValues)[number];
+
+export const businessModelReadinessValues = [
+  "ACCEPTS",
+  "CONSIDERING",
+  "REJECTS",
+  "UNKNOWN",
+] as const;
+export type BusinessModelReadiness =
+  (typeof businessModelReadinessValues)[number];
+
 export interface ExtractedFacts {
   city: string | null;
   budget: number | null;
   budgetConfirmed: boolean | null;
+  availableCapital: number | null;
+  availableCapitalConfirmed: boolean;
+  entryBudget: number | null;
+  additionalLaunchCapital: number | null;
+  capitalScope: CapitalScope;
+  additionalExpensesReadiness: AdditionalExpensesReadiness;
+  businessModelReadiness: BusinessModelReadiness;
+  calculationUnits: number | null;
   startingUnits: number | null;
   scalingPotentialUnits: number | null;
   hasFreeTime: boolean | null;

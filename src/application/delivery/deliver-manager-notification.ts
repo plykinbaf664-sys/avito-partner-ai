@@ -4,6 +4,7 @@ import {
   externalErrorCode,
   isRetryableExternalError,
   MAX_EXTERNAL_DELIVERY_ATTEMPTS,
+  sanitizeExternalErrorCode,
 } from "./retry-policy";
 import {
   silentLogger,
@@ -67,7 +68,7 @@ export function createManagerNotificationDelivery({
               deliveryAttempts: attempts,
               deliveryRetryable:
                 result.retryable && attempts < MAX_EXTERNAL_DELIVERY_ATTEMPTS,
-              lastDeliveryErrorCode: result.errorCode.slice(0, 100),
+              lastDeliveryErrorCode: sanitizeExternalErrorCode(result.errorCode),
               updatedAt: clock(),
             };
       await persistence.managerNotifications.update(updated);

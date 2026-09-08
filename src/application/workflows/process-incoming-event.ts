@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import type { NaturalResponseGenerator } from "../conversation/generate-natural-response";
+import { EventProcessingRejectedError } from "../errors/event-processing-error";
+import { RetryableInfrastructureError } from "../errors/infrastructure-error";
 import { createManagerNotificationDelivery } from "../delivery/deliver-manager-notification";
 import { createOutboundMessageDelivery } from "../delivery/deliver-outbound-message";
 import type { ExtractMessageResult } from "../extraction/extract-message";
@@ -14,6 +16,10 @@ import type {
   ManagerNotificationProvider,
   OutboundMessageProvider,
 } from "../ports/channels";
+import {
+  MAX_INBOUND_MESSAGE_LENGTH,
+  MAX_INCOMING_PROCESSING_ATTEMPTS,
+} from "../security/technical-limits";
 import { buildConversationResponse } from "../../domain/conversation/conversation-response";
 import {
   assessInformationNeeds,
@@ -46,7 +52,7 @@ export const incomingPartnerEventSchema = z
     externalEventId: z.string().trim().min(1).max(255),
     externalLeadId: z.string().trim().min(1).max(255),
     messageId: z.string().trim().min(1).max(255),
-    text: z.string().trim().min(1).max(20_000),
+    text: z.string().trim().min(1).max(MAX_INBOUND_MESSAGE_LENGTH),
     rawPayload: z.unknown().optional(),
     receivedAt: z.date().optional(),
   })
@@ -74,6 +80,8 @@ export interface ProcessIncomingEventResult {
   duplicate: boolean;
   outOfOrderIgnored: boolean;
   extraction: ExtractedMessage | null;
+  segment: Lead["segment"] | null;
+  segmentConfidence: number | null;
   qualificationStatus: Lead["qualificationStatus"] | null;
   qualificationReason: string | null;
   qualificationDecision: QualificationDecision | null;
@@ -134,6 +142,15 @@ function createLead(
     serviceability: "NEEDS_REVIEW",
     budget: null,
     budgetConfirmed: false,
+    availableCapital: null,
+    availableCapitalConfirmed: false,
+    entryBudget: null,
+    additionalLaunchCapital: null,
+    capitalScope: "UNKNOWN",
+    additionalExpensesReadiness: "UNKNOWN",
+    businessModelReadiness: "UNKNOWN",
+    segment: "UNDETERMINED",
+    segmentConfidence: 0,
     startingUnits: null,
     scalingPotentialUnits: null,
     hasFreeTime: null,
@@ -153,7 +170,7 @@ function createLead(
     objections: [],
     buyingIntent: null,
     qualificationStatus: "QUALIFYING",
-    qualificationReason: "BUDGET_UNKNOWN",
+    qualificationReason: "CAPITAL_UNKNOWN",
     conversationSummary: null,
     createdAt: now,
     updatedAt: now,
@@ -169,11 +186,13 @@ async function prepareClaimedEvent(
   idGenerator: IdGenerator,
   now: Date,
   staleBefore: Date,
+  maxProcessingAttempts: number,
 ): Promise<PreparedEvent> {
   const claim = await repositories.incomingEvents.tryClaim(
     event.id,
     now,
     staleBefore,
+    maxProcessingAttempts,
   );
   if (!claim.claimed) {
     const lead = await repositories.leads.findByExternalIdentity(
@@ -359,6 +378,8 @@ function buildResult({
     duplicate,
     outOfOrderIgnored,
     extraction,
+    segment: lead?.segment ?? null,
+    segmentConfidence: lead?.segmentConfidence ?? null,
     qualificationStatus: decision?.status ?? lead?.qualificationStatus ?? null,
     qualificationReason: decision?.reason ?? lead?.qualificationReason ?? null,
     qualificationDecision: decision,
@@ -388,9 +409,14 @@ function buildResult({
   };
 }
 
-function safeErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : "Unknown processing error";
-  return message.slice(0, 500);
+function safeErrorCode(error: unknown): string {
+  if (!(error instanceof Error)) return "UNKNOWN_PROCESSING_ERROR";
+  const code = "code" in error ? String(error.code) : error.name;
+  return code.replace(/[^A-Za-z0-9_.:-]/g, "_").slice(0, 100);
+}
+
+function isRetryableProcessingError(error: unknown): boolean {
+  return error instanceof RetryableInfrastructureError;
 }
 
 function parseStoredKnowledgeIds(summary: string | null): string[] {
@@ -435,6 +461,8 @@ export function createIncomingEventProcessor({
       payload: input.rawPayload ?? input,
       status: "RECEIVED",
       error: null,
+      processingAttempts: 0,
+      processingRetryable: null,
       extraction: null,
       llmModel: null,
       llmInputTokens: null,
@@ -463,12 +491,14 @@ export function createIncomingEventProcessor({
           idGenerator,
           clock(),
           new Date(clock().getTime() - processingTimeoutMs),
+          MAX_INCOMING_PROCESSING_ATTEMPTS,
         ),
       );
     } catch (error) {
       await persistence.incomingEvents.markFailed(
         registration.event.id,
-        safeErrorMessage(error),
+        safeErrorCode(error),
+        true,
       );
       throw error;
     }
@@ -483,6 +513,21 @@ export function createIncomingEventProcessor({
     }
 
     if (!prepared.claimed) {
+      if (
+        registration.event.status === "FAILED" &&
+        (registration.event.processingRetryable === false ||
+          registration.event.processingAttempts >=
+            MAX_INCOMING_PROCESSING_ATTEMPTS)
+      ) {
+        logger.error("event.retry_rejected", {
+          eventId: registration.event.id,
+          leadId: prepared.lead?.id ?? null,
+          conversationId: prepared.conversation?.id ?? null,
+          source: input.source,
+          attempts: registration.event.processingAttempts,
+        });
+        throw new EventProcessingRejectedError();
+      }
       const duration = elapsedMilliseconds(processingStartedAt, timer);
       logger.info("event.duplicate", {
         eventId: registration.event.id,
@@ -516,7 +561,8 @@ export function createIncomingEventProcessor({
       const llmLatencyMs = elapsedMilliseconds(llmStartedAt, timer);
       await persistence.incomingEvents.markFailed(
         registration.event.id,
-        safeErrorMessage(error),
+        safeErrorCode(error),
+        isRetryableProcessingError(error),
       );
       logger.error("extraction.failed", {
         eventId: registration.event.id,
@@ -529,7 +575,6 @@ export function createIncomingEventProcessor({
             ? Boolean(error.retryable)
             : true,
         errorType: error instanceof Error ? error.name : "UnknownError",
-        errorMessage: safeErrorMessage(error),
       });
       throw error;
     }
@@ -648,17 +693,28 @@ export function createIncomingEventProcessor({
       const history = await persistence.messages.listByConversationId(
         currentConversation.id,
       );
-      const responseLlm =
-        responsePlan.useNaturalAdaptation && generateNaturalResponse
-          ? await generateNaturalResponse({
-              lead: evaluatedLead,
-              plan: responsePlan,
-              recentMessages: history.map(({ direction, content }) => ({
-                direction,
-                content,
-              })),
-            })
-          : null;
+      let responseLlm: Awaited<ReturnType<NaturalResponseGenerator>> | null =
+        null;
+      if (responsePlan.useNaturalAdaptation && generateNaturalResponse) {
+        try {
+          responseLlm = await generateNaturalResponse({
+            lead: evaluatedLead,
+            plan: responsePlan,
+            recentMessages: history.map(({ direction, content }) => ({
+              direction,
+              content,
+            })),
+          });
+        } catch (error) {
+          logger.error("response_generation.fallback", {
+            eventId: registration.event.id,
+            leadId: prepared.lead!.id,
+            conversationId: prepared.conversation!.id,
+            source: input.source,
+            errorType: safeErrorCode(error),
+          });
+        }
+      }
       const completed = await persistence.transaction(async (repositories) => {
         const storedLead = await repositories.leads.findByExternalIdentity(
           input.source,
@@ -1015,7 +1071,8 @@ export function createIncomingEventProcessor({
     } catch (error) {
       await persistence.incomingEvents.markFailed(
         registration.event.id,
-        safeErrorMessage(error),
+        safeErrorCode(error),
+        isRetryableProcessingError(error),
       );
       throw error;
     }

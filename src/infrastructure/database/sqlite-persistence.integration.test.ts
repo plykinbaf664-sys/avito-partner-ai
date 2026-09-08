@@ -29,6 +29,8 @@ describe("SQLite repositories", () => {
       payload: { text: "Здравствуйте" },
       status: "RECEIVED",
       error: null,
+      processingAttempts: 0,
+      processingRetryable: null,
       extraction: null,
       llmModel: null,
       llmInputTokens: null,

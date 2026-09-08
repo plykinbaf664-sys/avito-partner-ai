@@ -281,6 +281,7 @@ class DrizzleIncomingEventRepository implements IncomingEventRepository {
     id: string,
     startedAt: Date,
     staleBefore: Date,
+    maxAttempts: number,
   ): Promise<{ claimed: boolean; recoveredStale: boolean }> {
     const previous = await this.database
       .select({ status: schema.incomingEvents.status })
@@ -292,13 +293,23 @@ class DrizzleIncomingEventRepository implements IncomingEventRepository {
       .set({
         status: "PROCESSING",
         processingStartedAt: startedAt,
+        processingAttempts: sql`${schema.incomingEvents.processingAttempts} + 1`,
+        processingRetryable: null,
         error: null,
       })
       .where(
         and(
           eq(schema.incomingEvents.id, id),
+          lt(schema.incomingEvents.processingAttempts, maxAttempts),
           or(
-            inArray(schema.incomingEvents.status, ["RECEIVED", "FAILED"]),
+            eq(schema.incomingEvents.status, "RECEIVED"),
+            and(
+              eq(schema.incomingEvents.status, "FAILED"),
+              or(
+                isNull(schema.incomingEvents.processingRetryable),
+                eq(schema.incomingEvents.processingRetryable, true),
+              ),
+            ),
             and(
               eq(schema.incomingEvents.status, "PROCESSING"),
               or(
@@ -327,10 +338,14 @@ class DrizzleIncomingEventRepository implements IncomingEventRepository {
       .where(eq(schema.incomingEvents.id, id));
   }
 
-  async markFailed(id: string, error: string): Promise<void> {
+  async markFailed(
+    id: string,
+    error: string,
+    retryable: boolean,
+  ): Promise<void> {
     await this.database
       .update(schema.incomingEvents)
-      .set({ status: "FAILED", error })
+      .set({ status: "FAILED", error, processingRetryable: retryable })
       .where(
         and(
           eq(schema.incomingEvents.id, id),
@@ -354,23 +369,68 @@ function createRepositoryContext(database: DatabaseExecutor): RepositoryContext 
   };
 }
 
+function serializeRepository<T extends object>(
+  repository: T,
+  serialize: <Result>(operation: () => Promise<Result>) => Promise<Result>,
+): T {
+  return new Proxy(repository, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) =>
+        serialize(() =>
+          Promise.resolve(
+            Reflect.apply(
+              value as (...parameters: unknown[]) => unknown,
+              target,
+              args,
+            ),
+          ),
+        );
+    },
+  });
+}
+
 export class SqlitePersistence implements Persistence {
   readonly leads: LeadRepository;
   readonly conversations: ConversationRepository;
   readonly messages: MessageRepository;
   readonly incomingEvents: IncomingEventRepository;
   readonly managerNotifications: ManagerNotificationRepository;
+  private operationTail: Promise<void> = Promise.resolve();
 
   private constructor(
     private readonly client: Client,
     private readonly database: Database,
   ) {
     const repositories = createRepositoryContext(database);
-    this.leads = repositories.leads;
-    this.conversations = repositories.conversations;
-    this.messages = repositories.messages;
-    this.incomingEvents = repositories.incomingEvents;
-    this.managerNotifications = repositories.managerNotifications;
+    const serialize = <Result>(operation: () => Promise<Result>) =>
+      this.serialize(operation);
+    this.leads = serializeRepository(repositories.leads, serialize);
+    this.conversations = serializeRepository(repositories.conversations, serialize);
+    this.messages = serializeRepository(repositories.messages, serialize);
+    this.incomingEvents = serializeRepository(
+      repositories.incomingEvents,
+      serialize,
+    );
+    this.managerNotifications = serializeRepository(
+      repositories.managerNotifications,
+      serialize,
+    );
+  }
+
+  private async serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.operationTail;
+    let release!: () => void;
+    this.operationTail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 
   static create(databaseUrl = "file:./data/local.db"): SqlitePersistence {
@@ -390,26 +450,33 @@ export class SqlitePersistence implements Persistence {
   async transaction<T>(
     operation: (repositories: RepositoryContext) => Promise<T>,
   ): Promise<T> {
-    return this.database.transaction((transaction) =>
-      operation(createRepositoryContext(transaction)),
+    return this.serialize(() =>
+      this.database.transaction((transaction) =>
+        operation(createRepositoryContext(transaction)),
+      ),
     );
   }
 
   async checkHealth(): Promise<void> {
-    await this.database.run(sql`select 1`);
+    await this.serialize(() => this.database.run(sql`select 1`));
   }
 
   async checkReadiness(): Promise<void> {
-    await this.checkHealth();
-    await this.database.select({ id: schema.leads.id }).from(schema.leads).limit(1);
-    await this.database
-      .select({ id: schema.incomingEvents.id })
-      .from(schema.incomingEvents)
-      .limit(1);
-    await this.database
-      .select({ id: schema.managerNotifications.id })
-      .from(schema.managerNotifications)
-      .limit(1);
+    await this.serialize(async () => {
+      await this.database.run(sql`select 1`);
+      await this.database
+        .select({ id: schema.leads.id })
+        .from(schema.leads)
+        .limit(1);
+      await this.database
+        .select({ id: schema.incomingEvents.id })
+        .from(schema.incomingEvents)
+        .limit(1);
+      await this.database
+        .select({ id: schema.managerNotifications.id })
+        .from(schema.managerNotifications)
+        .limit(1);
+    });
   }
 
   close(): void {

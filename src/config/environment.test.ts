@@ -27,4 +27,21 @@ describe("environment validation", () => {
       }),
     ).not.toThrow();
   });
+
+  it("requires an explicit database in production and never falls back to fake providers", () => {
+    expect(() =>
+      readInboundEnvironment({
+        NODE_ENV: "production",
+        ANTHROPIC_API_KEY: "configured",
+        ANTHROPIC_MODEL: "claude-test",
+      }),
+    ).toThrowError(new InvalidEnvironmentError(["DATABASE_URL"]));
+
+    expect(() =>
+      readInboundEnvironment({
+        NODE_ENV: "production",
+        DATABASE_URL: "file:./data/production.db",
+      }),
+    ).toThrowError(InvalidEnvironmentError);
+  });
 });

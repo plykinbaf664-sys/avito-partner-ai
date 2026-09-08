@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { SqlitePersistence } from "@/infrastructure/database/sqlite-persistence";
 import { GET as healthCheck } from "@/app/api/health/route";
+import { createReadinessHandler } from "@/app/api/readiness/route";
 
 import { checkReadiness } from "./system-health";
 
@@ -30,5 +31,18 @@ describe("system health", () => {
       status: "not_ready",
       database: "unavailable",
     });
+  });
+
+  it("does not expose sensitive configuration in readiness failures", async () => {
+    const secretMarker = "must-not-be-returned";
+    const response = await createReadinessHandler({
+      NODE_ENV: "production",
+      DATABASE_URL: `invalid://${secretMarker}`,
+    })();
+    const body = await response.text();
+
+    expect(response.status).toBe(503);
+    expect(body).not.toContain(secretMarker);
+    expect(body).toBe('{"status":"not_ready","database":"unavailable"}');
   });
 });

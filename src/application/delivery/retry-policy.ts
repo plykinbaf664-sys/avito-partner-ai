@@ -1,5 +1,12 @@
 export const MAX_EXTERNAL_DELIVERY_ATTEMPTS = 3;
 
+export function sanitizeExternalErrorCode(value: unknown): string {
+  const normalized = String(value)
+    .replace(/[^A-Za-z0-9_.:-]/g, "_")
+    .slice(0, 100);
+  return normalized || "UNKNOWN_ERROR";
+}
+
 export function canRetryExternalDelivery({
   attempts,
   retryable,
@@ -20,12 +27,26 @@ export function isRetryableExternalError(error: unknown): boolean {
     return status === 429 || status >= 500;
   }
 
-  return true;
+  if (error instanceof Error && "code" in error) {
+    return new Set([
+      "ECONNRESET",
+      "ECONNREFUSED",
+      "EHOSTUNREACH",
+      "ENETUNREACH",
+      "ETIMEDOUT",
+      "UND_ERR_CONNECT_TIMEOUT",
+      "UND_ERR_HEADERS_TIMEOUT",
+    ]).has(String(error.code));
+  }
+
+  return error instanceof Error && error.name === "AbortError";
 }
 
 export function externalErrorCode(error: unknown): string {
   if (error instanceof Error && "code" in error) {
-    return String(error.code).slice(0, 100);
+    return sanitizeExternalErrorCode(error.code);
   }
-  return error instanceof Error ? error.name.slice(0, 100) : "UNKNOWN_ERROR";
+  return error instanceof Error
+    ? sanitizeExternalErrorCode(error.name)
+    : "UNKNOWN_ERROR";
 }

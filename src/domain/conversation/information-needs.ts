@@ -1,9 +1,13 @@
-import type { ConversationState } from "./conversation-state";
+import { LAUNCH_COST_REFERENCE } from "../economics/economics-calculator";
 import type { Lead } from "../lead/lead";
+import { assessFinancialReadiness } from "../qualification/financial-readiness";
+import type { ConversationState } from "./conversation-state";
 
 export const informationNeeds = [
+  "AVAILABLE_CAPITAL",
+  "ADDITIONAL_EXPENSES",
+  "BUSINESS_MODEL",
   "CITY",
-  "BUDGET",
   "LAUNCH_TIMING",
   "FREE_TIME",
   "MANAGEMENT_READINESS",
@@ -15,15 +19,6 @@ export const informationNeeds = [
 ] as const;
 
 export type InformationNeed = (typeof informationNeeds)[number];
-
-export const criticalInformationNeeds = [
-  "BUDGET",
-  "LAUNCH_TIMING",
-  "CITY",
-  "STARTING_UNITS",
-  "GOAL",
-  "MANAGEMENT_READINESS",
-] as const satisfies readonly InformationNeed[];
 
 export const optionalInformationNeeds = [
   "FREE_TIME",
@@ -42,10 +37,20 @@ export interface InformationNeedsAssessment {
 
 function isKnown(lead: Lead, need: InformationNeed): boolean {
   switch (need) {
+    case "AVAILABLE_CAPITAL":
+      return (
+        lead.entryBudget !== null ||
+        (lead.availableCapital !== null && lead.availableCapitalConfirmed) ||
+        (lead.budget !== null && lead.budgetConfirmed)
+      );
+    case "ADDITIONAL_EXPENSES":
+      return ["HIGH", "READY", "INCOMPATIBLE"].includes(
+        assessFinancialReadiness(lead).financialReadiness,
+      );
+    case "BUSINESS_MODEL":
+      return lead.businessModelReadiness !== "UNKNOWN";
     case "CITY":
       return lead.city !== null;
-    case "BUDGET":
-      return lead.budget !== null && lead.budgetConfirmed;
     case "LAUNCH_TIMING":
       return lead.launchTiming !== null && lead.launchTiming !== "UNKNOWN";
     case "FREE_TIME":
@@ -71,15 +76,61 @@ function isKnown(lead: Lead, need: InformationNeed): boolean {
   }
 }
 
+function criticalInformationNeedsFor(lead: Lead): InformationNeed[] {
+  if (lead.segment === "INVESTOR") {
+    const needs: InformationNeed[] = [
+      "AVAILABLE_CAPITAL",
+      "LAUNCH_TIMING",
+      "GOAL",
+      "MANAGEMENT_READINESS",
+      "CITY",
+    ];
+    if (lead.startingUnits === null && lead.scalingPotentialUnits === null) {
+      needs.push("STARTING_UNITS");
+    }
+    return needs;
+  }
+  if (lead.segment === "SMALL_BUSINESS") {
+    return [
+      "AVAILABLE_CAPITAL",
+      "STARTING_UNITS",
+      "LAUNCH_TIMING",
+      "CITY",
+      "GOAL",
+      "BUSINESS_MODEL",
+      "ADDITIONAL_EXPENSES",
+      "MANAGEMENT_READINESS",
+    ];
+  }
+  const needs: InformationNeed[] = [
+    "AVAILABLE_CAPITAL",
+    "STARTING_UNITS",
+    "GOAL",
+    "BUSINESS_MODEL",
+    "LAUNCH_TIMING",
+  ];
+  if (
+    lead.entryBudget !== null &&
+    (lead.availableCapital === null ||
+      lead.availableCapital <
+        LAUNCH_COST_REFERENCE.baseLaunchReference +
+          LAUNCH_COST_REFERENCE.furnishingReserveReference)
+  ) {
+    needs.push("ADDITIONAL_EXPENSES");
+  }
+  return needs;
+}
+
 export function assessInformationNeeds(
   lead: Lead,
 ): InformationNeedsAssessment {
   const knownFacts = informationNeeds.filter((need) => isKnown(lead, need));
+  const criticalInformationNeeds = criticalInformationNeedsFor(lead);
   const missingCriticalFacts = criticalInformationNeeds.filter(
     (need) => !knownFacts.includes(need),
   );
   const missingOptionalFacts = optionalInformationNeeds.filter(
-    (need) => !knownFacts.includes(need),
+    (need) => !knownFacts.includes(need) && !missingCriticalFacts.includes(need),
   );
   const suggestedNextInformationNeed = selectNextInformationNeed(
     lead,
@@ -105,39 +156,40 @@ function selectNextInformationNeed(
   if (candidates.length === 0) return null;
 
   const scores: Record<InformationNeed, number> = {
-    BUDGET: 100,
+    AVAILABLE_CAPITAL: 100,
+    STARTING_UNITS: 95,
     LAUNCH_TIMING: 90,
+    ADDITIONAL_EXPENSES: 85,
+    BUSINESS_MODEL: 82,
     CITY: 80,
-    STARTING_UNITS: 75,
-    SCALING_POTENTIAL_UNITS: 20,
-    GOAL: 70,
-    MANAGEMENT_READINESS: 65,
+    GOAL: 75,
+    MANAGEMENT_READINESS: 70,
+    SCALING_POTENTIAL_UNITS: 40,
     FREE_TIME: 35,
     EXPERIENCE: 30,
     BARRIER: 25,
   };
 
-  if (
-    lead.budget !== null &&
-    lead.budgetConfirmed &&
-    lead.budget < 150_000
-  ) {
-    scores.MANAGEMENT_READINESS += 20;
-    scores.STARTING_UNITS += 15;
-  }
-  if (lead.serviceability === "NEEDS_REVIEW" && lead.city !== null) {
-    scores.STARTING_UNITS += 10;
+  if (lead.segment === "INVESTOR") {
+    scores.STARTING_UNITS += 20;
+    scores.SCALING_POTENTIAL_UNITS += 45;
+    scores.MANAGEMENT_READINESS += 10;
+    scores.ADDITIONAL_EXPENSES -= 50;
   }
   if (
-    (lead.startingUnits !== null && lead.startingUnits >= 5) ||
-    (lead.scalingPotentialUnits !== null && lead.scalingPotentialUnits >= 5)
+    lead.segment === "SMALL_BUSINESS" &&
+    lead.capitalScope === "TOTAL_LIMIT" &&
+    lead.additionalExpensesReadiness !== "READY"
   ) {
-    scores.MANAGEMENT_READINESS += 20;
-    scores.GOAL += 10;
+    scores.ADDITIONAL_EXPENSES += 35;
   }
-  if (lead.primaryFear !== null) {
-    scores.BARRIER -= 20;
+  if (
+    lead.entryBudget !== null &&
+    !isKnown(lead, "ADDITIONAL_EXPENSES")
+  ) {
+    scores.ADDITIONAL_EXPENSES += 35;
   }
+  if (lead.primaryFear !== null) scores.BARRIER -= 20;
 
   return [...candidates].sort((left, right) => scores[right] - scores[left])[0] ?? null;
 }
@@ -146,10 +198,11 @@ export function stateForInformationNeed(
   need: InformationNeed | null,
 ): ConversationState {
   switch (need) {
+    case "AVAILABLE_CAPITAL":
+    case "ADDITIONAL_EXPENSES":
+      return "WAITING_BUDGET";
     case "CITY":
       return "WAITING_CITY";
-    case "BUDGET":
-      return "WAITING_BUDGET";
     case "LAUNCH_TIMING":
       return "WAITING_LAUNCH_TIMING";
     case "FREE_TIME":
@@ -161,6 +214,7 @@ export function stateForInformationNeed(
       return "WAITING_EXPERIENCE";
     case "BARRIER":
       return "WAITING_BARRIER";
+    case "BUSINESS_MODEL":
     case "STARTING_UNITS":
     case "SCALING_POTENTIAL_UNITS":
       return "QUALIFYING";

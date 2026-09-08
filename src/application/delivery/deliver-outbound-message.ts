@@ -4,6 +4,7 @@ import {
   externalErrorCode,
   isRetryableExternalError,
   MAX_EXTERNAL_DELIVERY_ATTEMPTS,
+  sanitizeExternalErrorCode,
 } from "./retry-policy";
 import {
   silentLogger,
@@ -70,7 +71,7 @@ export function createOutboundMessageDelivery({
               deliveryAttempts: attempts,
               deliveryRetryable:
                 result.retryable && attempts < MAX_EXTERNAL_DELIVERY_ATTEMPTS,
-              lastDeliveryErrorCode: result.errorCode.slice(0, 100),
+              lastDeliveryErrorCode: sanitizeExternalErrorCode(result.errorCode),
             };
       await persistence.messages.update(updated);
       logger[result.status === "SENT" ? "info" : "error"](

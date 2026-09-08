@@ -1,11 +1,15 @@
 import type {
   BusinessBarrier,
+  BusinessModelReadiness,
+  CapitalScope,
+  AdditionalExpensesReadiness,
   LaunchTiming,
   ManagementReadiness,
   PrimaryGoal,
 } from "../extraction/extracted-message";
 import type { QualificationStatus } from "./qualification-status";
 import type { ServiceabilityStatus } from "./serviceability";
+import type { LeadSegment } from "./lead-segment";
 
 export interface Lead {
   id: string;
@@ -17,6 +21,15 @@ export interface Lead {
   serviceability: ServiceabilityStatus;
   budget: number | null;
   budgetConfirmed: boolean;
+  availableCapital: number | null;
+  availableCapitalConfirmed: boolean;
+  entryBudget: number | null;
+  additionalLaunchCapital: number | null;
+  capitalScope: CapitalScope;
+  additionalExpensesReadiness: AdditionalExpensesReadiness;
+  businessModelReadiness: BusinessModelReadiness;
+  segment: LeadSegment;
+  segmentConfidence: number;
   startingUnits: number | null;
   scalingPotentialUnits: number | null;
   hasFreeTime: boolean | null;
@@ -51,6 +64,15 @@ export type LeadFactPatch = Partial<
     | "city"
     | "budget"
     | "budgetConfirmed"
+    | "availableCapital"
+    | "availableCapitalConfirmed"
+    | "entryBudget"
+    | "additionalLaunchCapital"
+    | "capitalScope"
+    | "additionalExpensesReadiness"
+    | "businessModelReadiness"
+    | "segment"
+    | "segmentConfidence"
     | "startingUnits"
     | "scalingPotentialUnits"
     | "hasFreeTime"

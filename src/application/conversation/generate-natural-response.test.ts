@@ -24,7 +24,7 @@ describe("natural response generation", () => {
       lead,
       plan: {
         text: "Сомнение понятно. Какой бюджет вы готовы выделить на запуск?",
-        nextInformationNeed: "BUDGET",
+        nextInformationNeed: "AVAILABLE_CAPITAL",
         asksUserQuestion: true,
         knowledgeEntryIds: [],
         unresolvedQuestions: [],
@@ -41,6 +41,11 @@ describe("natural response generation", () => {
     expect(result.text).toContain("бюджет");
     expect(llm.callCount).toBe(1);
     expect(llm.requests[0]?.maxTokens).toBe(320);
+    const sentContext = JSON.parse(llm.requests[0]!.userMessage) as {
+      recentMessages: { content: string }[];
+    };
+    expect(sentContext.recentMessages).toHaveLength(3);
+    expect(llm.requests[0]?.systemPrompt).toContain("SECURITY BOUNDARY");
     expect(llm.requests[0]?.userMessage).not.toContain("Первое");
   });
 });

@@ -8,7 +8,12 @@ import type {
 import type { KnowledgeAnswer } from "../knowledge/knowledge-base";
 
 const qualificationQuestions: Record<InformationNeed, string> = {
-  BUDGET: "Какой бюджет вы готовы выделить на запуск?",
+  AVAILABLE_CAPITAL:
+    "Какую сумму вы реально готовы выделить на проект: это бюджет только на первый этап или общий доступный капитал?",
+  ADDITIONAL_EXPENSES:
+    "Готовы ли вы отдельно учитывать расходы по самому объекту — например залог, оснащение и обслуживание? Точную сумму сейчас называть не нужно.",
+  BUSINESS_MODEL:
+    "Рассматриваете именно запуск бизнеса через субаренду с помощью управляющей компании?",
   LAUNCH_TIMING: "Когда примерно вы рассматриваете запуск?",
   CITY: "В каком городе вы планируете запускать объекты?",
   STARTING_UNITS: "Со скольких объектов хотите начать?",
@@ -22,11 +27,9 @@ const qualificationQuestions: Record<InformationNeed, string> = {
 };
 
 const rejectionMessages: Partial<Record<QualificationReasonCode, string>> = {
-  INSUFFICIENT_BUDGET:
-    "Для запуска в текущей модели нужен бюджет от 100 000 ₽, а нормальный стартовый ориентир — от 150 000 ₽. С текущей суммой корректно запустить проект не получится. Если ситуация изменится, можно вернуться к разговору.",
   NO_LAUNCH_INTENT:
     "Понял. Раз запуск вы сейчас не рассматриваете, не буду продолжать квалификацию. Если планы изменятся, можно вернуться к разговору.",
-  NO_OPERATIONAL_READINESS:
+  NO_MANAGEMENT_INTERACTION:
     "Понял. В этой модели всё же нужно взаимодействовать с управляющей компанией по ключевым вопросам, поэтому сейчас формат вам не подойдёт.",
   DECLINED_BY_LEAD:
     "Понял, спасибо за прямой ответ. Не буду больше отвлекать. Если интерес вернётся, можно продолжить разговор.",
@@ -34,8 +37,8 @@ const rejectionMessages: Partial<Record<QualificationReasonCode, string>> = {
     "Компания не гарантирует доход или прибыль. Если гарантия является обязательным условием, текущий формат вам не подойдёт.",
   INCOMPATIBLE_BUSINESS_MODEL:
     "Понял. Судя по вашему условию, текущая модель бизнеса вам не подходит, поэтому не буду продолжать квалификацию.",
-  UNSUPPORTED_REGION:
-    "Сейчас компания не работает в этом регионе, поэтому продолжить запуск в текущем формате не получится.",
+  UNWILLING_TO_FUND_REQUIRED_EXPENSES:
+    "Помимо услуги команды, для запуска нужно самостоятельно оплатить аренду, залог и базовую комплектацию объекта. Вы указали, что не готовы финансировать эти обязательные расходы, поэтому в текущем формате запуск не получится.",
 };
 
 export interface ConversationResponsePlan {
@@ -81,7 +84,7 @@ export function buildConversationResponse(params: {
         : "Основные данные собраны. Передам менеджеру краткий контекст, чтобы продолжить предметно.",
     );
   } else if (nextInformationNeed !== null) {
-    parts.push(qualificationQuestions[nextInformationNeed]);
+    parts.push(questionForInformationNeed(nextInformationNeed, params.lead));
   }
 
   if (parts.length === 0) {
@@ -102,6 +105,24 @@ export function buildConversationResponse(params: {
   };
 }
 
-export function questionForInformationNeed(need: InformationNeed): string {
+export function questionForInformationNeed(
+  need: InformationNeed,
+  lead?: Lead,
+): string {
+  if (
+    need === "ADDITIONAL_EXPENSES" &&
+    lead &&
+    lead.availableCapital !== null &&
+    lead?.capitalScope === "TOTAL_LIMIT"
+  ) {
+    return "Правильно понимаю, что названная сумма — общий предел на услугу команды, аренду, залог и комплектацию, или при необходимости сможете предусмотреть дополнительный бюджет?";
+  }
+  if (
+    need === "ADDITIONAL_EXPENSES" &&
+    lead &&
+    lead.entryBudget !== null
+  ) {
+    return "Помимо первого этапа, для запуска понадобятся аренда, залог и базовая комплектация квартиры. Вы рассматриваете отдельный бюджет на эти расходы?";
+  }
   return qualificationQuestions[need];
 }

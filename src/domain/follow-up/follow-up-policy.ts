@@ -74,7 +74,12 @@ export function buildQualificationFollowUp(
   if (need) {
     const question = questionForInformationNeed(need);
     const contextualLeadIn: Partial<Record<typeof need, string>> = {
-      BUDGET: "Чтобы понять, подходит ли вам формат, уточню важный момент.",
+      AVAILABLE_CAPITAL:
+        "Чтобы понять подходящий формат старта, уточню финансовый контекст.",
+      ADDITIONAL_EXPENSES:
+        "Возвращаюсь к вопросу о расходах на сам объект.",
+      BUSINESS_MODEL:
+        "Чтобы точнее понять, подходит ли вам формат, уточню один момент.",
       LAUNCH_TIMING: "Возвращаюсь к нашему разговору о возможном запуске.",
       CITY: "Чтобы проверить возможность работы по вашему направлению, уточню один момент.",
       STARTING_UNITS: "Чтобы оценить подходящий формат старта, уточню один момент.",

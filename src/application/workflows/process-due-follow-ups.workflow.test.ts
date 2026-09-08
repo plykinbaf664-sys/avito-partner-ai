@@ -17,6 +17,14 @@ function extractionReply(facts: Record<string, unknown> = {}) {
       city: null,
       budget: null,
       budgetConfirmed: false,
+      availableCapital: -1,
+      availableCapitalConfirmed: false,
+      entryBudget: -1,
+      additionalLaunchCapital: -1,
+      capitalScope: "UNKNOWN",
+      additionalExpensesReadiness: "UNKNOWN",
+      businessModelReadiness: "UNKNOWN",
+      calculationUnits: -1,
       startingUnits: null,
       scalingPotentialUnits: null,
       hasFreeTime: null,
@@ -118,6 +126,28 @@ describe("due qualification follow-ups workflow", () => {
     });
   });
 
+  it("deduplicates parallel scheduler invocations", async () => {
+    const { processEvent, processDue, outboundProvider } = harness([
+      extractionReply(),
+    ]);
+    const first = await processEvent(
+      input("event-parallel-scheduler", "Р—РґСЂР°РІСЃС‚РІСѓР№С‚Рµ"),
+    );
+    currentTime = new Date("2026-09-02T10:00:00.000Z");
+
+    await Promise.all([processDue(currentTime), processDue(currentTime)]);
+    const messages = await persistence.messages.listByConversationId(
+      first.conversationId!,
+    );
+
+    expect(outboundProvider.requests).toHaveLength(1);
+    expect(
+      messages.filter((message) =>
+        message.deduplicationKey?.startsWith("qualification-follow-up:"),
+      ),
+    ).toHaveLength(1);
+  });
+
   it("does not send the old follow-up after an inbound reply before 24 hours", async () => {
     const { processEvent, processDue } = harness([
       extractionReply(),
@@ -148,8 +178,8 @@ describe("due qualification follow-ups workflow", () => {
 
     expect(resumed).toMatchObject({
       conversationId: first.conversationId,
-      suggestedNextInformationNeed: "CITY",
-      outboundMessage: expect.stringContaining("городе"),
+      suggestedNextInformationNeed: "STARTING_UNITS",
+      outboundMessage: expect.stringContaining("объектов"),
     });
     expect(messages.map((message) => message.direction)).toEqual([
       "INBOUND",
@@ -214,19 +244,17 @@ describe("due qualification follow-ups workflow", () => {
       persistence.conversations.listDueFollowUps.bind(
         persistence.conversations,
       );
-    persistence.conversations.listDueFollowUps = async (now, limit) => {
-      const candidates = await originalList(now, limit);
-      const conversation = await persistence.conversations.findById(
-        first.conversationId!,
-      );
-      await persistence.conversations.update({
-        ...conversation!,
-        awaitingUserReply: false,
-        followUpEligibleAt: null,
-        lastInboundAt: now,
-      });
-      return candidates;
-    };
+    const staleCandidates = await originalList(currentTime, 100);
+    const conversation = await persistence.conversations.findById(
+      first.conversationId!,
+    );
+    await persistence.conversations.update({
+      ...conversation!,
+      awaitingUserReply: false,
+      followUpEligibleAt: null,
+      lastInboundAt: currentTime,
+    });
+    persistence.conversations.listDueFollowUps = async () => staleCandidates;
     const outboundProvider = new FakeOutboundProvider();
     const processDue = createDueFollowUpsProcessor({
       persistence,

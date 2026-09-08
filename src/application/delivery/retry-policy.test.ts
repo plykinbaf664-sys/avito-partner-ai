@@ -4,6 +4,7 @@ import {
   canRetryExternalDelivery,
   isRetryableExternalError,
   MAX_EXTERNAL_DELIVERY_ATTEMPTS,
+  sanitizeExternalErrorCode,
 } from "./retry-policy";
 
 describe("external delivery retry policy", () => {
@@ -35,5 +36,19 @@ describe("external delivery retry policy", () => {
         Object.assign(new Error(), { status: 400, retryable: false }),
       ),
     ).toBe(false);
+    expect(
+      isRetryableExternalError(
+        Object.assign(new Error(), { code: "ETIMEDOUT" }),
+      ),
+    ).toBe(true);
+    expect(isRetryableExternalError(new Error("validation failed"))).toBe(
+      false,
+    );
+  });
+
+  it("sanitizes provider error codes before persistence and logging", () => {
+    expect(sanitizeExternalErrorCode("TEMP\nsecret=value")).toBe(
+      "TEMP_secret_value",
+    );
   });
 });

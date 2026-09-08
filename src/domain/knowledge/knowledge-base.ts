@@ -1,4 +1,5 @@
 import type { ExtractedMessage } from "../extraction/extracted-message";
+import { calculateEconomicsEstimate } from "../economics/economics-calculator";
 
 export const knowledgeCategories = [
   "BUSINESS_MODEL",
@@ -25,7 +26,45 @@ export interface KnowledgeEntry {
 const containsAny = (text: string, terms: readonly string[]) =>
   terms.some((term) => text.includes(term));
 
+const mentionsFiftyThousand = (text: string) =>
+  /(^|[^\d])50(?:\s*000|\s*тысяч)/u.test(text);
+
+function formatUnitCount(units: number): string {
+  const modulo100 = units % 100;
+  const modulo10 = units % 10;
+  const noun =
+    modulo100 >= 11 && modulo100 <= 14
+      ? "объектов"
+      : modulo10 === 1
+        ? "объекта"
+        : modulo10 >= 2 && modulo10 <= 4
+          ? "объектов"
+          : "объектов";
+  return `${units} ${noun}`;
+}
+
 export const PARTNER_KNOWLEDGE_BASE: readonly KnowledgeEntry[] = [
+  {
+    id: "small-business-entry",
+    category: "BUSINESS_MODEL",
+    answer:
+      "Около 50 000 ₽ — ориентир оплаты услуги команды: помощь с подбором подходящего объекта и рекомендации или чек-лист по базовой комплектации. Отдельно партнёр оплачивает аренду, залог, комплектацию и другие расходы по объекту. Текущие ориентиры — около 35 000 ₽ на аренду, около 35 000 ₽ на залог и около 120 000 ₽ минимального капитала на запуск; дополнительно желательно предусмотреть порядка 20 000 ₽ на базовое оснащение. Это не фиксированная смета: итог зависит от конкретного объекта.",
+    matches: (text) =>
+      mentionsFiftyThousand(text) ||
+      containsAny(text, [
+        "первый этап",
+        "субаренд",
+        "дополнительн",
+        "залог",
+        "оснащен",
+        "расход",
+        "сколько нужно",
+        "сколько надо",
+        "сколько вообще",
+        "хватит",
+        "бюджет запуска",
+      ]),
+  },
   {
     id: "qualification-fit",
     category: "LIMITATIONS",
@@ -58,9 +97,16 @@ export const PARTNER_KNOWLEDGE_BASE: readonly KnowledgeEntry[] = [
     id: "guarantees-and-economics",
     category: "GUARANTEES",
     answer:
-      "Гарантированного дохода нет. По текущим объектам компании в Московской области и внутреннему анализу посуточной аренды ориентир составляет около 30 000 ₽ на один объект и около 150 000 ₽ на пять объектов в месяц, но результат зависит от города, объекта, загрузки и расходов.",
-    matches: (text) =>
-      containsAny(text, ["гарант", "150 тысяч", "150 000", "доход", "прибыл", "окуп"]),
+      "Гарантированного дохода нет. По текущей модели ориентир по доходу партнёров составляет около 20 000 ₽ с одного объекта в месяц, но фактический результат зависит от конкретного объекта и условий.",
+    matches: (text) => {
+      const incomeContext = containsAny(text, [
+        "доход",
+        "прибыл",
+        "окуп",
+        "заработ",
+      ]);
+      return incomeContext || (text.includes("гарант") && text.includes("в месяц"));
+    },
   },
   {
     id: "operations-guests",
@@ -126,8 +172,43 @@ export function answerFromKnowledgeBase(
     return !matched.some((entry) => entry.matches(normalized));
   });
 
+  const asksAboutEconomics = userStatements.some((statement) =>
+    containsAny(statement.trim().toLocaleLowerCase("ru-RU"), [
+      "заработ",
+      "доход",
+      "прибыл",
+      "окуп",
+      "гарант",
+    ]),
+  );
+  const explicitUnits =
+    extraction.facts.calculationUnits ??
+    extraction.facts.startingUnits ??
+    extraction.facts.scalingPotentialUnits;
+  const estimate = asksAboutEconomics
+    ? calculateEconomicsEstimate(explicitUnits)
+    : null;
+  const answerFragments = matched.map((entry) => {
+    if (entry.id !== "guarantees-and-economics" || !asksAboutEconomics) {
+      return entry.answer;
+    }
+    if (estimate) {
+      const monthlyIncome = estimate.estimatedMonthlyIncome
+        .toLocaleString("ru-RU")
+        .replaceAll("\u00a0", " ");
+      return `Для ${formatUnitCount(estimate.units)} ориентир по доходу составляет около ${monthlyIncome} ₽ в месяц. ${estimate.disclaimer}`;
+    }
+    if (
+      extraction.facts.availableCapital !== null ||
+      extraction.facts.entryBudget !== null
+    ) {
+      return "По одному размеру капитала нельзя корректно определить количество объектов: универсальная стоимость запуска объекта пока не подтверждена. Могу посчитать ориентир по доходу, когда определим предполагаемое число объектов.";
+    }
+    return entry.answer;
+  });
+
   return {
-    answerFragments: [...new Set(matched.map((entry) => entry.answer))],
+    answerFragments: [...new Set(answerFragments)],
     entryIds: matched.map((entry) => entry.id),
     unresolvedQuestions,
   };

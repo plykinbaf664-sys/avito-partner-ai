@@ -24,6 +24,14 @@ function reply({
       city: null,
       budget: null,
       budgetConfirmed: false,
+      availableCapital: -1,
+      availableCapitalConfirmed: false,
+      entryBudget: -1,
+      additionalLaunchCapital: -1,
+      capitalScope: "UNKNOWN",
+      additionalExpensesReadiness: "UNKNOWN",
+      businessModelReadiness: "UNKNOWN",
+      calculationUnits: -1,
       startingUnits: null,
       scalingPotentialUnits: null,
       hasFreeTime: null,
@@ -84,23 +92,24 @@ describe("multi-turn qualification conversation", () => {
     text,
   });
 
-  it("moves a strong complete lead to PRIORITY and prepares a manager summary", async () => {
+  it("moves a strong investor directly to PRIORITY and prepares a manager summary", async () => {
     const { processEvent } = harness([
       reply({
         facts: {
           city: "Волгоград",
-          budget: 500_000,
-          budgetConfirmed: true,
-          startingUnits: 5,
-          scalingPotentialUnits: 5,
+          availableCapital: 2_000_000,
+          availableCapitalConfirmed: true,
+          capitalScope: "TOTAL_LIMIT",
+          startingUnits: 8,
+          scalingPotentialUnits: 10,
           launchTiming: "READY_NOW",
-          primaryGoal: "MAIN_BUSINESS",
+          primaryGoal: "INVESTMENT",
           managementReadiness: "READY",
         },
       }),
     ]);
 
-    const result = await processEvent(input(1, "Есть 500 тысяч, хочу 5 объектов и готов начать сейчас"));
+    const result = await processEvent(input(1, "Есть 2 миллиона, хочу зайти примерно в 10 квартир и готов начать сейчас"));
 
     expect(result).toMatchObject({
       qualificationStatus: "PRIORITY",
@@ -109,9 +118,12 @@ describe("multi-turn qualification conversation", () => {
       suggestedNextInformationNeed: null,
       managerSummary: {
         city: "Волгоград",
-        budget: 500_000,
-        startingUnits: 5,
-        scalingPotentialUnits: 5,
+        segment: "INVESTOR",
+        availableCapital: 2_000_000,
+        startingUnits: 8,
+        scalingPotentialUnits: 10,
+        estimatedMonthlyPartnerIncome: 200_000,
+        incomeEstimateGuaranteed: false,
         qualificationStatus: "PRIORITY",
       },
     });
@@ -153,7 +165,7 @@ describe("multi-turn qualification conversation", () => {
     ]);
     const result = await processEvent(input(1, question));
     expect(result.outboundMessage).toContain("администратор");
-    expect(result.outboundMessage).toContain("Какой бюджет");
+    expect(result.outboundMessage).toContain("Какую сумму");
   });
 
   it("explains economics without promising a guaranteed income", async () => {
@@ -167,8 +179,243 @@ describe("multi-turn qualification conversation", () => {
     ]);
     const result = await processEvent(input(1, question));
     expect(result.outboundMessage).toContain("Гарантированного дохода нет");
-    expect(result.outboundMessage).toContain("Московской области");
-    expect(result.outboundMessage).toContain("около 150 000 ₽");
+    expect(result.outboundMessage).toContain("около 20 000 ₽");
+    expect(result.outboundMessage).not.toContain("первого этапа");
+    expect(result.outboundMessage).not.toContain("около 150 000 ₽");
+  });
+
+  it("calculates the income reference for one explicitly named unit", async () => {
+    const question = "Сколько можно заработать на одной квартире?";
+    const { llm, processEvent } = harness([
+      reply({
+        intent: "QUESTION",
+        facts: { calculationUnits: 1 },
+        signals: { questions: [question] },
+      }),
+    ]);
+
+    const result = await processEvent(input(1, question));
+
+    expect(result.outboundMessage).toContain("около 20 000 ₽ в месяц");
+    expect(result.outboundMessage).toContain("ориентир, а не гарантия");
+    expect(llm.callCount).toBe(1);
+  });
+
+  it("calculates the income reference for ten explicitly named units", async () => {
+    const question = "Хочу 10 квартир, сколько это примерно можно заработать?";
+    const { processEvent } = harness([
+      reply({
+        intent: "QUESTION",
+        facts: {
+          calculationUnits: 10,
+          startingUnits: 10,
+          scalingPotentialUnits: 10,
+        },
+        signals: { questions: [question] },
+      }),
+    ]);
+
+    const result = await processEvent(input(1, question));
+
+    expect(result.outboundMessage).toContain("около 200 000 ₽ в месяц");
+    expect(result.outboundMessage).toContain("ориентир, а не гарантия");
+  });
+
+  it("never derives a unit count from capital alone", async () => {
+    const question = "У меня 2 млн, сколько заработаю?";
+    const { processEvent } = harness([
+      reply({
+        intent: "QUESTION",
+        facts: {
+          availableCapital: 2_000_000,
+          availableCapitalConfirmed: true,
+        },
+        signals: { questions: [question] },
+      }),
+    ]);
+
+    const result = await processEvent(input(1, question));
+
+    expect(result.outboundMessage).toContain(
+      "По одному размеру капитала нельзя корректно определить количество объектов",
+    );
+    expect(result.outboundMessage).toContain("предполагаемое число объектов");
+    expect(result.outboundMessage).not.toContain("200 000 ₽");
+    expect(result.suggestedNextInformationNeed).toBe("STARTING_UNITS");
+  });
+
+  it("treats an unspecified 50,000 as first-stage money and asks about other launch costs", async () => {
+    const { processEvent } = harness([
+      reply({
+        facts: {
+          budget: 50_000,
+          budgetConfirmed: true,
+          entryBudget: 50_000,
+          capitalScope: "ENTRY_ONLY",
+        },
+      }),
+    ]);
+
+    const result = await processEvent(input(1, "У меня есть 50 тысяч"));
+
+    expect(result).toMatchObject({
+      segment: "UNDETERMINED",
+      qualificationStatus: "NEEDS_MORE_INFO",
+      suggestedNextInformationNeed: "ADDITIONAL_EXPENSES",
+      shouldHandoffToManager: false,
+    });
+    expect(result.extraction?.facts).toMatchObject({
+      entryBudget: 50_000,
+      availableCapital: null,
+    });
+    expect(result.outboundMessage).toContain("аренда, залог");
+    expect(result.outboundMessage).toContain("отдельный бюджет");
+  });
+
+  it("rejects only an explicit refusal to fund required expenses beyond 50,000", async () => {
+    const { processEvent } = harness([
+      reply({
+        facts: {
+          availableCapital: 50_000,
+          availableCapitalConfirmed: true,
+          additionalLaunchCapital: 0,
+          capitalScope: "TOTAL_LIMIT",
+          additionalExpensesReadiness: "NOT_READY",
+        },
+      }),
+    ]);
+
+    const result = await processEvent(
+      input(1, "У меня только 50 тысяч на всё и больше вкладывать не готов"),
+    );
+
+    expect(result).toMatchObject({
+      qualificationStatus: "NO_FIT",
+      qualificationReason: "UNWILLING_TO_FUND_REQUIRED_EXPENSES",
+      conversationState: "CLOSED",
+      shouldHandoffToManager: false,
+    });
+    expect(result.outboundMessage).toContain("аренду, залог");
+    expect(result.outboundMessage).not.toContain("100 000");
+  });
+
+  it("merges explicit service and additional capital without another financial question", async () => {
+    const { processEvent } = harness([
+      reply({
+        facts: {
+          availableCapital: 150_000,
+          availableCapitalConfirmed: true,
+          entryBudget: 50_000,
+          additionalLaunchCapital: 100_000,
+          capitalScope: "ADDITIONAL_AVAILABLE",
+          additionalExpensesReadiness: "READY",
+        },
+      }),
+    ]);
+
+    const result = await processEvent(
+      input(1, "Есть 50 тысяч вам и ещё 100 тысяч на квартиру"),
+    );
+
+    expect(result.extraction?.facts).toMatchObject({
+      availableCapital: 150_000,
+      entryBudget: 50_000,
+      additionalLaunchCapital: 100_000,
+    });
+    expect(result.knownFacts).toContain("ADDITIONAL_EXPENSES");
+    expect(result.suggestedNextInformationNeed).not.toBe("ADDITIONAL_EXPENSES");
+    expect(result.outboundMessage).not.toContain("отдельный бюджет");
+  });
+
+  it("treats 200,000 as strong financial readiness without another financial question", async () => {
+    const { processEvent } = harness([
+      reply({
+        facts: {
+          availableCapital: 200_000,
+          availableCapitalConfirmed: true,
+          startingUnits: 1,
+          launchTiming: "READY_NOW",
+        },
+      }),
+    ]);
+
+    const result = await processEvent(
+      input(1, "У меня 200 тысяч и готов начать сейчас с одной квартиры"),
+    );
+
+    expect(result.knownFacts).toContain("ADDITIONAL_EXPENSES");
+    expect(result.suggestedNextInformationNeed).not.toBe("ADDITIONAL_EXPENSES");
+    expect(result.qualificationStatus).not.toBe("NO_FIT");
+  });
+
+  it("answers transparently how much a small-business launch can require", async () => {
+    const question = "Сколько вообще надо денег на старт?";
+    const { processEvent } = harness([
+      reply({ intent: "QUESTION", signals: { questions: [question] } }),
+    ]);
+
+    const result = await processEvent(input(1, question));
+
+    expect(result.outboundMessage).toContain("50 000 ₽");
+    expect(result.outboundMessage).toContain("35 000 ₽ на аренду");
+    expect(result.outboundMessage).toContain("35 000 ₽ на залог");
+    expect(result.outboundMessage).toContain("120 000 ₽");
+    expect(result.outboundMessage).toContain("20 000 ₽");
+    expect(result.outboundMessage).toContain("зависит от конкретного объекта");
+  });
+
+  it("does not guarantee that 140,000 will cover a launch", async () => {
+    const question = "140 тысяч гарантированно хватит?";
+    const { processEvent } = harness([
+      reply({
+        intent: "QUESTION",
+        facts: {
+          availableCapital: 140_000,
+          availableCapitalConfirmed: true,
+        },
+        signals: { questions: [question] },
+      }),
+    ]);
+
+    const result = await processEvent(input(1, question));
+
+    expect(result.outboundMessage).toContain("не фиксированная смета");
+    expect(result.outboundMessage).toContain("зависит от конкретного объекта");
+    expect(result.outboundMessage).not.toContain("гарантированно хватит");
+    expect(result.outboundMessage).not.toContain("Гарантированного дохода");
+  });
+
+  it("raises financial readiness after additional capital arrives in the next turn", async () => {
+    const { processEvent } = harness([
+      reply({
+        facts: {
+          entryBudget: 50_000,
+          capitalScope: "ENTRY_ONLY",
+        },
+      }),
+      reply({
+        facts: {
+          additionalLaunchCapital: 100_000,
+          capitalScope: "ADDITIONAL_AVAILABLE",
+          additionalExpensesReadiness: "READY",
+        },
+      }),
+    ]);
+
+    const first = await processEvent(input(1, "Есть 50 тысяч"));
+    const second = await processEvent(
+      input(2, "Да, ещё около 100 тысяч могу выделить"),
+    );
+    const lead = await persistence.leads.findById(second.leadId!);
+
+    expect(first.suggestedNextInformationNeed).toBe("ADDITIONAL_EXPENSES");
+    expect(second.suggestedNextInformationNeed).not.toBe("ADDITIONAL_EXPENSES");
+    expect(second.knownFacts).toContain("ADDITIONAL_EXPENSES");
+    expect(second.outboundMessage).not.toContain("отдельный бюджет");
+    expect(lead).toMatchObject({
+      entryBudget: 50_000,
+      additionalLaunchCapital: 100_000,
+    });
   });
 
   it("answers pricing only from the approved knowledge base", async () => {
@@ -230,8 +477,11 @@ describe("multi-turn qualification conversation", () => {
       reply({
         facts: {
           city: "Химки",
-          budget: 300_000,
-          budgetConfirmed: true,
+          availableCapital: 300_000,
+          availableCapitalConfirmed: true,
+          entryBudget: 50_000,
+          additionalExpensesReadiness: "READY",
+          businessModelReadiness: "ACCEPTS",
           hasFreeTime: false,
           availableTimeDetails: "Работаю, времени мало",
           primaryGoal: "ADDITIONAL_INCOME",
@@ -249,13 +499,31 @@ describe("multi-turn qualification conversation", () => {
   it("accumulates facts through a full dialogue without repeating known questions", async () => {
     const { llm, processEvent } = harness([
       reply({ intent: "GENERAL_INTEREST" }),
-      reply({ facts: { budget: 300_000, budgetConfirmed: true } }),
-      reply({ facts: { city: "Волгоград", launchTiming: "WITHIN_MONTH" } }),
+      reply({
+        facts: {
+          entryBudget: 60_000,
+          capitalScope: "ENTRY_ONLY",
+        },
+      }),
+      reply({
+        facts: {
+          additionalLaunchCapital: 100_000,
+          capitalScope: "ADDITIONAL_AVAILABLE",
+          additionalExpensesReadiness: "READY",
+        },
+      }),
       reply({
         facts: {
           startingUnits: 1,
-          scalingPotentialUnits: 5,
+          scalingPotentialUnits: 10,
           primaryGoal: "MAIN_BUSINESS",
+        },
+      }),
+      reply({
+        facts: {
+          city: "Волгоград",
+          launchTiming: "WITHIN_MONTH",
+          businessModelReadiness: "ACCEPTS",
         },
       }),
       reply({ facts: { managementReadiness: "READY" } }),
@@ -263,26 +531,36 @@ describe("multi-turn qualification conversation", () => {
 
     const turns = [
       await processEvent(input(1, "Здравствуйте, интересно, расскажите подробнее")),
-      await processEvent(input(2, "Могу выделить 300 тысяч")),
-      await processEvent(input(3, "Я из Волгограда, старт через месяц")),
-      await processEvent(input(4, "Хочу основной бизнес и масштаб до пяти объектов")),
-      await processEvent(input(5, "Да, готов взаимодействовать")),
+      await processEvent(input(2, "Есть около 60 тысяч на первый этап")),
+      await processEvent(input(3, "Да, ещё около 100 тысяч могу выделить на квартиру")),
+      await processEvent(input(4, "Начну с одной квартиры, потом готов дойти до десяти, цель — основной бизнес")),
+      await processEvent(input(5, "Я из Волгограда, старт через месяц, модель субаренды принимаю")),
+      await processEvent(input(6, "Да, готов взаимодействовать с управляющей компанией")),
     ];
 
-    expect(turns.map((turn) => turn.suggestedNextInformationNeed).slice(0, 4)).toEqual([
-      "BUDGET",
-      "LAUNCH_TIMING",
+    expect(turns.map((turn) => turn.suggestedNextInformationNeed)).toEqual([
+      "AVAILABLE_CAPITAL",
+      "ADDITIONAL_EXPENSES",
       "STARTING_UNITS",
+      "LAUNCH_TIMING",
       "MANAGEMENT_READINESS",
+      null,
     ]);
-    expect(turns[4]).toMatchObject({
-      qualificationStatus: "PRIORITY",
+    expect(turns[5]).toMatchObject({
+      qualificationStatus: "HOT",
       shouldHandoffToManager: true,
       conversationState: "QUALIFIED",
+      managerSummary: {
+        entryBudget: 60_000,
+        additionalLaunchCapital: 100_000,
+        launchCostAwareness: "CONFIRMED",
+        financialReadiness: "HIGH",
+        financialBarrier: null,
+      },
     });
-    expect(llm.callCount).toBe(5);
+    expect(llm.callCount).toBe(6);
     const allOutbound = turns.map((turn) => turn.outboundMessage).join(" ");
-    expect(allOutbound.match(/Какой бюджет/g)).toHaveLength(1);
+    expect(allOutbound.match(/Какую сумму вы реально готовы выделить/g)).toHaveLength(1);
   });
 
   it("switches a promising multi-turn lead to NO_FIT when a hard blocker appears", async () => {
