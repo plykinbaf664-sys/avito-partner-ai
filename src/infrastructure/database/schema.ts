@@ -35,6 +35,10 @@ export const leads = sqliteTable(
     externalLeadId: text("external_lead_id").notNull(),
     name: text("name"),
     contact: text("contact"),
+    phoneNumber: text("phone_number"),
+    phoneConfirmed: integer("phone_confirmed", { mode: "boolean" })
+      .notNull()
+      .default(false),
     city: text("city"),
     serviceability: text("serviceability", { enum: serviceabilityStatuses })
       .notNull()
@@ -268,3 +272,64 @@ export const managerNotifications = sqliteTable(
     index("manager_notifications_lead_id_idx").on(table.leadId),
   ],
 );
+
+export const telegramManagerRecipients = sqliteTable(
+  "telegram_manager_recipients",
+  {
+    id: text("id").primaryKey(),
+    telegramChatId: text("telegram_chat_id").notNull(),
+    telegramUserId: text("telegram_user_id").notNull(),
+    username: text("username"),
+    firstName: text("first_name"),
+    isActive: integer("is_active", { mode: "boolean" })
+      .notNull()
+      .default(true),
+    authorizedAt: integer("authorized_at", { mode: "timestamp_ms" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    uniqueIndex("telegram_manager_recipients_chat_id_unique").on(
+      table.telegramChatId,
+    ),
+    index("telegram_manager_recipients_active_idx").on(table.isActive),
+  ],
+);
+
+export const telegramManagerDeliveries = sqliteTable(
+  "telegram_manager_deliveries",
+  {
+    id: text("id").primaryKey(),
+    managerNotificationId: text("manager_notification_id")
+      .notNull()
+      .references(() => managerNotifications.id, { onDelete: "cascade" }),
+    recipientId: text("recipient_id")
+      .notNull()
+      .references(() => telegramManagerRecipients.id, { onDelete: "restrict" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    deliveryStatus: text("delivery_status", { enum: deliveryStatuses })
+      .notNull()
+      .default("PENDING"),
+    deliveryAttempts: integer("delivery_attempts").notNull().default(0),
+    deliveryRetryable: integer("delivery_retryable", { mode: "boolean" }),
+    lastDeliveryErrorCode: text("last_delivery_error_code"),
+    externalMessageId: text("external_message_id"),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    sentAt: integer("sent_at", { mode: "timestamp_ms" }),
+  },
+  (table) => [
+    uniqueIndex("telegram_manager_deliveries_idempotency_key_unique").on(
+      table.idempotencyKey,
+    ),
+    index("telegram_manager_deliveries_notification_idx").on(
+      table.managerNotificationId,
+    ),
+    index("telegram_manager_deliveries_recipient_idx").on(table.recipientId),
+  ],
+);
+
+export const telegramBotUpdates = sqliteTable("telegram_bot_updates", {
+  updateId: text("update_id").primaryKey(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+});

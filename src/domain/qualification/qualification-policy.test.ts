@@ -11,6 +11,8 @@ import {
 
 function facts(overrides: Partial<QualificationFacts> = {}): QualificationFacts {
   return {
+    phoneNumber: null,
+    phoneConfirmed: false,
     segment: "UNDETERMINED",
     segmentConfidence: 0,
     city: null,
@@ -45,6 +47,8 @@ function readySmallBusiness(
   overrides: Partial<QualificationFacts> = {},
 ): QualificationFacts {
   return facts({
+    phoneNumber: "+79991234567",
+    phoneConfirmed: true,
     segment: "SMALL_BUSINESS",
     segmentConfidence: 0.95,
     city: "Волгоград",
@@ -68,6 +72,8 @@ function readyInvestor(
   overrides: Partial<QualificationFacts> = {},
 ): QualificationFacts {
   return facts({
+    phoneNumber: "+79991234567",
+    phoneConfirmed: true,
     segment: "INVESTOR",
     segmentConfidence: 0.95,
     city: "Волгоград",
@@ -102,6 +108,26 @@ describe("segment-aware partner qualification", () => {
       blockingReasons: [],
       shouldHandoffToManager: true,
     });
+  });
+
+  it("requests a phone before an otherwise ready ordinary handoff", () => {
+    const decision = evaluateQualification(
+      readySmallBusiness({ phoneNumber: null, phoneConfirmed: false }),
+    );
+    expect(decision).toMatchObject({
+      status: "NEEDS_MORE_INFO",
+      reason: "PHONE_UNKNOWN",
+      shouldHandoffToManager: false,
+      blockingReasons: [],
+    });
+  });
+
+  it("does not make refusal to share a phone a hard blocker", () => {
+    const decision = evaluateQualification(
+      readySmallBusiness({ phoneNumber: null, phoneConfirmed: false }),
+    );
+    expect(decision.status).not.toBe("NO_FIT");
+    expect(decision.blockingReasons).toEqual([]);
   });
 
   it("keeps 50,000 for the first stage in qualification", () => {
@@ -140,6 +166,26 @@ describe("segment-aware partner qualification", () => {
       status: "NO_FIT",
       reason: "UNWILLING_TO_FUND_REQUIRED_EXPENSES",
       blockingReasons: ["UNWILLING_TO_FUND_REQUIRED_EXPENSES"],
+      shouldHandoffToManager: false,
+      nextAction: "REJECT_POLITELY",
+    });
+  });
+
+  it("rejects confirmed absence of any launch capital", () => {
+    expect(
+      evaluateQualification(
+        facts({
+          budget: 0,
+          budgetConfirmed: true,
+          availableCapital: 0,
+          availableCapitalConfirmed: true,
+          capitalScope: "TOTAL_LIMIT",
+        }),
+      ),
+    ).toMatchObject({
+      status: "NO_FIT",
+      reason: "NO_LAUNCH_CAPITAL",
+      blockingReasons: ["NO_LAUNCH_CAPITAL"],
       shouldHandoffToManager: false,
       nextAction: "REJECT_POLITELY",
     });

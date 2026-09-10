@@ -9,6 +9,7 @@ export const conversationStates = [
   "WAITING_BUDGET",
   "WAITING_TIME",
   "WAITING_LAUNCH_TIMING",
+  "WAITING_PHONE",
   "QUALIFIED",
   "HANDOFF",
   "CLOSED",
@@ -26,6 +27,7 @@ const activeQualificationStates = new Set<ConversationState>([
   "WAITING_BUDGET",
   "WAITING_TIME",
   "WAITING_LAUNCH_TIMING",
+  "WAITING_PHONE",
 ]);
 
 export function canTransitionConversation(

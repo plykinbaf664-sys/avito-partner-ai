@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "smoke:avito": "node --experimental-strip-types --env-file-if-exists=.env.local scripts/smoke-avito-api.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",

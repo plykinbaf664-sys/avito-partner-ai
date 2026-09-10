@@ -11,6 +11,7 @@ export const PARTNER_QUALIFICATION_POLICY = Object.freeze({
 });
 
 export const hardBlockingReasonCodes = [
+  "NO_LAUNCH_CAPITAL",
   "NO_LAUNCH_INTENT",
   "NO_MANAGEMENT_INTERACTION",
   "DECLINED_BY_LEAD",
@@ -46,6 +47,7 @@ export type QualificationReasonCode =
   | "GOAL_UNKNOWN"
   | "BUSINESS_MODEL_READINESS_UNKNOWN"
   | "ADDITIONAL_EXPENSES_CONTEXT_UNKNOWN"
+  | "PHONE_UNKNOWN"
   | "SMALL_BUSINESS_READY"
   | "INVESTOR_READY"
   | "INVESTOR_SCALE_CONFIRMED"
@@ -63,6 +65,8 @@ export type QualificationNextAction =
 
 export type QualificationFacts = Pick<
   Lead,
+  | "phoneNumber"
+  | "phoneConfirmed"
   | "segment"
   | "segmentConfidence"
   | "city"
@@ -126,11 +130,19 @@ export function evaluateQualification(
 ): QualificationDecision {
   const financialAssessment = assessFinancialReadiness(facts);
   const blockingReasons: HardBlockingReasonCode[] = [];
+  const confirmedNoLaunchCapital =
+    (facts.availableCapital === 0 && facts.availableCapitalConfirmed) ||
+    (facts.availableCapital === null &&
+      facts.budget === 0 &&
+      facts.budgetConfirmed);
   if (facts.buyingIntent === "DECLINED") {
     blockingReasons.push("DECLINED_BY_LEAD");
   }
   if (facts.launchTiming === "NO_PLANS") {
     blockingReasons.push("NO_LAUNCH_INTENT");
+  }
+  if (confirmedNoLaunchCapital) {
+    blockingReasons.push("NO_LAUNCH_CAPITAL");
   }
   if (facts.managementReadiness === "NOT_READY") {
     blockingReasons.push("NO_MANAGEMENT_INTERACTION");
@@ -253,6 +265,9 @@ export function evaluateQualification(
     financialAssessment.financialReadiness !== "READY"
   ) {
     informationGaps.push("ADDITIONAL_EXPENSES_CONTEXT_UNKNOWN");
+  }
+  if (facts.phoneNumber === null || !facts.phoneConfirmed) {
+    informationGaps.push("PHONE_UNKNOWN");
   }
 
   if (informationGaps.length > 0) {

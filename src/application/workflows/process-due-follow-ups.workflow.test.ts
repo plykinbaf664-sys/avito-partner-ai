@@ -14,6 +14,8 @@ function extractionReply(facts: Record<string, unknown> = {}) {
   return JSON.stringify({
     intent: "QUALIFICATION_INFORMATION",
     facts: {
+      phoneNumber: "",
+      phoneConfirmed: false,
       city: null,
       budget: null,
       budgetConfirmed: false,

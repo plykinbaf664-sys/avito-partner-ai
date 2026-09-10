@@ -8,6 +8,8 @@ import type {
 import type { KnowledgeAnswer } from "../knowledge/knowledge-base";
 
 const qualificationQuestions: Record<InformationNeed, string> = {
+  PHONE_NUMBER:
+    "Тогда можно переходить к предметному разговору с Дмитрием. Оставьте, пожалуйста, номер телефона, по которому с вами удобнее связаться.",
   AVAILABLE_CAPITAL:
     "Какую сумму вы реально готовы выделить на проект: это бюджет только на первый этап или общий доступный капитал?",
   ADDITIONAL_EXPENSES:
@@ -27,6 +29,8 @@ const qualificationQuestions: Record<InformationNeed, string> = {
 };
 
 const rejectionMessages: Partial<Record<QualificationReasonCode, string>> = {
+  NO_LAUNCH_CAPITAL:
+    "Для запуска в этой модели нужен собственный капитал на услугу команды, аренду, залог и подготовку объекта. Без доступных средств начать сейчас не получится. Если финансовая ситуация изменится, можно вернуться к разговору.",
   NO_LAUNCH_INTENT:
     "Понял. Раз запуск вы сейчас не рассматриваете, не буду продолжать квалификацию. Если планы изменятся, можно вернуться к разговору.",
   NO_MANAGEMENT_INTERACTION:

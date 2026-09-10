@@ -69,6 +69,7 @@ const enumLabels: Record<string, string> = {
   SMALL_BUSINESS: "Малый бизнес",
   INVESTOR: "Инвестор",
   UNDETERMINED: "Сегмент пока не определён",
+  NO_LAUNCH_CAPITAL: "Нет капитала для запуска",
   NO_LAUNCH_INTENT: "Нет намерения запускаться",
   NO_MANAGEMENT_INTERACTION: "Нет готовности взаимодействовать с управляющей компанией",
   DECLINED_BY_LEAD: "Лид отказался",

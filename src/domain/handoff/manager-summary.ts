@@ -11,6 +11,7 @@ import {
 export interface ManagerSummary {
   name: string | null;
   contact: string | null;
+  phoneNumber: string | null;
   city: string | null;
   budget: number | null;
   segment: Lead["segment"];
@@ -69,6 +70,7 @@ export function createManagerSummary(
   return {
     name: lead.name,
     contact: lead.contact,
+    phoneNumber: lead.phoneNumber,
     city: lead.city,
     budget: lead.budget,
     segment: lead.segment,

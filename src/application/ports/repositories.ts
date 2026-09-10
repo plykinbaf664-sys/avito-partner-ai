@@ -4,6 +4,31 @@ import type { IncomingEvent } from "@/domain/event/incoming-event";
 import type { Lead } from "@/domain/lead/lead";
 import type { Message } from "@/domain/message/message";
 import type { ManagerNotification } from "@/domain/notification/manager-notification";
+import type { TelegramManagerDelivery } from "@/domain/notification/telegram-manager-delivery";
+import type { TelegramManagerRecipient } from "@/domain/notification/telegram-manager-recipient";
+import type { CrmLeadFilter } from "@/application/crm/crm-record";
+
+export interface CrmLeadSnapshot {
+  lead: Lead;
+  conversation: Conversation | null;
+  managerNotification: ManagerNotification | null;
+  lastActivityAt: Date;
+}
+
+export interface CrmLeadListQuery {
+  filter: CrmLeadFilter;
+  search: string | null;
+  limit: number;
+  offset: number;
+}
+
+export interface CrmReadRepository {
+  listLeadSnapshots(query: CrmLeadListQuery): Promise<CrmLeadSnapshot[]>;
+  countLeadSnapshots(
+    query: Pick<CrmLeadListQuery, "filter" | "search">,
+  ): Promise<number>;
+  findLeadSnapshot(leadId: string): Promise<CrmLeadSnapshot | null>;
+}
 
 export interface LeadRepository {
   findById(id: string): Promise<Lead | null>;
@@ -36,6 +61,10 @@ export interface MessageRepository {
   update(message: Message): Promise<void>;
   findByIncomingEventId(incomingEventId: string): Promise<Message | null>;
   listByConversationId(conversationId: string): Promise<Message[]>;
+  listRecentByConversationId(
+    conversationId: string,
+    limit: number,
+  ): Promise<Message[]>;
 }
 
 export interface ManagerNotificationRepository {
@@ -43,6 +72,31 @@ export interface ManagerNotificationRepository {
   findByIdempotencyKey(key: string): Promise<ManagerNotification | null>;
   insertIfAbsent(notification: ManagerNotification): Promise<boolean>;
   update(notification: ManagerNotification): Promise<void>;
+  listDeliverable(limit: number): Promise<ManagerNotification[]>;
+}
+
+export interface TelegramManagerRecipientRepository {
+  findByChatId(chatId: string): Promise<TelegramManagerRecipient | null>;
+  listActive(): Promise<TelegramManagerRecipient[]>;
+  upsertAuthorized(recipient: TelegramManagerRecipient): Promise<void>;
+  deactivate(chatId: string, updatedAt: Date): Promise<boolean>;
+}
+
+export interface TelegramManagerDeliveryRepository {
+  findByIdempotencyKey(key: string): Promise<TelegramManagerDelivery | null>;
+  insertIfAbsent(delivery: TelegramManagerDelivery): Promise<boolean>;
+  tryClaim(
+    id: string,
+    expectedAttempts: number,
+    updatedAt: Date,
+    staleBefore: Date,
+  ): Promise<boolean>;
+  update(delivery: TelegramManagerDelivery): Promise<void>;
+}
+
+export interface TelegramBotUpdateRepository {
+  tryClaim(updateId: string, createdAt: Date): Promise<boolean>;
+  release(updateId: string): Promise<void>;
 }
 
 export interface ProcessedEventDetails {
@@ -82,6 +136,10 @@ export interface RepositoryContext {
   messages: MessageRepository;
   incomingEvents: IncomingEventRepository;
   managerNotifications: ManagerNotificationRepository;
+  telegramManagerRecipients: TelegramManagerRecipientRepository;
+  telegramManagerDeliveries: TelegramManagerDeliveryRepository;
+  telegramBotUpdates: TelegramBotUpdateRepository;
+  crm: CrmReadRepository;
 }
 
 export interface Persistence extends RepositoryContext {

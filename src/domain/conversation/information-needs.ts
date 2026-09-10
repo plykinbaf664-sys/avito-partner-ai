@@ -4,6 +4,7 @@ import { assessFinancialReadiness } from "../qualification/financial-readiness";
 import type { ConversationState } from "./conversation-state";
 
 export const informationNeeds = [
+  "PHONE_NUMBER",
   "AVAILABLE_CAPITAL",
   "ADDITIONAL_EXPENSES",
   "BUSINESS_MODEL",
@@ -43,6 +44,8 @@ function isKnown(lead: Lead, need: InformationNeed): boolean {
         (lead.availableCapital !== null && lead.availableCapitalConfirmed) ||
         (lead.budget !== null && lead.budgetConfirmed)
       );
+    case "PHONE_NUMBER":
+      return lead.phoneNumber !== null && lead.phoneConfirmed;
     case "ADDITIONAL_EXPENSES":
       return ["HIGH", "READY", "INCOMPATIBLE"].includes(
         assessFinancialReadiness(lead).financialReadiness,
@@ -84,6 +87,7 @@ function criticalInformationNeedsFor(lead: Lead): InformationNeed[] {
       "GOAL",
       "MANAGEMENT_READINESS",
       "CITY",
+      "PHONE_NUMBER",
     ];
     if (lead.startingUnits === null && lead.scalingPotentialUnits === null) {
       needs.push("STARTING_UNITS");
@@ -100,6 +104,7 @@ function criticalInformationNeedsFor(lead: Lead): InformationNeed[] {
       "BUSINESS_MODEL",
       "ADDITIONAL_EXPENSES",
       "MANAGEMENT_READINESS",
+      "PHONE_NUMBER",
     ];
   }
   const needs: InformationNeed[] = [
@@ -156,6 +161,7 @@ function selectNextInformationNeed(
   if (candidates.length === 0) return null;
 
   const scores: Record<InformationNeed, number> = {
+    PHONE_NUMBER: 65,
     AVAILABLE_CAPITAL: 100,
     STARTING_UNITS: 95,
     LAUNCH_TIMING: 90,
@@ -201,6 +207,8 @@ export function stateForInformationNeed(
     case "AVAILABLE_CAPITAL":
     case "ADDITIONAL_EXPENSES":
       return "WAITING_BUDGET";
+    case "PHONE_NUMBER":
+      return "WAITING_PHONE";
     case "CITY":
       return "WAITING_CITY";
     case "LAUNCH_TIMING":

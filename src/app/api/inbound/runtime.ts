@@ -2,10 +2,14 @@ import { createMessageExtractor } from "../../../application/extraction/extract-
 import { createNaturalResponseGenerator } from "../../../application/conversation/generate-natural-response";
 import { ConsoleStructuredLogger } from "../../../application/observability/structured-logger";
 import { createIncomingEventProcessor } from "../../../application/workflows/process-incoming-event";
-import { readInboundEnvironment } from "../../../config/environment";
+import {
+  readInboundEnvironment,
+  readTelegramEnvironment,
+} from "../../../config/environment";
 import { SqlitePersistence } from "../../../infrastructure/database/sqlite-persistence";
 import { AnthropicLLMProvider } from "../../../integrations/anthropic/anthropic-llm-provider";
 import { readAnthropicConfig } from "../../../integrations/anthropic/config";
+import { TelegramManagerNotificationProvider } from "../../../integrations/telegram/telegram-manager-notification-provider";
 import type {
   InboundRequestVerifier,
   InboundVerificationResult,
@@ -30,10 +34,17 @@ export function createRuntimeInboundProcessor() {
   const environment = readInboundEnvironment(process.env);
   const persistence = SqlitePersistence.create(environment.DATABASE_URL);
   const llmProvider = new AnthropicLLMProvider(readAnthropicConfig(process.env));
+  const telegram = readTelegramEnvironment(process.env);
+  const managerNotificationProvider = telegram.enabled
+    ? new TelegramManagerNotificationProvider({
+        botToken: telegram.botToken!,
+      }, persistence)
+    : undefined;
   return createIncomingEventProcessor({
     persistence,
     extractMessage: createMessageExtractor({ llmProvider }),
     generateNaturalResponse: createNaturalResponseGenerator({ llmProvider }),
+    managerNotificationProvider,
     logger: new ConsoleStructuredLogger(),
   });
 }

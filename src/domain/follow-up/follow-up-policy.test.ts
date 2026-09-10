@@ -17,6 +17,8 @@ function lead(overrides: Partial<Lead> = {}): Lead {
     externalLeadId: "external-1",
     name: null,
     contact: null,
+    phoneNumber: null,
+    phoneConfirmed: false,
     city: null,
     serviceability: "NEEDS_REVIEW",
     budget: null,

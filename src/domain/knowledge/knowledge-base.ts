@@ -26,6 +26,15 @@ export interface KnowledgeEntry {
 const containsAny = (text: string, terms: readonly string[]) =>
   terms.some((term) => text.includes(term));
 
+const economicsTerms = [
+  "заработ",
+  "зарабат",
+  "принос",
+  "доход",
+  "прибыл",
+  "окуп",
+] as const;
+
 const mentionsFiftyThousand = (text: string) =>
   /(^|[^\d])50(?:\s*000|\s*тысяч)/u.test(text);
 
@@ -99,12 +108,7 @@ export const PARTNER_KNOWLEDGE_BASE: readonly KnowledgeEntry[] = [
     answer:
       "Гарантированного дохода нет. По текущей модели ориентир по доходу партнёров составляет около 20 000 ₽ с одного объекта в месяц, но фактический результат зависит от конкретного объекта и условий.",
     matches: (text) => {
-      const incomeContext = containsAny(text, [
-        "доход",
-        "прибыл",
-        "окуп",
-        "заработ",
-      ]);
+      const incomeContext = containsAny(text, economicsTerms);
       return incomeContext || (text.includes("гарант") && text.includes("в месяц"));
     },
   },
@@ -174,12 +178,19 @@ export function answerFromKnowledgeBase(
 
   const asksAboutEconomics = userStatements.some((statement) =>
     containsAny(statement.trim().toLocaleLowerCase("ru-RU"), [
-      "заработ",
-      "доход",
-      "прибыл",
-      "окуп",
+      ...economicsTerms,
       "гарант",
     ]),
+  );
+  const asksWhetherLaunchBudgetIsGuaranteed = userStatements.some(
+    (statement) => {
+      const normalized = statement.trim().toLocaleLowerCase("ru-RU");
+      return (
+        !containsAny(normalized, economicsTerms) &&
+        containsAny(normalized, ["гарант", "хватит"]) &&
+        containsAny(normalized, ["тысяч", "бюджет", "запуск", "влож"])
+      );
+    },
   );
   const explicitUnits =
     extraction.facts.calculationUnits ??
@@ -189,6 +200,12 @@ export function answerFromKnowledgeBase(
     ? calculateEconomicsEstimate(explicitUnits)
     : null;
   const answerFragments = matched.map((entry) => {
+    if (
+      entry.id === "small-business-entry" &&
+      asksWhetherLaunchBudgetIsGuaranteed
+    ) {
+      return "Это рабочий ориентир, а не фиксированная смета или гарантия достаточности бюджета. Итог зависит от конкретного объекта: аренду, залог и комплектацию нужно считать по выбранной квартире.";
+    }
     if (entry.id !== "guarantees-and-economics" || !asksAboutEconomics) {
       return entry.answer;
     }

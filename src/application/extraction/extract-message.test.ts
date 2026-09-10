@@ -116,7 +116,7 @@ describe("message extraction schema", () => {
           budgetConfirmed: true,
           availableCapital: 50_000,
           availableCapitalConfirmed: false,
-          entryBudget: -1,
+          entryBudget: 50_000,
           additionalLaunchCapital: -1,
           capitalScope: "ENTRY_ONLY",
           additionalExpensesReadiness: "UNKNOWN",
@@ -157,6 +157,110 @@ describe("message extraction schema", () => {
       availableCapital: null,
       availableCapitalConfirmed: false,
       capitalScope: "ENTRY_ONLY",
+    });
+  });
+
+  it("recognizes an explicit willingness to work with the management company", async () => {
+    const statement = "Готов работать с управляющей компанией";
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        intent: "QUALIFICATION_INFORMATION",
+        facts: {
+          phoneNumber: "",
+          phoneConfirmed: false,
+          city: null,
+          budget: null,
+          budgetConfirmed: false,
+          availableCapital: -1,
+          availableCapitalConfirmed: false,
+          entryBudget: -1,
+          additionalLaunchCapital: -1,
+          capitalScope: "UNKNOWN",
+          additionalExpensesReadiness: "UNKNOWN",
+          businessModelReadiness: "UNKNOWN",
+          calculationUnits: -1,
+          startingUnits: null,
+          scalingPotentialUnits: null,
+          hasFreeTime: null,
+          availableTimeDetails: null,
+          businessExperience: null,
+          shortTermRentalExperience: null,
+          ownsProperty: null,
+          desiredIncome: null,
+          primaryGoal: "UNKNOWN",
+          launchTiming: null,
+          managementReadiness: null,
+          requiresGuaranteedIncome: null,
+          rejectsBusinessModel: null,
+        },
+        signals: {
+          questions: [],
+          objections: [statement],
+          possiblePrimaryFear: null,
+          possibleSecondaryFear: null,
+          wantsHuman: false,
+        },
+        confidence: 0.9,
+        uncertainty: [],
+      }),
+    ]);
+
+    const result = await createMessageExtractor({ llmProvider: llm })(statement);
+
+    expect(result.extraction.facts.managementReadiness).toBe("READY");
+    expect(result.extraction.signals.objections).toEqual([]);
+  });
+
+  it("normalizes an explicitly provided phone number", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        intent: "QUALIFICATION_INFORMATION",
+        facts: {
+          phoneNumber: "+7 999 123-45-67",
+          phoneConfirmed: true,
+          city: null,
+          budget: null,
+          budgetConfirmed: false,
+          availableCapital: -1,
+          availableCapitalConfirmed: false,
+          entryBudget: -1,
+          additionalLaunchCapital: -1,
+          capitalScope: "UNKNOWN",
+          additionalExpensesReadiness: "UNKNOWN",
+          businessModelReadiness: "UNKNOWN",
+          calculationUnits: -1,
+          startingUnits: null,
+          scalingPotentialUnits: null,
+          hasFreeTime: null,
+          availableTimeDetails: null,
+          businessExperience: null,
+          shortTermRentalExperience: null,
+          ownsProperty: null,
+          desiredIncome: null,
+          primaryGoal: "UNKNOWN",
+          launchTiming: null,
+          managementReadiness: null,
+          requiresGuaranteedIncome: null,
+          rejectsBusinessModel: null,
+        },
+        signals: {
+          questions: [],
+          objections: [],
+          possiblePrimaryFear: null,
+          possibleSecondaryFear: null,
+          wantsHuman: false,
+        },
+        confidence: 0.99,
+        uncertainty: [],
+      }),
+    ]);
+
+    const result = await createMessageExtractor({ llmProvider: llm })(
+      "Мой номер +7 999 123-45-67",
+    );
+    expect(result.extraction.facts).toMatchObject({
+      phoneNumber: "+79991234567",
+      phoneConfirmed: true,
     });
   });
 });

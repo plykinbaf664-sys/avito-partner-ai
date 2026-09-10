@@ -7,11 +7,21 @@ const nonEmptyOptional = z.preprocess(
   z.string().trim().min(1).optional(),
 );
 
+const booleanFlag = z
+  .enum(["true", "false"])
+  .default("false")
+  .transform((value) => value === "true");
+
 const baseEnvironmentSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   DATABASE_URL: nonEmptyOptional,
   AVITO_CLIENT_ID: nonEmptyOptional,
   AVITO_CLIENT_SECRET: nonEmptyOptional,
+  CRM_ENABLED: booleanFlag,
+  CRM_ACCESS_TOKEN: nonEmptyOptional,
+  TELEGRAM_MANAGER_NOTIFICATIONS_ENABLED: booleanFlag,
+  TELEGRAM_BOT_TOKEN: nonEmptyOptional,
+  TELEGRAM_MANAGER_INVITE_CODE: nonEmptyOptional,
 });
 
 const inboundEnvironmentSchema = baseEnvironmentSchema.extend({
@@ -41,9 +51,7 @@ function parseEnvironment<T>(
 
 export function readBaseEnvironment(environment: EnvironmentInput) {
   const parsed = parseEnvironment(baseEnvironmentSchema, environment);
-  if (parsed.NODE_ENV === "production" && !parsed.DATABASE_URL) {
-    throw new InvalidEnvironmentError(["DATABASE_URL"]);
-  }
+  validateConditionalEnvironment(parsed);
   return {
     ...parsed,
     DATABASE_URL: parsed.DATABASE_URL ?? "file:./data/local.db",
@@ -52,12 +60,58 @@ export function readBaseEnvironment(environment: EnvironmentInput) {
 
 export function readInboundEnvironment(environment: EnvironmentInput) {
   const parsed = parseEnvironment(inboundEnvironmentSchema, environment);
-  if (parsed.NODE_ENV === "production" && !parsed.DATABASE_URL) {
-    throw new InvalidEnvironmentError(["DATABASE_URL"]);
-  }
+  validateConditionalEnvironment(parsed);
   return {
     ...parsed,
     DATABASE_URL: parsed.DATABASE_URL ?? "file:./data/local.db",
+  };
+}
+
+function validateConditionalEnvironment(parsed: {
+  NODE_ENV: "development" | "test" | "production";
+  DATABASE_URL?: string;
+  CRM_ENABLED: boolean;
+  CRM_ACCESS_TOKEN?: string;
+  TELEGRAM_MANAGER_NOTIFICATIONS_ENABLED: boolean;
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_MANAGER_INVITE_CODE?: string;
+}): void {
+  const invalid: string[] = [];
+  if (parsed.NODE_ENV === "production" && !parsed.DATABASE_URL) {
+    invalid.push("DATABASE_URL");
+  }
+  if (
+    parsed.CRM_ENABLED &&
+    (!parsed.CRM_ACCESS_TOKEN || parsed.CRM_ACCESS_TOKEN.length < 16)
+  ) {
+    invalid.push("CRM_ACCESS_TOKEN");
+  }
+  if (parsed.TELEGRAM_MANAGER_NOTIFICATIONS_ENABLED) {
+    if (!parsed.TELEGRAM_BOT_TOKEN) invalid.push("TELEGRAM_BOT_TOKEN");
+    if (
+      !parsed.TELEGRAM_MANAGER_INVITE_CODE ||
+      !/^[A-Za-z0-9_-]{16,128}$/.test(parsed.TELEGRAM_MANAGER_INVITE_CODE)
+    ) invalid.push("TELEGRAM_MANAGER_INVITE_CODE");
+  }
+  if (invalid.length > 0) throw new InvalidEnvironmentError(invalid);
+}
+
+export function readCrmEnvironment(environment: EnvironmentInput) {
+  const config = readBaseEnvironment(environment);
+  return {
+    enabled: config.CRM_ENABLED,
+    accessToken: config.CRM_ACCESS_TOKEN ?? null,
+    databaseUrl: config.DATABASE_URL,
+  };
+}
+
+export function readTelegramEnvironment(environment: EnvironmentInput) {
+  const config = readBaseEnvironment(environment);
+  return {
+    enabled: config.TELEGRAM_MANAGER_NOTIFICATIONS_ENABLED,
+    botToken: config.TELEGRAM_BOT_TOKEN ?? null,
+    inviteCode: config.TELEGRAM_MANAGER_INVITE_CODE ?? null,
+    databaseUrl: config.DATABASE_URL,
   };
 }
 
@@ -68,4 +122,13 @@ export function validateAvitoEnvironment(environment: EnvironmentInput): void {
     !config.AVITO_CLIENT_SECRET ? "AVITO_CLIENT_SECRET" : null,
   ].filter((field): field is string => field !== null);
   if (missing.length > 0) throw new InvalidEnvironmentError(missing);
+}
+
+export function readAvitoEnvironment(environment: EnvironmentInput) {
+  validateAvitoEnvironment(environment);
+  const config = readBaseEnvironment(environment);
+  return {
+    clientId: config.AVITO_CLIENT_ID!,
+    clientSecret: config.AVITO_CLIENT_SECRET!,
+  };
 }

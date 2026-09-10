@@ -41,15 +41,18 @@ export function createManagerNotificationDelivery({
       return notification;
     }
 
-    const attempts = notification.deliveryAttempts + 1;
     try {
       const result = await provider.notify({
+        notificationId: notification.id,
         leadId: notification.leadId,
         conversationId: notification.conversationId,
         qualificationStatus: notification.qualificationStatus,
         summary: notification.summary,
         idempotencyKey: notification.idempotencyKey,
       });
+      const attempts =
+        notification.deliveryAttempts +
+        (result.status === "FAILED" && result.attempted === false ? 0 : 1);
       const updated: ManagerNotification =
         result.status === "SENT"
           ? {
@@ -88,6 +91,7 @@ export function createManagerNotificationDelivery({
       );
       return updated;
     } catch (error) {
+      const attempts = notification.deliveryAttempts + 1;
       const retryable =
         isRetryableExternalError(error) &&
         attempts < MAX_EXTERNAL_DELIVERY_ATTEMPTS;

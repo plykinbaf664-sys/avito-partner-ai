@@ -88,6 +88,8 @@ export type BusinessModelReadiness =
   (typeof businessModelReadinessValues)[number];
 
 export interface ExtractedFacts {
+  phoneNumber: string | null;
+  phoneConfirmed: boolean;
   city: string | null;
   budget: number | null;
   budgetConfirmed: boolean | null;

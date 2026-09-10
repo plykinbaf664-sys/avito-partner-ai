@@ -17,6 +17,8 @@ export interface Lead {
   externalLeadId: string;
   name: string | null;
   contact: string | null;
+  phoneNumber: string | null;
+  phoneConfirmed: boolean;
   city: string | null;
   serviceability: ServiceabilityStatus;
   budget: number | null;
@@ -61,6 +63,8 @@ export type LeadFactPatch = Partial<
     Lead,
     | "name"
     | "contact"
+    | "phoneNumber"
+    | "phoneConfirmed"
     | "city"
     | "budget"
     | "budgetConfirmed"

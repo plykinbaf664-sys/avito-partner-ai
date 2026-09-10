@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   InvalidEnvironmentError,
+  readBaseEnvironment,
   readInboundEnvironment,
   validateAvitoEnvironment,
 } from "./environment";
@@ -14,6 +15,38 @@ describe("environment validation", () => {
         ANTHROPIC_MODEL: "claude-test",
       }),
     ).toThrowError(new InvalidEnvironmentError(["ANTHROPIC_API_KEY"]));
+  });
+
+  it("requires Telegram credentials only when manager notifications are enabled", () => {
+    expect(() =>
+      readBaseEnvironment({
+        TELEGRAM_MANAGER_NOTIFICATIONS_ENABLED: "true",
+      }),
+    ).toThrowError(InvalidEnvironmentError);
+    expect(() =>
+      readBaseEnvironment({
+        TELEGRAM_MANAGER_NOTIFICATIONS_ENABLED: "true",
+        TELEGRAM_BOT_TOKEN: "token",
+        TELEGRAM_MANAGER_INVITE_CODE: "strong_invite_code_123",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      readBaseEnvironment({
+        TELEGRAM_MANAGER_NOTIFICATIONS_ENABLED: "false",
+      }),
+    ).not.toThrow();
+  });
+
+  it("fails closed when CRM is enabled without a sufficiently strong token", () => {
+    expect(() => readBaseEnvironment({ CRM_ENABLED: "true" })).toThrowError(
+      InvalidEnvironmentError,
+    );
+    expect(() =>
+      readBaseEnvironment({
+        CRM_ENABLED: "true",
+        CRM_ACCESS_TOKEN: "long-local-secret-token",
+      }),
+    ).not.toThrow();
   });
 
   it("requires both Avito credentials only when its provider is enabled", () => {

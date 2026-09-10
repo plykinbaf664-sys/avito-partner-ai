@@ -2,7 +2,11 @@ import type { ExtractedMessage } from "../../domain/extraction/extracted-message
 import type { Lead, LeadFactPatch } from "../../domain/lead/lead";
 import { assessLeadSegment } from "../../domain/lead/lead-segment";
 import { evaluateServiceability } from "../../domain/lead/serviceability";
-import { MAX_STORED_LEAD_SIGNAL_ITEMS } from "../security/technical-limits";
+import { normalizePhoneNumber } from "../../domain/lead/phone-number";
+import {
+  MAX_EXTRACTED_MONEY,
+  MAX_STORED_LEAD_SIGNAL_ITEMS,
+} from "../security/technical-limits";
 
 function uniqueStrings(existing: string[], incoming: string[]): string[] {
   return [...new Set([...existing, ...incoming])].slice(
@@ -16,6 +20,14 @@ export function mergeExtractedFacts(
   updatedAt: Date,
 ): Lead {
   const patch: LeadFactPatch = {};
+
+  if (typeof extraction.facts.phoneNumber === "string") {
+    const phoneNumber = normalizePhoneNumber(extraction.facts.phoneNumber);
+    if (phoneNumber !== null) {
+      patch.phoneNumber = phoneNumber;
+      patch.phoneConfirmed = extraction.facts.phoneConfirmed;
+    }
+  }
 
   for (const field of [
     "city",
@@ -63,7 +75,11 @@ export function mergeExtractedFacts(
       extraction.facts.availableCapitalConfirmed;
     patch.budget = extraction.facts.availableCapital;
     patch.budgetConfirmed = extraction.facts.availableCapitalConfirmed;
-  } else if (extraction.facts.budget !== null) {
+  } else if (
+    extraction.facts.budget !== null &&
+    extraction.facts.entryBudget === null &&
+    extraction.facts.capitalScope !== "ENTRY_ONLY"
+  ) {
     patch.availableCapital = extraction.facts.budget;
     patch.availableCapitalConfirmed =
       extraction.facts.budgetConfirmed === true;
@@ -89,13 +105,38 @@ export function mergeExtractedFacts(
     patch.buyingIntent = "DECLINED";
   }
 
-  const merged = {
+  let merged = {
     ...lead,
     ...patch,
     questions: uniqueStrings(lead.questions, extraction.signals.questions),
     objections: uniqueStrings(lead.objections, extraction.signals.objections),
     updatedAt,
   };
+
+  const receivedCapitalBreakdown =
+    extraction.facts.capitalScope === "ADDITIONAL_AVAILABLE" &&
+    (extraction.facts.entryBudget !== null ||
+      extraction.facts.additionalLaunchCapital !== null);
+  if (
+    receivedCapitalBreakdown &&
+    merged.entryBudget !== null &&
+    merged.additionalLaunchCapital !== null
+  ) {
+    const derivedAvailableCapital =
+      merged.entryBudget + merged.additionalLaunchCapital;
+    if (
+      Number.isSafeInteger(derivedAvailableCapital) &&
+      derivedAvailableCapital <= MAX_EXTRACTED_MONEY
+    ) {
+      merged = {
+        ...merged,
+        availableCapital: derivedAvailableCapital,
+        availableCapitalConfirmed: true,
+        budget: derivedAvailableCapital,
+        budgetConfirmed: true,
+      };
+    }
+  }
 
   const withServiceability = {
     ...merged,

@@ -35,6 +35,8 @@ function extractionReply({
   const extraction: ExtractedMessage = {
     intent,
     facts: {
+      phoneNumber: "",
+      phoneConfirmed: false,
       city: null,
       budget: null,
       budgetConfirmed: false,
@@ -269,7 +271,8 @@ describe("incoming partner event workflow", () => {
     );
 
     expect(result.extraction?.facts).toMatchObject({
-      availableCapital: 50_000,
+      availableCapital: null,
+      entryBudget: 50_000,
       startingUnits: 1,
       scalingPotentialUnits: null,
       ownsProperty: false,
@@ -281,7 +284,7 @@ describe("incoming partner event workflow", () => {
       nextAction: "CONTINUE_QUALIFICATION",
     });
     expect(lead).toMatchObject({
-      availableCapital: 50_000,
+      availableCapital: null,
       entryBudget: 50_000,
       ownsProperty: false,
       startingUnits: 1,
@@ -662,6 +665,10 @@ describe("incoming partner event workflow", () => {
       messages: persistence.messages,
       incomingEvents: persistence.incomingEvents,
       managerNotifications: persistence.managerNotifications,
+      telegramManagerRecipients: persistence.telegramManagerRecipients,
+      telegramManagerDeliveries: persistence.telegramManagerDeliveries,
+      telegramBotUpdates: persistence.telegramBotUpdates,
+      crm: persistence.crm,
       checkHealth: () => persistence.checkHealth(),
       checkReadiness: () => persistence.checkReadiness(),
       transaction: async (operation) => {

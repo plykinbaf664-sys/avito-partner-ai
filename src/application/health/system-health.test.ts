@@ -45,4 +45,16 @@ describe("system health", () => {
     expect(body).not.toContain(secretMarker);
     expect(body).toBe('{"status":"not_ready","database":"unavailable"}');
   });
+
+  it("fails readiness on enabled but incomplete Telegram configuration without making an API call", async () => {
+    const response = await createReadinessHandler({
+      NODE_ENV: "test",
+      TELEGRAM_MANAGER_NOTIFICATIONS_ENABLED: "true",
+    })();
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      status: "not_ready",
+      database: "unavailable",
+    });
+  });
 });

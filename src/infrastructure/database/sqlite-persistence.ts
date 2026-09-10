@@ -1,10 +1,28 @@
 import { createClient, type Client } from "@libsql/client";
-import { and, asc, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  lt,
+  lte,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
 
 import type {
   ConversationRepository,
+  CrmLeadListQuery,
+  CrmLeadSnapshot,
+  CrmReadRepository,
   IncomingEventRegistration,
   IncomingEventRepository,
   LeadRepository,
@@ -13,6 +31,9 @@ import type {
   Persistence,
   ProcessedEventDetails,
   RepositoryContext,
+  TelegramBotUpdateRepository,
+  TelegramManagerDeliveryRepository,
+  TelegramManagerRecipientRepository,
 } from "@/application/ports/repositories";
 import type { Conversation } from "@/domain/conversation/conversation";
 import type { ConversationState } from "@/domain/conversation/conversation-state";
@@ -20,6 +41,8 @@ import type { IncomingEvent } from "@/domain/event/incoming-event";
 import type { Lead } from "@/domain/lead/lead";
 import type { Message } from "@/domain/message/message";
 import type { ManagerNotification } from "@/domain/notification/manager-notification";
+import type { TelegramManagerDelivery } from "@/domain/notification/telegram-manager-delivery";
+import type { TelegramManagerRecipient } from "@/domain/notification/telegram-manager-recipient";
 
 import * as schema from "./schema";
 
@@ -191,6 +214,166 @@ class DrizzleMessageRepository implements MessageRepository {
       .where(eq(schema.messages.conversationId, conversationId))
       .orderBy(schema.messages.createdAt);
   }
+
+  async listRecentByConversationId(
+    conversationId: string,
+    limit: number,
+  ): Promise<Message[]> {
+    const rows = await this.database
+      .select()
+      .from(schema.messages)
+      .where(eq(schema.messages.conversationId, conversationId))
+      .orderBy(desc(schema.messages.createdAt))
+      .limit(Math.max(1, Math.min(100, limit)));
+    return rows.reverse();
+  }
+}
+
+function crmLeadWhere(
+  query: Pick<CrmLeadListQuery, "filter" | "search">,
+): SQL | undefined {
+  const conditions: SQL[] = [];
+  if (query.search) {
+    const search = `%${query.search}%`;
+    const searchCondition = or(
+      like(schema.leads.name, search),
+      like(schema.leads.phoneNumber, search),
+      like(schema.leads.city, search),
+    );
+    if (searchCondition) conditions.push(searchCondition);
+  }
+  switch (query.filter) {
+    case "hot":
+      conditions.push(
+        inArray(schema.leads.qualificationStatus, ["HOT", "PRIORITY"]),
+      );
+      break;
+    case "qualified":
+      conditions.push(eq(schema.leads.qualificationStatus, "QUALIFIED"));
+      break;
+    case "handoff":
+      conditions.push(isNotNull(schema.leads.handoffAt));
+      break;
+    case "active":
+      conditions.push(
+        inArray(schema.leads.qualificationStatus, [
+          "NEW",
+          "QUALIFYING",
+          "NEEDS_MORE_INFO",
+          "BORDERLINE",
+          "WARM",
+          "NURTURE",
+        ]),
+      );
+      break;
+    case "no_fit":
+      conditions.push(
+        or(
+          inArray(schema.leads.qualificationStatus, ["NO_FIT", "CLOSED"]),
+          eq(schema.leads.buyingIntent, "DECLINED"),
+        )!,
+      );
+      break;
+    case "all":
+      break;
+  }
+  return conditions.length === 0 ? undefined : and(...conditions);
+}
+
+class DrizzleCrmReadRepository implements CrmReadRepository {
+  constructor(private readonly database: DatabaseExecutor) {}
+
+  private async attachRelations(leads: Lead[]): Promise<CrmLeadSnapshot[]> {
+    if (leads.length === 0) return [];
+    const leadIds = leads.map((lead) => lead.id);
+    const [conversationRows, notificationRows] = await Promise.all([
+      this.database
+        .select()
+        .from(schema.conversations)
+        .where(inArray(schema.conversations.leadId, leadIds))
+        .orderBy(desc(schema.conversations.updatedAt)),
+      this.database
+        .select()
+        .from(schema.managerNotifications)
+        .where(inArray(schema.managerNotifications.leadId, leadIds))
+        .orderBy(desc(schema.managerNotifications.createdAt)),
+    ]);
+    const conversationsByLead = new Map<string, Conversation>();
+    for (const conversation of conversationRows) {
+      if (!conversationsByLead.has(conversation.leadId)) {
+        conversationsByLead.set(conversation.leadId, conversation);
+      }
+    }
+    const notificationsByLead = new Map<string, ManagerNotification>();
+    for (const notification of notificationRows) {
+      if (!notificationsByLead.has(notification.leadId)) {
+        notificationsByLead.set(notification.leadId, notification);
+      }
+    }
+    return leads.map((lead) => {
+      const conversation = conversationsByLead.get(lead.id) ?? null;
+      const managerNotification = notificationsByLead.get(lead.id) ?? null;
+      const candidates = [
+        lead.updatedAt,
+        conversation?.lastInboundAt,
+        conversation?.lastOutboundAt,
+        conversation?.updatedAt,
+      ].filter((value): value is Date => value instanceof Date);
+      return {
+        lead,
+        conversation,
+        managerNotification,
+        lastActivityAt: new Date(
+          Math.max(...candidates.map((value) => value.getTime())),
+        ),
+      };
+    });
+  }
+
+  async listLeadSnapshots(query: CrmLeadListQuery): Promise<CrmLeadSnapshot[]> {
+    const rows = await this.database
+      .select()
+      .from(schema.leads)
+      .where(crmLeadWhere(query))
+      .orderBy(
+        sql`case
+          when ${schema.leads.handoffAt} is not null then 0
+          when ${schema.leads.qualificationStatus} in ('HOT', 'PRIORITY', 'QUALIFIED') then 1
+          when ${schema.leads.qualificationStatus} in ('NEW', 'QUALIFYING', 'NEEDS_MORE_INFO', 'BORDERLINE', 'WARM', 'NURTURE') then 2
+          else 3 end`,
+        desc(
+          sql`coalesce(
+            (select max(${schema.conversations.updatedAt})
+             from ${schema.conversations}
+             where ${schema.conversations.leadId} = ${schema.leads.id}),
+            ${schema.leads.updatedAt}
+          )`,
+        ),
+      )
+      .limit(query.limit)
+      .offset(query.offset);
+    return this.attachRelations(rows);
+  }
+
+  async countLeadSnapshots(
+    query: Pick<CrmLeadListQuery, "filter" | "search">,
+  ): Promise<number> {
+    const rows = await this.database
+      .select({ total: count() })
+      .from(schema.leads)
+      .where(crmLeadWhere(query));
+    return rows[0]?.total ?? 0;
+  }
+
+  async findLeadSnapshot(leadId: string): Promise<CrmLeadSnapshot | null> {
+    const rows = await this.database
+      .select()
+      .from(schema.leads)
+      .where(eq(schema.leads.id, leadId))
+      .limit(1);
+    if (!rows[0]) return null;
+    return (await this.attachRelations([rows[0]]))[0] ?? null;
+  }
 }
 
 class DrizzleManagerNotificationRepository
@@ -230,6 +413,169 @@ class DrizzleManagerNotificationRepository
       .update(schema.managerNotifications)
       .set(notification)
       .where(eq(schema.managerNotifications.id, notification.id));
+  }
+
+  async listDeliverable(limit: number): Promise<ManagerNotification[]> {
+    return this.database
+      .select()
+      .from(schema.managerNotifications)
+      .where(
+        or(
+          eq(schema.managerNotifications.deliveryStatus, "PENDING"),
+          and(
+            eq(schema.managerNotifications.deliveryStatus, "FAILED"),
+            eq(schema.managerNotifications.deliveryRetryable, true),
+          ),
+        ),
+      )
+      .orderBy(asc(schema.managerNotifications.createdAt))
+      .limit(limit);
+  }
+}
+
+class DrizzleTelegramManagerRecipientRepository
+  implements TelegramManagerRecipientRepository
+{
+  constructor(private readonly database: DatabaseExecutor) {}
+
+  async findByChatId(chatId: string): Promise<TelegramManagerRecipient | null> {
+    const rows = await this.database
+      .select()
+      .from(schema.telegramManagerRecipients)
+      .where(eq(schema.telegramManagerRecipients.telegramChatId, chatId))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  async listActive(): Promise<TelegramManagerRecipient[]> {
+    return this.database
+      .select()
+      .from(schema.telegramManagerRecipients)
+      .where(eq(schema.telegramManagerRecipients.isActive, true))
+      .orderBy(asc(schema.telegramManagerRecipients.createdAt));
+  }
+
+  async upsertAuthorized(recipient: TelegramManagerRecipient): Promise<void> {
+    await this.database
+      .insert(schema.telegramManagerRecipients)
+      .values(recipient)
+      .onConflictDoUpdate({
+        target: schema.telegramManagerRecipients.telegramChatId,
+        set: {
+          telegramUserId: recipient.telegramUserId,
+          username: recipient.username,
+          firstName: recipient.firstName,
+          isActive: true,
+          authorizedAt: recipient.authorizedAt,
+          updatedAt: recipient.updatedAt,
+        },
+      });
+  }
+
+  async deactivate(chatId: string, updatedAt: Date): Promise<boolean> {
+    const rows = await this.database
+      .update(schema.telegramManagerRecipients)
+      .set({ isActive: false, updatedAt })
+      .where(eq(schema.telegramManagerRecipients.telegramChatId, chatId))
+      .returning({ id: schema.telegramManagerRecipients.id });
+    return rows.length === 1;
+  }
+}
+
+class DrizzleTelegramManagerDeliveryRepository
+  implements TelegramManagerDeliveryRepository
+{
+  constructor(private readonly database: DatabaseExecutor) {}
+
+  async findByIdempotencyKey(
+    key: string,
+  ): Promise<TelegramManagerDelivery | null> {
+    const rows = await this.database
+      .select()
+      .from(schema.telegramManagerDeliveries)
+      .where(eq(schema.telegramManagerDeliveries.idempotencyKey, key))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  async insertIfAbsent(delivery: TelegramManagerDelivery): Promise<boolean> {
+    const rows = await this.database
+      .insert(schema.telegramManagerDeliveries)
+      .values(delivery)
+      .onConflictDoNothing()
+      .returning({ id: schema.telegramManagerDeliveries.id });
+    return rows.length === 1;
+  }
+
+  async tryClaim(
+    id: string,
+    expectedAttempts: number,
+    updatedAt: Date,
+    staleBefore: Date,
+  ): Promise<boolean> {
+    const rows = await this.database
+      .update(schema.telegramManagerDeliveries)
+      .set({
+        deliveryStatus: "PENDING",
+        deliveryAttempts: expectedAttempts + 1,
+        deliveryRetryable: false,
+        lastDeliveryErrorCode: null,
+        updatedAt,
+      })
+      .where(
+        and(
+          eq(schema.telegramManagerDeliveries.id, id),
+          eq(
+            schema.telegramManagerDeliveries.deliveryAttempts,
+            expectedAttempts,
+          ),
+          or(
+            and(
+              eq(schema.telegramManagerDeliveries.deliveryStatus, "PENDING"),
+              isNull(schema.telegramManagerDeliveries.deliveryRetryable),
+            ),
+            and(
+              eq(schema.telegramManagerDeliveries.deliveryStatus, "FAILED"),
+              eq(schema.telegramManagerDeliveries.deliveryRetryable, true),
+            ),
+            and(
+              eq(schema.telegramManagerDeliveries.deliveryStatus, "PENDING"),
+              eq(schema.telegramManagerDeliveries.deliveryRetryable, false),
+              lt(schema.telegramManagerDeliveries.updatedAt, staleBefore),
+            ),
+          ),
+        ),
+      )
+      .returning({ id: schema.telegramManagerDeliveries.id });
+    return rows.length === 1;
+  }
+
+  async update(delivery: TelegramManagerDelivery): Promise<void> {
+    await this.database
+      .update(schema.telegramManagerDeliveries)
+      .set(delivery)
+      .where(eq(schema.telegramManagerDeliveries.id, delivery.id));
+  }
+}
+
+class DrizzleTelegramBotUpdateRepository
+  implements TelegramBotUpdateRepository
+{
+  constructor(private readonly database: DatabaseExecutor) {}
+
+  async tryClaim(updateId: string, createdAt: Date): Promise<boolean> {
+    const rows = await this.database
+      .insert(schema.telegramBotUpdates)
+      .values({ updateId, createdAt })
+      .onConflictDoNothing()
+      .returning({ updateId: schema.telegramBotUpdates.updateId });
+    return rows.length === 1;
+  }
+
+  async release(updateId: string): Promise<void> {
+    await this.database
+      .delete(schema.telegramBotUpdates)
+      .where(eq(schema.telegramBotUpdates.updateId, updateId));
   }
 }
 
@@ -366,6 +712,14 @@ function createRepositoryContext(database: DatabaseExecutor): RepositoryContext 
     messages: new DrizzleMessageRepository(database),
     incomingEvents: new DrizzleIncomingEventRepository(database),
     managerNotifications: new DrizzleManagerNotificationRepository(database),
+    telegramManagerRecipients: new DrizzleTelegramManagerRecipientRepository(
+      database,
+    ),
+    telegramManagerDeliveries: new DrizzleTelegramManagerDeliveryRepository(
+      database,
+    ),
+    telegramBotUpdates: new DrizzleTelegramBotUpdateRepository(database),
+    crm: new DrizzleCrmReadRepository(database),
   };
 }
 
@@ -397,6 +751,10 @@ export class SqlitePersistence implements Persistence {
   readonly messages: MessageRepository;
   readonly incomingEvents: IncomingEventRepository;
   readonly managerNotifications: ManagerNotificationRepository;
+  readonly telegramManagerRecipients: TelegramManagerRecipientRepository;
+  readonly telegramManagerDeliveries: TelegramManagerDeliveryRepository;
+  readonly telegramBotUpdates: TelegramBotUpdateRepository;
+  readonly crm: CrmReadRepository;
   private operationTail: Promise<void> = Promise.resolve();
 
   private constructor(
@@ -417,6 +775,19 @@ export class SqlitePersistence implements Persistence {
       repositories.managerNotifications,
       serialize,
     );
+    this.telegramManagerRecipients = serializeRepository(
+      repositories.telegramManagerRecipients,
+      serialize,
+    );
+    this.telegramManagerDeliveries = serializeRepository(
+      repositories.telegramManagerDeliveries,
+      serialize,
+    );
+    this.telegramBotUpdates = serializeRepository(
+      repositories.telegramBotUpdates,
+      serialize,
+    );
+    this.crm = serializeRepository(repositories.crm, serialize);
   }
 
   private async serialize<T>(operation: () => Promise<T>): Promise<T> {
@@ -475,6 +846,10 @@ export class SqlitePersistence implements Persistence {
       await this.database
         .select({ id: schema.managerNotifications.id })
         .from(schema.managerNotifications)
+        .limit(1);
+      await this.database
+        .select({ id: schema.telegramManagerRecipients.id })
+        .from(schema.telegramManagerRecipients)
         .limit(1);
     });
   }

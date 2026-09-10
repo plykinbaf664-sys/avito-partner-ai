@@ -138,6 +138,8 @@ function createLead(
     externalLeadId,
     name: null,
     contact: null,
+    phoneNumber: null,
+    phoneConfirmed: false,
     city: null,
     serviceability: "NEEDS_REVIEW",
     budget: null,

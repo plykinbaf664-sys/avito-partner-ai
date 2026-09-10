@@ -30,6 +30,7 @@ export type ProviderDeliveryResult =
       status: "FAILED";
       retryable: boolean;
       errorCode: string;
+      attempted?: boolean;
     };
 
 export interface OutboundMessageProvider {
@@ -37,6 +38,7 @@ export interface OutboundMessageProvider {
 }
 
 export interface ManagerNotificationRequest {
+  notificationId: string;
   leadId: string;
   conversationId: string;
   qualificationStatus: QualificationStatus;
