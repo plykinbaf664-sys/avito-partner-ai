@@ -28,6 +28,7 @@ describe("environment validation", () => {
         TELEGRAM_MANAGER_NOTIFICATIONS_ENABLED: "true",
         TELEGRAM_BOT_TOKEN: "token",
         TELEGRAM_MANAGER_INVITE_CODE: "strong_invite_code_123",
+        TELEGRAM_WEBHOOK_SECRET: "strong_webhook_secret_123",
       }),
     ).not.toThrow();
     expect(() =>
@@ -55,6 +56,16 @@ describe("environment validation", () => {
     );
     expect(() =>
       validateAvitoEnvironment({
+        AVITO_CLIENT_ID: "id",
+        AVITO_CLIENT_SECRET: "secret",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      readBaseEnvironment({ AVITO_CHANNEL_ENABLED: "true" }),
+    ).toThrowError(InvalidEnvironmentError);
+    expect(() =>
+      readBaseEnvironment({
+        AVITO_CHANNEL_ENABLED: "true",
         AVITO_CLIENT_ID: "id",
         AVITO_CLIENT_SECRET: "secret",
       }),

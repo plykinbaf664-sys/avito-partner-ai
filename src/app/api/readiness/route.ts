@@ -1,5 +1,5 @@
 import { checkReadiness } from "@/application/health/system-health";
-import { readBaseEnvironment } from "@/config/environment";
+import { readBaseEnvironment, readInboundEnvironment } from "@/config/environment";
 import { SqlitePersistence } from "@/infrastructure/database/sqlite-persistence";
 
 export const runtime = "nodejs";
@@ -12,6 +12,7 @@ export function createReadinessHandler(
     let persistence: SqlitePersistence | null = null;
     try {
       const config = readBaseEnvironment(environment);
+      if (config.AVITO_CHANNEL_ENABLED) readInboundEnvironment(environment);
       persistence = SqlitePersistence.create(config.DATABASE_URL);
       const result = await checkReadiness(persistence);
       return Response.json(result, {

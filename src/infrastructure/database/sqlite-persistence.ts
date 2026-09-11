@@ -606,6 +606,42 @@ class DrizzleIncomingEventRepository implements IncomingEventRepository {
     return { event: existing, created: false };
   }
 
+  async listRecoverable(
+    now: Date,
+    staleBefore: Date,
+    maxAttempts: number,
+    limit: number,
+  ): Promise<IncomingEvent[]> {
+    return this.database
+      .select()
+      .from(schema.incomingEvents)
+      .where(
+        and(
+          lte(schema.incomingEvents.receivedAt, now),
+          lt(
+            schema.incomingEvents.processingAttempts,
+            maxAttempts,
+          ),
+          or(
+            eq(schema.incomingEvents.status, "RECEIVED"),
+            and(
+              eq(schema.incomingEvents.status, "FAILED"),
+              eq(schema.incomingEvents.processingRetryable, true),
+            ),
+            and(
+              eq(schema.incomingEvents.status, "PROCESSING"),
+              or(
+                isNull(schema.incomingEvents.processingStartedAt),
+                lt(schema.incomingEvents.processingStartedAt, staleBefore),
+              ),
+            ),
+          ),
+        ),
+      )
+      .orderBy(asc(schema.incomingEvents.receivedAt))
+      .limit(Math.max(1, Math.min(100, limit)));
+  }
+
   async findByIdentity(
     source: string,
     externalEventId: string,

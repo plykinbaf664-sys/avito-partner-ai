@@ -93,6 +93,7 @@ export default async function CrmPage({
             <thead className="bg-slate-900 text-xs uppercase text-slate-400">
               <tr>
                 {[
+                  "Источник",
                   "Последняя активность", "Имя", "Телефон", "Сегмент", "Город",
                   "Капитал", "Старт", "Потенциал", "Срок", "Квалификация",
                   "Финансы", "Намерение", "Handoff", "Telegram",
@@ -102,6 +103,7 @@ export default async function CrmPage({
             <tbody className="divide-y divide-slate-800">
               {result.records.map((lead) => (
                 <tr key={lead.leadId} className="bg-slate-950 hover:bg-slate-900/70">
+                  <td className="px-3 py-3">{lead.source}</td>
                   <td className="px-3 py-3"><Link className="text-blue-300 hover:underline" href={`/crm/${encodeURIComponent(lead.leadId)}`}>{dateTime(lead.lastActivityAt)}</Link></td>
                   <td className="px-3 py-3">{lead.name ?? ""}</td>
                   <td className="px-3 py-3">{lead.phoneNumber ?? ""}</td>
@@ -119,7 +121,7 @@ export default async function CrmPage({
                 </tr>
               ))}
               {result.records.length === 0 ? (
-                <tr><td colSpan={14} className="px-4 py-10 text-center text-slate-500">Лиды не найдены</td></tr>
+                <tr><td colSpan={15} className="px-4 py-10 text-center text-slate-500">Лиды не найдены</td></tr>
               ) : null}
             </tbody>
           </table>

@@ -190,6 +190,41 @@ describe("multi-turn qualification conversation", () => {
     expect(result.qualificationStatus).not.toBe("NO_FIT");
   });
 
+  it("keeps the latest explicitly changed budget, city, and phone", async () => {
+    const { processEvent } = harness([
+      reply({
+        facts: {
+          city: "Подольск",
+          availableCapital: 120_000,
+          availableCapitalConfirmed: true,
+          phoneNumber: "+79991234567",
+          phoneConfirmed: true,
+        },
+      }),
+      reply({
+        facts: {
+          city: "Химки",
+          availableCapital: 200_000,
+          availableCapitalConfirmed: true,
+          phoneNumber: "+79997654321",
+          phoneConfirmed: true,
+        },
+      }),
+    ]);
+    const first = await processEvent(
+      input(1, "Я из Подольска, на запуск есть 120 тысяч, номер +79991234567"),
+    );
+    await processEvent(
+      input(2, "Уточню: теперь я в Химках, могу выделить 200 тысяч, номер +79997654321"),
+    );
+    const lead = await persistence.leads.findById(first.leadId!);
+    expect(lead).toMatchObject({
+      city: "Химки",
+      availableCapital: 200_000,
+      phoneNumber: "+79997654321",
+    });
+  });
+
   it("answers that owned property is not required and continues qualification", async () => {
     const question = "Своей квартиры нет, это проблема?";
     const { processEvent } = harness([

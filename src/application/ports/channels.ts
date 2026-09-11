@@ -44,6 +44,7 @@ export interface ManagerNotificationRequest {
   qualificationStatus: QualificationStatus;
   summary: ManagerSummary;
   idempotencyKey: string;
+  createdAt: Date;
 }
 
 export interface ManagerNotificationProvider {

@@ -49,6 +49,8 @@ export default async function CrmLeadPage({
         <section>
           <h2 className="mb-3 text-lg font-medium">Основные данные</h2>
           <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Field label="Источник" value={record.source} />
+            <Field label="ID диалога в канале" value={record.externalLeadId} />
             <Field label="Имя" value={record.name ?? ""} />
             <Field label="Телефон" value={record.phoneNumber ?? ""} />
             <Field label="Сегмент" value={segmentLabels[record.segment]} />

@@ -112,8 +112,11 @@ export class TelegramManagerNotificationProvider
   async notify(
     notification: ManagerNotificationRequest,
   ): Promise<ProviderDeliveryResult> {
-    const recipients =
-      await this.persistence.telegramManagerRecipients.listActive();
+    const recipients = (
+      await this.persistence.telegramManagerRecipients.listActive()
+    ).filter(
+      (recipient) => recipient.authorizedAt.getTime() <= notification.createdAt.getTime(),
+    );
     if (recipients.length === 0) {
       return {
         status: "FAILED",
@@ -257,4 +260,3 @@ export class TelegramManagerNotificationProvider
         };
   }
 }
-

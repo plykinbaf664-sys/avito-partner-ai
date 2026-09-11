@@ -17,6 +17,8 @@ export type CrmLeadFilter = (typeof crmLeadFilters)[number];
 
 export interface CrmLeadRecord {
   leadId: string;
+  source: string;
+  externalLeadId: string;
   conversationId: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -57,4 +59,3 @@ export interface CrmLeadDetails extends CrmLeadRecord {
     deliveryStatus: DeliveryStatus | null;
   }>;
 }
-

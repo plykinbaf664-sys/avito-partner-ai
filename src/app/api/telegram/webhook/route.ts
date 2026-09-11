@@ -1,9 +1,7 @@
-import { createPendingManagerNotificationDelivery } from "@/application/delivery/deliver-pending-manager-notifications";
 import { createTelegramManagerUpdateProcessor } from "@/application/workflows/process-telegram-manager-update";
 import { readTelegramEnvironment } from "@/config/environment";
 import { SqlitePersistence } from "@/infrastructure/database/sqlite-persistence";
 import { TelegramBotApiClient } from "@/integrations/telegram/telegram-bot-api-client";
-import { TelegramManagerNotificationProvider } from "@/integrations/telegram/telegram-manager-notification-provider";
 
 import { createTelegramWebhookHandler } from "./route-handler";
 
@@ -19,26 +17,14 @@ export async function POST(request: Request): Promise<Response> {
     }
     persistence = SqlitePersistence.create(telegram.databaseUrl);
     const sender = new TelegramBotApiClient(telegram.botToken!);
-    const notificationProvider = new TelegramManagerNotificationProvider(
-      { botToken: telegram.botToken! },
-      persistence,
-      fetch,
-      () => new Date(),
-      undefined,
-      sender,
-    );
     const processUpdate = createTelegramManagerUpdateProcessor({
       persistence,
       sender,
       inviteCode: telegram.inviteCode!,
-      onManagerAuthorized: createPendingManagerNotificationDelivery({
-        persistence,
-        provider: notificationProvider,
-      }),
     });
     return await createTelegramWebhookHandler({
       enabled: true,
-      secret: telegram.inviteCode!,
+      secret: telegram.webhookSecret!,
       processUpdate,
     })(request);
   } catch {

@@ -116,6 +116,12 @@ export interface IncomingEventRegistration {
 
 export interface IncomingEventRepository {
   register(event: IncomingEvent): Promise<IncomingEventRegistration>;
+  listRecoverable(
+    now: Date,
+    staleBefore: Date,
+    maxAttempts: number,
+    limit: number,
+  ): Promise<IncomingEvent[]>;
   findByIdentity(
     source: string,
     externalEventId: string,

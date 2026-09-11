@@ -49,6 +49,7 @@ export function createManagerNotificationDelivery({
         qualificationStatus: notification.qualificationStatus,
         summary: notification.summary,
         idempotencyKey: notification.idempotencyKey,
+        createdAt: notification.createdAt,
       });
       const attempts =
         notification.deliveryAttempts +

@@ -30,6 +30,7 @@ function request(
     conversationId: "conversation-1",
     qualificationStatus: "HOT",
     idempotencyKey: `manager-handoff:${notificationId}`,
+    createdAt: timestamp,
     summary: {
       name: "Александр <script>",
       phoneNumber: "+79991234567",
@@ -328,6 +329,38 @@ describe("Telegram manager notifications", () => {
       deliveryRetryable: true,
       lastDeliveryErrorCode: "TELEGRAM_NO_ACTIVE_RECIPIENTS",
     });
+  });
+
+  it("does not send an old HOT notification to a manager authorized later", async () => {
+    const notificationRequest = request();
+    await seedNotification(persistence, notificationRequest);
+    await persistence.telegramManagerRecipients.upsertAuthorized({
+      id: "recipient-new",
+      telegramChatId: "404",
+      telegramUserId: "404",
+      username: null,
+      firstName: null,
+      isActive: true,
+      authorizedAt: new Date(timestamp.getTime() + 1_000),
+      createdAt: new Date(timestamp.getTime() + 1_000),
+      updatedAt: new Date(timestamp.getTime() + 1_000),
+    });
+    const sender = new RecordingSender();
+    const provider = new TelegramManagerNotificationProvider(
+      { botToken: "unused" },
+      persistence,
+      fetch,
+      () => new Date(timestamp.getTime() + 2_000),
+      () => "delivery-id",
+      sender,
+    );
+
+    await expect(provider.notify(notificationRequest)).resolves.toMatchObject({
+      status: "FAILED",
+      attempted: false,
+      errorCode: "TELEGRAM_NO_ACTIVE_RECIPIENTS",
+    });
+    expect(sender.calls).toHaveLength(0);
   });
 
   it("omits empty fields and uses safe plain text", () => {

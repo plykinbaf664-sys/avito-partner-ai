@@ -13,7 +13,10 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "smoke:avito": "node --experimental-strip-types --env-file-if-exists=.env.local scripts/smoke-avito-api.ts"
+    "smoke:avito": "node --experimental-strip-types --env-file-if-exists=.env.local scripts/smoke-avito-api.ts",
+    "configure:avito-webhook": "node --experimental-strip-types --env-file-if-exists=.env.local scripts/configure-avito-webhook.ts",
+    "send:avito-test": "node --experimental-strip-types --env-file-if-exists=.env.local scripts/send-avito-test-message.ts",
+    "configure:telegram-webhook": "node --experimental-strip-types --env-file-if-exists=.env.local scripts/configure-telegram-webhook.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",

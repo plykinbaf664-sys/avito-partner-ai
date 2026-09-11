@@ -51,14 +51,12 @@ export function createTelegramManagerUpdateProcessor({
   persistence,
   sender,
   inviteCode,
-  onManagerAuthorized,
   now: clock = () => new Date(),
   generateId: idGenerator = generateId,
 }: {
   persistence: Persistence;
   sender: TelegramTextSender;
   inviteCode: string;
-  onManagerAuthorized?: () => Promise<void>;
   now?: () => Date;
   generateId?: IdGenerator;
 }) {
@@ -125,7 +123,6 @@ export function createTelegramManagerUpdateProcessor({
           code: delivery.errorCode,
         });
       }
-      if (result === "REGISTERED") await onManagerAuthorized?.();
       return result;
     } catch (error) {
       await persistence.telegramBotUpdates.release(updateId);
@@ -140,4 +137,3 @@ export function verifyTelegramWebhookSecret(
 ): boolean {
   return supplied !== null && secretMatches(supplied, expected);
 }
-

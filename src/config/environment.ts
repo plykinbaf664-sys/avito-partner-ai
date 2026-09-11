@@ -15,6 +15,7 @@ const booleanFlag = z
 const baseEnvironmentSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   DATABASE_URL: nonEmptyOptional,
+  AVITO_CHANNEL_ENABLED: booleanFlag,
   AVITO_CLIENT_ID: nonEmptyOptional,
   AVITO_CLIENT_SECRET: nonEmptyOptional,
   CRM_ENABLED: booleanFlag,
@@ -22,6 +23,7 @@ const baseEnvironmentSchema = z.object({
   TELEGRAM_MANAGER_NOTIFICATIONS_ENABLED: booleanFlag,
   TELEGRAM_BOT_TOKEN: nonEmptyOptional,
   TELEGRAM_MANAGER_INVITE_CODE: nonEmptyOptional,
+  TELEGRAM_WEBHOOK_SECRET: nonEmptyOptional,
 });
 
 const inboundEnvironmentSchema = baseEnvironmentSchema.extend({
@@ -70,15 +72,23 @@ export function readInboundEnvironment(environment: EnvironmentInput) {
 function validateConditionalEnvironment(parsed: {
   NODE_ENV: "development" | "test" | "production";
   DATABASE_URL?: string;
+  AVITO_CHANNEL_ENABLED: boolean;
+  AVITO_CLIENT_ID?: string;
+  AVITO_CLIENT_SECRET?: string;
   CRM_ENABLED: boolean;
   CRM_ACCESS_TOKEN?: string;
   TELEGRAM_MANAGER_NOTIFICATIONS_ENABLED: boolean;
   TELEGRAM_BOT_TOKEN?: string;
   TELEGRAM_MANAGER_INVITE_CODE?: string;
+  TELEGRAM_WEBHOOK_SECRET?: string;
 }): void {
   const invalid: string[] = [];
   if (parsed.NODE_ENV === "production" && !parsed.DATABASE_URL) {
     invalid.push("DATABASE_URL");
+  }
+  if (parsed.AVITO_CHANNEL_ENABLED) {
+    if (!parsed.AVITO_CLIENT_ID) invalid.push("AVITO_CLIENT_ID");
+    if (!parsed.AVITO_CLIENT_SECRET) invalid.push("AVITO_CLIENT_SECRET");
   }
   if (
     parsed.CRM_ENABLED &&
@@ -92,6 +102,10 @@ function validateConditionalEnvironment(parsed: {
       !parsed.TELEGRAM_MANAGER_INVITE_CODE ||
       !/^[A-Za-z0-9_-]{16,128}$/.test(parsed.TELEGRAM_MANAGER_INVITE_CODE)
     ) invalid.push("TELEGRAM_MANAGER_INVITE_CODE");
+    if (
+      !parsed.TELEGRAM_WEBHOOK_SECRET ||
+      !/^[A-Za-z0-9_-]{16,128}$/.test(parsed.TELEGRAM_WEBHOOK_SECRET)
+    ) invalid.push("TELEGRAM_WEBHOOK_SECRET");
   }
   if (invalid.length > 0) throw new InvalidEnvironmentError(invalid);
 }
@@ -111,6 +125,7 @@ export function readTelegramEnvironment(environment: EnvironmentInput) {
     enabled: config.TELEGRAM_MANAGER_NOTIFICATIONS_ENABLED,
     botToken: config.TELEGRAM_BOT_TOKEN ?? null,
     inviteCode: config.TELEGRAM_MANAGER_INVITE_CODE ?? null,
+    webhookSecret: config.TELEGRAM_WEBHOOK_SECRET ?? null,
     databaseUrl: config.DATABASE_URL,
   };
 }
@@ -128,7 +143,19 @@ export function readAvitoEnvironment(environment: EnvironmentInput) {
   validateAvitoEnvironment(environment);
   const config = readBaseEnvironment(environment);
   return {
+    enabled: config.AVITO_CHANNEL_ENABLED,
     clientId: config.AVITO_CLIENT_ID!,
     clientSecret: config.AVITO_CLIENT_SECRET!,
+    databaseUrl: config.DATABASE_URL,
+  };
+}
+
+export function readAvitoChannelEnvironment(environment: EnvironmentInput) {
+  const config = readBaseEnvironment(environment);
+  return {
+    enabled: config.AVITO_CHANNEL_ENABLED,
+    clientId: config.AVITO_CLIENT_ID ?? null,
+    clientSecret: config.AVITO_CLIENT_SECRET ?? null,
+    databaseUrl: config.DATABASE_URL,
   };
 }

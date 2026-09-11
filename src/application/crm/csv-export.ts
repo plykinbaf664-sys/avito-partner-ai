@@ -9,6 +9,8 @@ function csvCell(value: unknown): string {
 export function createCrmCsv(records: CrmLeadRecord[]): string {
   const headers = [
     "leadId",
+    "source",
+    "externalLeadId",
     "lastActivityAt",
     "name",
     "phoneNumber",
@@ -31,6 +33,8 @@ export function createCrmCsv(records: CrmLeadRecord[]): string {
   ];
   const rows = records.map((record) => [
     record.leadId,
+    record.source,
+    record.externalLeadId,
     record.lastActivityAt,
     record.name,
     record.phoneNumber,
@@ -55,4 +59,3 @@ export function createCrmCsv(records: CrmLeadRecord[]): string {
     .map((row) => row.map(csvCell).join(","))
     .join("\r\n")}\r\n`;
 }
-

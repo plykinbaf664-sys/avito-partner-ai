@@ -20,6 +20,8 @@ function toRecord(snapshot: CrmLeadSnapshot): CrmLeadRecord {
   const financial = assessFinancialReadiness(lead);
   return {
     leadId: lead.id,
+    source: lead.source,
+    externalLeadId: lead.externalLeadId,
     conversationId: conversation?.id ?? null,
     createdAt: lead.createdAt,
     updatedAt: lead.updatedAt,

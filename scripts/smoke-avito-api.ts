@@ -20,6 +20,29 @@ if (!clientId || !clientSecret) {
     console.log(
       `AVITO_API=PASS http=200 schema=account fields=${account.knownFields.join(",")}`,
     );
+    const chats = await client.listChats({ limit: 5 });
+    console.log(`AVITO_MESSENGER=PASS http=200 chats_checked=${chats.length}`);
+    let messagesPassed = chats.length === 0;
+    let lastMessageError: AvitoApiError | null = null;
+    for (const chat of chats) {
+      try {
+        const messages = await client.listMessages(chat.id, { limit: 1 });
+        console.log(
+          `AVITO_MESSAGES=PASS http=200 messages_checked=${messages.length}`,
+        );
+        messagesPassed = true;
+        break;
+      } catch (error) {
+        if (error instanceof AvitoApiError) lastMessageError = error;
+      }
+    }
+    if (!messagesPassed) {
+      throw lastMessageError ?? new AvitoApiError(
+        "AVITO_MESSAGES_UNAVAILABLE",
+        null,
+        false,
+      );
+    }
   } catch (error) {
     if (error instanceof AvitoApiError) {
       console.error(
@@ -31,4 +54,3 @@ if (!clientId || !clientSecret) {
     process.exitCode = 1;
   }
 }
-

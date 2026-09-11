@@ -57,4 +57,18 @@ describe("system health", () => {
       database: "unavailable",
     });
   });
+
+  it("fails readiness when Avito is enabled without its LLM/channel configuration", async () => {
+    const response = await createReadinessHandler({
+      NODE_ENV: "test",
+      AVITO_CHANNEL_ENABLED: "true",
+      AVITO_CLIENT_ID: "id",
+      AVITO_CLIENT_SECRET: "secret",
+    })();
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      status: "not_ready",
+      database: "unavailable",
+    });
+  });
 });

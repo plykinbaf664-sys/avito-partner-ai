@@ -41,6 +41,7 @@ describe("Avito API client", () => {
 
   it.each([
     [401, "AVITO_UNAUTHORIZED", false],
+    [402, "AVITO_MESSENGER_ACCESS_PAYMENT_REQUIRED", false],
     [403, "AVITO_FORBIDDEN", false],
     [429, "AVITO_RATE_LIMITED", true],
     [503, "AVITO_HTTP_503", true],
@@ -96,5 +97,56 @@ describe("Avito API client", () => {
       retryable: false,
     });
   });
-});
 
+  it("lists chats/messages and sends text with one cached access token", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        access_token: "access-token",
+        token_type: "Bearer",
+        expires_in: 86_400,
+      })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 123 })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ chats: [{ id: "chat-1" }] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ messages: [{
+        id: "message-1",
+        author_id: 456,
+        created: 1_700_000_000,
+        direction: "in",
+        type: "text",
+        content: { text: "Здравствуйте" },
+      }] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: "reply-1" })));
+    const client = new AvitoApiClient(
+      { clientId: "id", clientSecret: "secret" },
+      fetcher,
+    );
+
+    await expect(client.listChats({ limit: 1 })).resolves.toEqual([
+      { id: "chat-1", updatedAtUnix: null },
+    ]);
+    await expect(client.getInboundMessage("chat-1", "message-1")).resolves
+      .toMatchObject({ id: "message-1", text: "Здравствуйте", direction: "in" });
+    await expect(client.sendTextMessage("chat-1", "Ответ")).resolves.toBe("reply-1");
+
+    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(String(fetcher.mock.calls[2]?.[0])).toContain("/messenger/v2/");
+    expect(String(fetcher.mock.calls[3]?.[0])).toContain("/messenger/v3/");
+    expect(fetcher.mock.calls[4]?.[1]?.body).toBe(
+      JSON.stringify({ type: "text", message: { text: "Ответ" } }),
+    );
+  });
+
+  it("rejects invalid outbound text without making an API request", async () => {
+    const fetcher = vi.fn<typeof fetch>();
+    const client = new AvitoApiClient(
+      { clientId: "id", clientSecret: "secret" },
+      fetcher,
+    );
+    await expect(client.sendTextMessage("chat", "")).rejects.toMatchObject({
+      code: "AVITO_INVALID_MESSAGE_TEXT",
+      retryable: false,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});
