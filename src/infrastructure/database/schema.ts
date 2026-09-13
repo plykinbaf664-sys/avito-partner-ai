@@ -27,6 +27,14 @@ import { serviceabilityStatuses } from "@/domain/lead/serviceability";
 import { messageDirections } from "@/domain/message/message";
 import type { ManagerSummary } from "@/domain/handoff/manager-summary";
 
+export const pollingStates = sqliteTable("polling_states", {
+  key: text("key").primaryKey(),
+  startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+  lastCompletedAt: integer("last_completed_at", { mode: "timestamp_ms" }),
+  leaseOwner: text("lease_owner"),
+  leaseUntil: integer("lease_until", { mode: "timestamp_ms" }),
+});
+
 export const leads = sqliteTable(
   "leads",
   {

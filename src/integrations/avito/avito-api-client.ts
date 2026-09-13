@@ -19,6 +19,7 @@ const avitoAccountSchema = z.object({
 const avitoChatSchema = z.object({
   id: externalIdSchema,
   updated: z.number().int().nonnegative().optional(),
+  last_message: z.unknown().optional(),
 }).passthrough();
 const avitoChatsResponseSchema = z.object({
   chats: z.array(avitoChatSchema).max(100),
@@ -59,6 +60,7 @@ export interface AvitoAccountProbe {
 export interface AvitoChat {
   id: string;
   updatedAtUnix: number | null;
+  lastMessage?: AvitoMessage;
 }
 
 export interface AvitoMessage {
@@ -199,10 +201,18 @@ export class AvitoApiClient {
     if (!parsed.success) {
       throw new AvitoApiError("AVITO_INVALID_CHATS_RESPONSE", 200, false);
     }
-    return parsed.data.chats.map((chat) => ({
-      id: stringifyId(chat.id),
-      updatedAtUnix: chat.updated ?? null,
-    }));
+    return parsed.data.chats.map((chat) => {
+      const last = avitoMessageSchema.safeParse(chat.last_message);
+      return {
+        id: stringifyId(chat.id),
+        updatedAtUnix: chat.updated ?? null,
+        ...(last.success ? { lastMessage: {
+          id: stringifyId(last.data.id), authorId: stringifyId(last.data.author_id),
+          createdAtUnix: last.data.created, direction: last.data.direction,
+          type: last.data.type, text: last.data.content.text ?? null,
+        } } : {}),
+      };
+    });
   }
 
   async listMessages(

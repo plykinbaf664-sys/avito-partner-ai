@@ -149,4 +149,21 @@ describe("Avito API client", () => {
     });
     expect(fetcher).not.toHaveBeenCalled();
   });
+
+  it("validates and normalizes last_message from the authenticated chat list", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ access_token: "test-token", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(Response.json({ id: 123 }))
+      .mockResolvedValueOnce(Response.json({ chats: [
+        { id: "chat", updated: 1, last_message: { id: "preview", author_id: 456,
+          created: 1789296591, direction: "in", type: "text", content: { text: "Тест" } } },
+        { id: "invalid", last_message: { id: "bad", direction: "in" } },
+      ] }));
+    const client = new AvitoApiClient({ clientId: "id", clientSecret: "secret" }, fetcher);
+    expect(await client.listChats()).toEqual([
+      { id: "chat", updatedAtUnix: 1, lastMessage: { id: "preview", authorId: "456",
+        createdAtUnix: 1789296591, direction: "in", type: "text", text: "Тест" } },
+      { id: "invalid", updatedAtUnix: null },
+    ]);
+  });
 });

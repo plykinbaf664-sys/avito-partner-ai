@@ -1,0 +1,40 @@
+import { createNaturalResponseGenerator } from "@/application/conversation/generate-natural-response";
+import { createMessageExtractor } from "@/application/extraction/extract-message";
+import { ConsoleStructuredLogger } from "@/application/observability/structured-logger";
+import { createIncomingEventProcessor } from "@/application/workflows/process-incoming-event";
+import { createAvitoMessagePoller } from "@/application/workflows/poll-avito-messages";
+import { readAvitoChannelEnvironment, readInboundEnvironment, readTelegramEnvironment } from "@/config/environment";
+import { SqlitePersistence } from "@/infrastructure/database/sqlite-persistence";
+import { AnthropicLLMProvider } from "@/integrations/anthropic/anthropic-llm-provider";
+import { readAnthropicConfig } from "@/integrations/anthropic/config";
+import { TelegramManagerNotificationProvider } from "@/integrations/telegram/telegram-manager-notification-provider";
+import { AvitoApiClient } from "./avito-api-client";
+import { AvitoOutboundMessageProvider } from "./avito-outbound-message-provider";
+
+export async function createRuntimeAvitoPolling() {
+  const avito = readAvitoChannelEnvironment(process.env);
+  if (!avito.enabled || !avito.clientId || !avito.clientSecret) {
+    throw new Error("AVITO_POLL_CONFIGURATION_REQUIRED");
+  }
+  const inbound = readInboundEnvironment(process.env);
+  const telegram = readTelegramEnvironment(process.env);
+  const llmProvider = new AnthropicLLMProvider(readAnthropicConfig(process.env));
+  const persistence = await SqlitePersistence.createMigrated(inbound.DATABASE_URL);
+  const logger = new ConsoleStructuredLogger();
+  const client = new AvitoApiClient({ clientId: avito.clientId, clientSecret: avito.clientSecret });
+  const processIncomingEvent = createIncomingEventProcessor({
+    persistence,
+    extractMessage: createMessageExtractor({ llmProvider }),
+    generateNaturalResponse: createNaturalResponseGenerator({ llmProvider }),
+    outboundProvider: new AvitoOutboundMessageProvider(client),
+    managerNotificationProvider: telegram.enabled
+      ? new TelegramManagerNotificationProvider({ botToken: telegram.botToken! }, persistence)
+      : undefined,
+    logger,
+  });
+  return {
+    pollAvitoMessages: createAvitoMessagePoller({ client, persistence,
+      stateRepository: persistence.pollingStates, processIncomingEvent, logger }),
+    close: () => persistence.close(),
+  };
+}

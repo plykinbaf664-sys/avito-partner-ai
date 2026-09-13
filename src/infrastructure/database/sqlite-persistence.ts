@@ -45,6 +45,8 @@ import type { TelegramManagerDelivery } from "@/domain/notification/telegram-man
 import type { TelegramManagerRecipient } from "@/domain/notification/telegram-manager-recipient";
 
 import * as schema from "./schema";
+import type { PollingStateRepository } from "@/application/ports/polling-state";
+import { DrizzlePollingStateRepository } from "./polling-state-repository";
 
 type Database = LibSQLDatabase<typeof schema>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -611,6 +613,7 @@ class DrizzleIncomingEventRepository implements IncomingEventRepository {
     staleBefore: Date,
     maxAttempts: number,
     limit: number,
+    source?: string,
   ): Promise<IncomingEvent[]> {
     return this.database
       .select()
@@ -618,6 +621,7 @@ class DrizzleIncomingEventRepository implements IncomingEventRepository {
       .where(
         and(
           lte(schema.incomingEvents.receivedAt, now),
+          source ? eq(schema.incomingEvents.source, source) : undefined,
           lt(
             schema.incomingEvents.processingAttempts,
             maxAttempts,
@@ -782,6 +786,7 @@ function serializeRepository<T extends object>(
 }
 
 export class SqlitePersistence implements Persistence {
+  readonly pollingStates: PollingStateRepository;
   readonly leads: LeadRepository;
   readonly conversations: ConversationRepository;
   readonly messages: MessageRepository;
@@ -800,6 +805,7 @@ export class SqlitePersistence implements Persistence {
     const repositories = createRepositoryContext(database);
     const serialize = <Result>(operation: () => Promise<Result>) =>
       this.serialize(operation);
+    this.pollingStates = serializeRepository(new DrizzlePollingStateRepository(database), serialize);
     this.leads = serializeRepository(repositories.leads, serialize);
     this.conversations = serializeRepository(repositories.conversations, serialize);
     this.messages = serializeRepository(repositories.messages, serialize);

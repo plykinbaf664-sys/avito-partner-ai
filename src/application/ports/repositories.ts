@@ -121,6 +121,7 @@ export interface IncomingEventRepository {
     staleBefore: Date,
     maxAttempts: number,
     limit: number,
+    source?: string,
   ): Promise<IncomingEvent[]>;
   findByIdentity(
     source: string,
