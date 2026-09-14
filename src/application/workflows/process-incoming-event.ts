@@ -41,6 +41,8 @@ import {
 import { answerFromKnowledgeBase } from "../../domain/knowledge/knowledge-base";
 import {
   evaluateQualification,
+  hasConfirmedPhone,
+  qualificationContextForLead,
   type QualificationDecision,
   type QualificationNextAction,
 } from "../../domain/qualification/qualification-policy";
@@ -357,14 +359,12 @@ function buildResult({
   outOfOrderIgnored?: boolean;
 }): ProcessIncomingEventResult {
   const decision = suppliedDecision ?? (lead
-    ? evaluateQualification(lead, {
-        wantsHuman:
-          extraction?.signals.wantsHuman === true ||
-          conversation?.state === "HANDOFF",
+    ? evaluateQualification(lead, qualificationContextForLead(lead, {
+        wantsHuman: extraction?.signals.wantsHuman === true,
         unknownBusinessQuestion:
           extraction !== null &&
           answerFromKnowledgeBase(extraction).unresolvedQuestions.length > 0,
-      })
+      }))
     : null);
   const assessedNeeds = lead ? assessInformationNeeds(lead) : emptyNeeds();
   const needs =
@@ -669,12 +669,10 @@ export function createIncomingEventProcessor({
         evaluatedAt,
       );
       const knowledge = answerFromKnowledgeBase(extracted.extraction);
-      const decision = evaluateQualification(evaluatedLead, {
-        wantsHuman:
-          extracted.extraction.signals.wantsHuman ||
-          currentConversation.state === "HANDOFF",
+      const decision = evaluateQualification(evaluatedLead, qualificationContextForLead(evaluatedLead, {
+        wantsHuman: extracted.extraction.signals.wantsHuman,
         unknownBusinessQuestion: knowledge.unresolvedQuestions.length > 0,
-      });
+      }));
       evaluatedLead = {
         ...evaluatedLead,
         qualificationStatus: decision.status,
@@ -764,12 +762,10 @@ export function createIncomingEventProcessor({
           extracted.extraction,
           now,
         );
-        const transactionDecision = evaluateQualification(transactionLead, {
-          wantsHuman:
-            extracted.extraction.signals.wantsHuman ||
-            storedConversation.state === "HANDOFF",
+        const transactionDecision = evaluateQualification(transactionLead, qualificationContextForLead(transactionLead, {
+          wantsHuman: extracted.extraction.signals.wantsHuman,
           unknownBusinessQuestion: knowledge.unresolvedQuestions.length > 0,
-        });
+        }));
         transactionLead = {
           ...transactionLead,
           qualificationStatus: transactionDecision.status,
@@ -801,11 +797,13 @@ export function createIncomingEventProcessor({
               : transactionDecision.shouldHandoffToManager
                 ? "QUALIFIED"
                 : stateForInformationNeed(transactionNextInformationNeed);
+        // Legacy premature handoffs without a phone must resume qualification.
+        const resumeIncompleteHandoff = storedConversation.state === "HANDOFF" && !hasConfirmedPhone(storedLead);
         const nextState =
-          storedConversation.state === "HANDOFF" ||
+          (storedConversation.state === "HANDOFF" && !resumeIncompleteHandoff) ||
           storedConversation.state === "CLOSED"
             ? storedConversation.state
-            : transitionConversation(storedConversation.state, targetState);
+            : transitionConversation(resumeIncompleteHandoff ? "QUALIFYING" : storedConversation.state, targetState);
         const explainedKnowledge = [
           ...new Set([
             ...parseStoredKnowledgeIds(storedConversation.summary),
@@ -887,6 +885,15 @@ export function createIncomingEventProcessor({
                 idempotencyKey,
               )
             )?.id ?? null;
+        } else if (transactionDecision.shouldHandoffToManager && managerSummary) {
+          // Refresh only an untouched legacy queue entry after collecting its missing phone.
+          // Never create another handoff or reset an attempted/sent notification.
+          const existing = await repositories.managerNotifications.findByIdempotencyKey(`manager-handoff:${storedLead.id}`);
+          if (existing?.deliveryStatus === "PENDING" && existing.deliveryAttempts === 0 && !existing.summary.phoneNumber) {
+            await repositories.managerNotifications.update({ ...existing, summary: managerSummary,
+              qualificationStatus: transactionDecision.status, updatedAt: now });
+            managerNotificationId = existing.id;
+          }
         }
 
         const updatedConversation: Conversation = {

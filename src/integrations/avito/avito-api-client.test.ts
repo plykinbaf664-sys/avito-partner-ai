@@ -150,6 +150,59 @@ describe("Avito API client", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [403, "AVITO_FORBIDDEN", false],
+    [429, "AVITO_RATE_LIMITED", true],
+    [500, "AVITO_HTTP_500", true],
+    [503, "AVITO_HTTP_503", true],
+  ])("maps outbound HTTP %s without blindly resending the POST", async (status, code, retryable) => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ access_token: "test-token", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(Response.json({ id: 123 }))
+      .mockResolvedValueOnce(Response.json({ message: "private provider details" }, { status }));
+    const client = new AvitoApiClient({ clientId: "id", clientSecret: "secret" }, fetcher);
+    await expect(client.sendTextMessage("chat", "test")).rejects.toMatchObject({ code, status, retryable });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([200, 401])("refreshes an expired token once on outbound 401 (final HTTP %s)", async (status) => {
+    const token = () => Response.json({ access_token: "test-token", token_type: "Bearer", expires_in: 3600 });
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(token())
+      .mockResolvedValueOnce(Response.json({ id: 123 }))
+      .mockResolvedValueOnce(Response.json({}, { status: 401 }))
+      .mockResolvedValueOnce(token())
+      .mockResolvedValueOnce(Response.json({ id: "sent" }, { status }));
+    const client = new AvitoApiClient({ clientId: "id", clientSecret: "secret" }, fetcher);
+    if (status === 200) await expect(client.sendTextMessage("chat", "test")).resolves.toBe("sent");
+    else await expect(client.sendTextMessage("chat", "test")).rejects.toMatchObject({ code: "AVITO_UNAUTHORIZED", retryable: false });
+    expect(fetcher).toHaveBeenCalledTimes(5);
+  });
+
+  it("bounds the outbound request with a timeout and does not automatically resend", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ access_token: "test-token", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(Response.json({ id: 123 }))
+      .mockImplementationOnce(async (_url, init) => new Promise<Response>((_resolve, reject) => {
+        init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
+      }));
+    const client = new AvitoApiClient({ clientId: "id", clientSecret: "secret", timeoutMs: 20 }, fetcher);
+    await expect(client.sendTextMessage("chat", "test")).rejects.toMatchObject({ code: "AVITO_NETWORK_ERROR", retryable: true });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps a response-body timeout retryable instead of reporting a malformed success", async () => {
+    const response = new Response();
+    vi.spyOn(response, "json").mockRejectedValue(new DOMException("private timeout details", "TimeoutError"));
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ access_token: "test-token", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(Response.json({ id: 123 }))
+      .mockResolvedValueOnce(response);
+    const client = new AvitoApiClient({ clientId: "id", clientSecret: "secret" }, fetcher);
+    await expect(client.sendTextMessage("chat", "test")).rejects.toMatchObject({ code: "AVITO_NETWORK_ERROR", retryable: true });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
   it("validates and normalizes last_message from the authenticated chat list", async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ access_token: "test-token", token_type: "Bearer", expires_in: 3600 }))

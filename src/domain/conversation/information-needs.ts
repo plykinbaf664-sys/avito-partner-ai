@@ -1,6 +1,7 @@
 import { LAUNCH_COST_REFERENCE } from "../economics/economics-calculator";
 import type { Lead } from "../lead/lead";
 import { assessFinancialReadiness } from "../qualification/financial-readiness";
+import { hasConfirmedPhone } from "../qualification/qualification-policy";
 import type { ConversationState } from "./conversation-state";
 
 export const informationNeeds = [
@@ -45,7 +46,7 @@ function isKnown(lead: Lead, need: InformationNeed): boolean {
         (lead.budget !== null && lead.budgetConfirmed)
       );
     case "PHONE_NUMBER":
-      return lead.phoneNumber !== null && lead.phoneConfirmed;
+      return hasConfirmedPhone(lead);
     case "ADDITIONAL_EXPENSES":
       return ["HIGH", "READY", "INCOMPATIBLE"].includes(
         assessFinancialReadiness(lead).financialReadiness,
@@ -80,6 +81,9 @@ function isKnown(lead: Lead, need: InformationNeed): boolean {
 }
 
 function criticalInformationNeedsFor(lead: Lead): InformationNeed[] {
+  if (!hasConfirmedPhone(lead) && ["PHONE_UNKNOWN", "USER_REQUESTED_HUMAN", "UNKNOWN_BUSINESS_QUESTION"].includes(lead.qualificationReason ?? "")) {
+    return ["PHONE_NUMBER"];
+  }
   if (lead.segment === "INVESTOR") {
     const needs: InformationNeed[] = [
       "AVAILABLE_CAPITAL",

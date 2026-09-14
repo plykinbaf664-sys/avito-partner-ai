@@ -10,6 +10,25 @@ npm run poll:avito
 npm run poll:avito -- --continuous --interval-ms 10000
 ```
 
+For a manual check in the previously used test chat, start this command and wait
+for PASS before sending a **new** inbound from the other Avito account:
+
+```sh
+npm run poll:avito -- --continuous --interval-ms 10000 --chat-id u2i-MnHIHVe2FTkop58WQbBPjw
+```
+
+`--chat-id` (or `AVITO_POLL_CHAT_ID`) restricts both API message intake and durable
+event recovery to that chat. It uses its own activation/cursor/lease in the same
+SQLite database, leaving the account-wide cursor unchanged. Event/message
+deduplication remains shared with ordinary polling and webhooks. Without this
+option polling processes all eligible chats. Stop other account-wide pollers
+before a manual test if they are running.
+
+The read-only check `npm run smoke:avito -- --chat-id <chat-id>` verifies all five
+sampled histories plus the specified chat. Any sampled failure fails the smoke;
+an accessible unrelated chat can no longer hide a 402. `AVITO_TEST_CHAT_ID` is
+also supported by this smoke command.
+
 The CLI applies additive Drizzle migrations before polling. No Next.js server,
 webhook, production scheduler or new worker service is required. Ctrl+C finishes
 the active sweep, releases its lease and closes SQLite. Continuous mode schedules
@@ -82,6 +101,35 @@ messages were checked, and `skippedOldChats` counts chats outside the window.
 previews during a history failure. `avito.poll.window` records the account ID,
 activation, cursor and effective time window; `avito.poll.history_unavailable`
 records chat ID and the provider HTTP status without message text.
+`avito.poll.new_message` and `avito.poll.duplicate` link the provider message ID
+(`externalEventId`) with the internal event ID. During polling,
+`avito.outbound.sent` includes `providerMessageId`, `conversationId`, `chatId`
+and `latencyMs`; `avito.outbound.failed` includes sanitized error code, HTTP status,
+retryability and latency. The existing `outbound.sent` event confirms the SQLite
+delivery update. A failed/uncertain POST is not blindly retried by polling.
+
+## Post-upgrade verification, 2026-09-14
+
+OAuth returned HTTP 200 with `expires_in=86400`; the authenticated account is
+still `439666639`. The chat list returned 84 chats. All 84 message-history probes
+returned HTTP 200, including `u2i-MnHIHVe2FTkop58WQbBPjw` (4 inbound messages).
+HTTP 402 was not reproduced by these read-only calls.
+
+A normal poll scoped to the test chat returned PASS and saw 84 chats. Four
+continuous sweeps started at 14:00:00.356Z, 14:00:10.364Z, 14:00:20.378Z and
+14:00:30.388Z, all PASS. No new test-chat input arrived and no message was sent.
+Replaying the previously processed real message ID returned duplicate with zero
+extraction calls and an unchanged processing-attempt count of one.
+
+A synthetic message with the live configured Claude model completed extraction,
+the existing Conversation Engine, response creation and CRM lookup in isolated
+SQLite in 10.5 seconds. Its outbound stayed PENDING because no outbound provider
+was enabled for that synthetic probe. This is readiness evidence, not a live
+Avito delivery test.
+
+The old outbound failure from September 13 is retained, not reset or resent.
+Read access does not prove live send permission: final live delivery and its
+provider message ID must be checked with the new manual inbound above.
 
 ## Real-account verification, 2026-09-13
 

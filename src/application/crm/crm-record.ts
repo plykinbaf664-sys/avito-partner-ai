@@ -36,9 +36,11 @@ export interface CrmLeadRecord {
   goal: Lead["primaryGoal"];
   launchTiming: Lead["launchTiming"];
   qualificationStatus: Lead["qualificationStatus"];
+  qualificationReason: Lead["qualificationReason"];
   buyingIntent: string | null;
   financialReadiness: FinancialReadiness;
   shouldHandoffToManager: boolean;
+  waitingForPhone: boolean;
   handoffAt: Date | null;
   objections: string[];
   barriers: Array<NonNullable<Lead["primaryFear"]>>;

@@ -4,6 +4,8 @@ import type {
 } from "@/application/ports/repositories";
 import { assessFinancialReadiness } from "@/domain/qualification/financial-readiness";
 import { normalizePhoneNumber } from "@/domain/lead/phone-number";
+import { assessLeadSegment } from "@/domain/lead/lead-segment";
+import { evaluateQualification, hasConfirmedPhone } from "@/domain/qualification/qualification-policy";
 import type {
   CrmLeadDetails,
   CrmLeadFilter,
@@ -18,6 +20,13 @@ export const CRM_MAX_PAGE = 1_000_000;
 function toRecord(snapshot: CrmLeadSnapshot): CrmLeadRecord {
   const { lead, conversation, managerNotification } = snapshot;
   const financial = assessFinancialReadiness(lead);
+  const segment = assessLeadSegment(lead);
+  const reassessed = lead.qualificationStatus === "HANDOFF" || lead.qualificationReason === "PHONE_UNKNOWN"
+    ? evaluateQualification({ ...lead, segment: segment.segment }) : null;
+  const qualificationStatus = reassessed?.status ?? lead.qualificationStatus;
+  const waitingForPhone = !hasConfirmedPhone(lead) &&
+    (conversation?.pendingInformationNeed === "PHONE_NUMBER" || lead.qualificationStatus === "HANDOFF" ||
+      ["HOT", "PRIORITY", "QUALIFIED"].includes(qualificationStatus));
   return {
     leadId: lead.id,
     source: lead.source,
@@ -28,8 +37,8 @@ function toRecord(snapshot: CrmLeadSnapshot): CrmLeadRecord {
     lastActivityAt: snapshot.lastActivityAt,
     name: lead.name,
     phoneNumber: lead.phoneNumber,
-    segment: lead.segment,
-    segmentConfidence: lead.segmentConfidence,
+    segment: segment.segment,
+    segmentConfidence: segment.confidence,
     city: lead.city,
     availableCapital: lead.availableCapital,
     entryBudget: lead.entryBudget,
@@ -38,10 +47,12 @@ function toRecord(snapshot: CrmLeadSnapshot): CrmLeadRecord {
     scalingPotentialUnits: lead.scalingPotentialUnits,
     goal: lead.primaryGoal,
     launchTiming: lead.launchTiming,
-    qualificationStatus: lead.qualificationStatus,
+    qualificationStatus,
+    qualificationReason: reassessed?.reason ?? lead.qualificationReason,
     buyingIntent: lead.buyingIntent,
     financialReadiness: financial.financialReadiness,
-    shouldHandoffToManager: lead.handoffAt !== null,
+    shouldHandoffToManager: lead.handoffAt !== null && hasConfirmedPhone(lead),
+    waitingForPhone,
     handoffAt: lead.handoffAt,
     objections: lead.objections,
     barriers: [lead.primaryFear, lead.secondaryFear].filter(

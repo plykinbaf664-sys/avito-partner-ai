@@ -49,7 +49,7 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
   });
   afterEach(() => persistence.close());
 
-  function harness(database = persistence) {
+  function harness(database = persistence, chatId?: string) {
     const client = {
       getAuthenticatedAccount: vi.fn().mockResolvedValue({ id: "owner" }),
       listChats: vi.fn().mockResolvedValue([{ id: "chat", updatedAtUnix: null }]),
@@ -61,7 +61,7 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
       extractMessage, now: () => current,
       outboundProvider: new AvitoOutboundMessageProvider(client as unknown as AvitoApiClient),
     });
-    const poll = createAvitoMessagePoller({ client, persistence: database,
+    const poll = createAvitoMessagePoller({ client, persistence: database, chatId,
       stateRepository: database.pollingStates, processIncomingEvent, clock: () => current });
     return { client, extractMessage, processIncomingEvent, poll };
   }
@@ -76,6 +76,29 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     expect(messages.map((m) => m.direction)).toEqual(["INBOUND", "OUTBOUND"]);
     expect(messages[1]).toMatchObject({ deliveryStatus: "SENT", externalMessageId: "out-1" });
     expect(h.client.sendTextMessage).toHaveBeenCalledWith("chat", expect.any(String));
+  });
+
+  it("isolates a manual chat, including recovery, without advancing the account cursor", async () => {
+    const h = harness(persistence, "chat");
+    await persistence.pollingStates.initialize(`${key}:chat:chat`, start);
+    await createIncomingEventAcceptor({ persistence })({ source: "AVITO",
+      externalEventId: "foreign-pending", externalLeadId: "other-chat",
+      messageId: "foreign-pending", text: message().text!, receivedAt: start });
+    h.client.listChats.mockResolvedValue([
+      { id: "other-chat", updatedAtUnix: null, lastMessage: message("foreign-new") },
+      { id: "chat", updatedAtUnix: null, lastMessage: message() },
+    ]);
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", chats: 2,
+      checkedChats: 1, accepted: 1, processed: 1 });
+    expect(h.client.listMessages).toHaveBeenCalledExactlyOnceWith("chat", { limit: 100, offset: 0 });
+    expect(await persistence.incomingEvents.findByIdentity("AVITO", "foreign-new")).toBeNull();
+    expect(await persistence.incomingEvents.findByIdentity("AVITO", "foreign-pending"))
+      .toMatchObject({ status: "RECEIVED", processingAttempts: 0 });
+    expect((await persistence.pollingStates.initialize(key, current)).lastCompletedAt).toBeNull();
+    expect((await persistence.pollingStates.initialize(`${key}:chat:chat`, current)).lastCompletedAt).toEqual(current);
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", accepted: 0, processed: 0 });
+    expect(h.extractMessage).toHaveBeenCalledTimes(1);
+    expect(h.client.sendTextMessage).toHaveBeenCalledExactlyOnceWith("chat", expect.any(String));
   });
 
   it("ignores old messages and includes every message on the time boundary", async () => {

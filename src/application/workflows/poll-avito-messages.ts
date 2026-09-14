@@ -39,15 +39,18 @@ export interface AvitoPollResult {
 
 export function createAvitoMessagePoller({
   client, persistence, stateRepository, processIncomingEvent,
+  chatId: requestedChatId,
   logger = silentLogger, clock = () => new Date(),
 }: {
   client: Pick<AvitoApiClient, "getAuthenticatedAccount" | "listChats" | "listMessages">;
   persistence: Persistence;
   stateRepository: PollingStateRepository;
   processIncomingEvent: (input: IncomingPartnerEvent) => Promise<ProcessIncomingEventResult>;
+  chatId?: string;
   logger?: StructuredLogger;
   clock?: () => Date;
 }) {
+  const chatId = requestedChatId === undefined ? undefined : z.string().trim().min(1).max(255).parse(requestedChatId);
   const accept = createIncomingEventAcceptor({ persistence, logger, now: clock });
   const channel = new AvitoInboundChannel();
 
@@ -92,7 +95,7 @@ export function createAvitoMessagePoller({
 
     try {
       const account = await client.getAuthenticatedAccount();
-      key = `avito-messages:${account.id}`;
+      key = `avito-messages:${account.id}${chatId ? `:chat:${chatId}` : ""}`;
       await stateRepository.initialize(key, new Date(Math.floor(now.getTime() / 1_000) * 1_000));
       const at = clock();
       acquired = await stateRepository.acquire(key, owner, at, new Date(at.getTime() + LEASE_MS));
@@ -105,6 +108,7 @@ export function createAvitoMessagePoller({
       const since = Math.max(state.startedAt.getTime(),
         (state.lastCompletedAt?.getTime() ?? state.startedAt.getTime()) - OVERLAP_MS);
       logger.info("avito.poll.window", { source: "AVITO", accountId: account.id,
+        chatId: chatId ?? null,
         startedAt: state.startedAt.toISOString(),
         lastCompletedAt: state.lastCompletedAt?.toISOString() ?? null,
         since: new Date(since).toISOString(), now: now.toISOString() });
@@ -115,7 +119,7 @@ export function createAvitoMessagePoller({
       );
       for (const event of pending) {
         const stored = storedInputSchema.safeParse(event.payload);
-        if (stored.success) {
+        if (stored.success && (!chatId || stored.data.normalizedInput.externalLeadId === chatId)) {
           await processOne({ ...stored.data.normalizedInput,
             receivedAt: new Date(stored.data.normalizedInput.receivedAt) });
         }
@@ -131,6 +135,7 @@ export function createAvitoMessagePoller({
           if (seenChats.has(chat.id)) continue;
           seenChats.add(chat.id);
           result.chats += 1;
+          if (chatId && chat.id !== chatId) continue;
           // Never stop chat pagination based on ordering of the chat list.
           const latestTime = Math.max(chat.updatedAtUnix ?? 0, chat.lastMessage?.createdAtUnix ?? 0);
           if (latestTime > 0 && latestTime * 1_000 < since) {
@@ -193,6 +198,10 @@ export function createAvitoMessagePoller({
             await assertLease();
             const input = incomingPartnerEventSchema.parse(channel.fromVerifiedMessage(chat.id, message));
             const accepted = await accept(input);
+            logger.info(accepted.created ? "avito.poll.new_message" : "avito.poll.duplicate", {
+              source: "AVITO", chatId: chat.id, externalEventId: input.externalEventId,
+              eventId: accepted.event.id,
+            });
             if (accepted.created) {
               result.accepted += 1;
               if (!messagesComplete && message.id === chat.lastMessage?.id) result.previewAccepted += 1;

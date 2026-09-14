@@ -10,7 +10,8 @@ import {
   money,
   notificationLabel,
   segmentLabels,
-  statusLabels,
+  qualificationLabel,
+  handoffLabel,
 } from "../crm-format";
 import { requireCrmPageAccess } from "../require-crm-page-access";
 
@@ -73,10 +74,11 @@ export default async function CrmLeadPage({
         <section>
           <h2 className="mb-3 text-lg font-medium">Квалификация и передача</h2>
           <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <Field label="Статус" value={statusLabels[record.qualificationStatus] ?? record.qualificationStatus} />
-            <Field label="Причина" value={record.lead.qualificationReason ?? ""} />
+            <Field label="Квалификация" value={qualificationLabel(record)} />
+            <Field label="Причина" value={record.qualificationReason ?? ""} />
             <Field label="Состояние диалога" value={record.conversationState ?? ""} />
-            <Field label="Handoff" value={record.handoffAt ? dateTime(record.handoffAt) : ""} />
+            <Field label="Handoff" value={handoffLabel(record)} />
+            <Field label="Дата передачи" value={dateTime(record.handoffAt)} />
             <Field label="Telegram" value={notificationLabel(record)} />
             <Field label="Ошибка доставки" value={record.managerNotificationErrorCode ?? ""} />
             <Field label="Барьеры" value={record.barriers.join(", ")} />

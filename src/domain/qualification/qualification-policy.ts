@@ -2,6 +2,7 @@ import type { Lead } from "../lead/lead";
 import type { QualificationStatus } from "../lead/qualification-status";
 import { SEGMENTATION_REFERENCE } from "../lead/lead-segment";
 import { assessFinancialReadiness } from "./financial-readiness";
+import { normalizePhoneNumber } from "../lead/phone-number";
 
 export const PARTNER_QUALIFICATION_POLICY = Object.freeze({
   smallBusinessEntryCapitalReference:
@@ -110,6 +111,18 @@ export interface QualificationContext {
   unknownBusinessQuestion?: boolean;
 }
 
+export function hasConfirmedPhone(facts: Pick<Lead, "phoneNumber" | "phoneConfirmed">): boolean {
+  return facts.phoneConfirmed && normalizePhoneNumber(facts.phoneNumber ?? "") !== null;
+}
+
+export function qualificationContextForLead(lead: Lead, current: QualificationContext): QualificationContext {
+  return {
+    wantsHuman: current.wantsHuman || lead.buyingIntent === "WANTS_HUMAN",
+    unknownBusinessQuestion: current.unknownBusinessQuestion ||
+      (lead.qualificationStatus !== "HANDOFF" && lead.qualificationReason === "UNKNOWN_BUSINESS_QUESTION"),
+  };
+}
+
 function unique<T>(values: T[]): T[] {
   return [...new Set(values)];
 }
@@ -176,17 +189,19 @@ export function evaluateQualification(
   }
 
   if (context.wantsHuman || context.unknownBusinessQuestion) {
+    const business = evaluateQualification(facts);
+    const canHandoff = hasConfirmedPhone(facts);
     const reason = context.wantsHuman
       ? "USER_REQUESTED_HUMAN"
       : "UNKNOWN_BUSINESS_QUESTION";
     return {
-      status: "HANDOFF",
+      ...business,
       reason,
-      reasonCodes: [reason],
+      reasonCodes: unique([reason, ...business.reasonCodes]),
       blockingReasons: [],
       weakSignals: [],
-      shouldHandoffToManager: true,
-      nextAction: "HANDOFF_TO_MANAGER",
+      shouldHandoffToManager: canHandoff,
+      nextAction: canHandoff ? "HANDOFF_TO_MANAGER" : "CONTINUE_QUALIFICATION",
     };
   }
 
@@ -266,9 +281,6 @@ export function evaluateQualification(
   ) {
     informationGaps.push("ADDITIONAL_EXPENSES_CONTEXT_UNKNOWN");
   }
-  if (facts.phoneNumber === null || !facts.phoneConfirmed) {
-    informationGaps.push("PHONE_UNKNOWN");
-  }
 
   if (informationGaps.length > 0) {
     return {
@@ -308,27 +320,28 @@ export function evaluateQualification(
           PARTNER_QUALIFICATION_POLICY.investorScaleReference);
     return {
       status: strongInvestorProfile ? "PRIORITY" : "HOT",
-      reason: strongInvestorProfile
+      reason: !hasConfirmedPhone(facts) ? "PHONE_UNKNOWN" : strongInvestorProfile
         ? "INVESTOR_SCALE_CONFIRMED"
         : "INVESTOR_READY",
       reasonCodes: unique([
+        ...(!hasConfirmedPhone(facts) ? ["PHONE_UNKNOWN" as const] : []),
         strongInvestorProfile ? "INVESTOR_SCALE_CONFIRMED" : "INVESTOR_READY",
         ...weakSignals,
       ]),
       blockingReasons: [],
       weakSignals: unique(weakSignals),
-      shouldHandoffToManager: true,
-      nextAction: "HANDOFF_TO_MANAGER",
+      shouldHandoffToManager: hasConfirmedPhone(facts),
+      nextAction: hasConfirmedPhone(facts) ? "HANDOFF_TO_MANAGER" : "CONTINUE_QUALIFICATION",
     };
   }
 
   return {
     status: weakSignals.length > 0 ? "WARM" : "HOT",
-    reason: weakSignals[0] ?? "SMALL_BUSINESS_READY",
-    reasonCodes: unique(["SMALL_BUSINESS_READY", ...weakSignals]),
+    reason: !hasConfirmedPhone(facts) ? "PHONE_UNKNOWN" : weakSignals[0] ?? "SMALL_BUSINESS_READY",
+    reasonCodes: unique(["SMALL_BUSINESS_READY", ...weakSignals, ...(!hasConfirmedPhone(facts) ? ["PHONE_UNKNOWN" as const] : [])]),
     blockingReasons: [],
     weakSignals: unique(weakSignals),
-    shouldHandoffToManager: true,
-    nextAction: "HANDOFF_TO_MANAGER",
+    shouldHandoffToManager: hasConfirmedPhone(facts),
+    nextAction: hasConfirmedPhone(facts) ? "HANDOFF_TO_MANAGER" : "CONTINUE_QUALIFICATION",
   };
 }

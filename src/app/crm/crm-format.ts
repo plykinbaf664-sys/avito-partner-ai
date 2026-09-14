@@ -9,7 +9,7 @@ export const statusLabels: Record<string, string> = {
   HOT: "Горячий",
   PRIORITY: "Приоритетный",
   QUALIFIED: "Квалифицирован",
-  HANDOFF: "Передан менеджеру",
+  HANDOFF: "Требуется информация",
   NO_FIT: "Не подходит",
   CLOSED: "Закрыт",
   NURTURE: "Отложен",
@@ -46,12 +46,25 @@ export const launchTimingLabels: Record<string, string> = {
 
 export const buyingIntentLabels: Record<string, string> = {
   DECLINED: "Отказался",
+  GENERAL_INTEREST: "Интересуется запуском",
+  WANTS_HUMAN: "Просит связаться",
 };
+
+export function qualificationLabel(record: CrmLeadRecord): string {
+  return record.waitingForPhone && ["HOT", "PRIORITY", "QUALIFIED"].includes(record.qualificationStatus)
+    ? "Квалифицирован" : statusLabels[record.qualificationStatus] ?? record.qualificationStatus;
+}
+
+export function handoffLabel(record: CrmLeadRecord): string {
+  if (record.handoffAt && !record.shouldHandoffToManager) return "Передан ранее без телефона";
+  if (record.shouldHandoffToManager) return "Передан менеджеру";
+  return record.waitingForPhone ? "Ожидает телефон" : "Не передан";
+}
 
 export function notificationLabel(record: CrmLeadRecord): string {
   return record.managerNotificationStatus
     ? notificationLabels[record.managerNotificationStatus]
-    : "Не требовалось";
+    : "Не отправлялось";
 }
 
 export function money(value: number | null): string {

@@ -92,6 +92,12 @@ function readyInvestor(
 }
 
 describe("segment-aware partner qualification", () => {
+  it("retains investor priority while waiting for a valid confirmed phone", () => {
+    for (const phoneNumber of [null, "invalid", ""]) {
+      expect(evaluateQualification(readyInvestor({ phoneNumber, phoneConfirmed: true })))
+        .toMatchObject({ status: "PRIORITY", reason: "PHONE_UNKNOWN", shouldHandoffToManager: false });
+    }
+  });
   it("keeps unknown facts in information gathering", () => {
     expect(evaluateQualification(facts())).toMatchObject({
       status: "NEEDS_MORE_INFO",
@@ -115,7 +121,7 @@ describe("segment-aware partner qualification", () => {
       readySmallBusiness({ phoneNumber: null, phoneConfirmed: false }),
     );
     expect(decision).toMatchObject({
-      status: "NEEDS_MORE_INFO",
+      status: "HOT",
       reason: "PHONE_UNKNOWN",
       shouldHandoffToManager: false,
       blockingReasons: [],

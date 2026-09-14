@@ -638,23 +638,28 @@ describe("incoming partner event workflow", () => {
     expect(result.qualificationStatus).not.toBe("NO_FIT");
   });
 
-  it("moves a direct request for a person to handoff deterministically", async () => {
+  it("collects a phone before completing a direct request for a person", async () => {
     const { processEvent } = createHarness([
       extractionReply({
         intent: "WANTS_HUMAN",
         signals: { wantsHuman: true },
       }),
+      extractionReply({ facts: { phoneNumber: "+79991234567", phoneConfirmed: true } }),
     ]);
 
     const result = await processEvent(
       input("event-human", "Позовите, пожалуйста, менеджера"),
     );
     expect(result).toMatchObject({
-      requiresHumanHandoff: true,
-      conversationState: "HANDOFF",
-      qualificationStatus: "HANDOFF",
+      requiresHumanHandoff: false,
+      conversationState: "WAITING_PHONE",
+      qualificationStatus: "NEEDS_MORE_INFO",
       qualificationReason: "USER_REQUESTED_HUMAN",
     });
+    expect(await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${result.leadId}`)).toBeNull();
+    const completed = await processEvent(input("event-human-phone", "+79991234567"));
+    expect(completed).toMatchObject({ shouldHandoffToManager: true, qualificationReason: "USER_REQUESTED_HUMAN" });
+    expect(completed.qualificationStatus).not.toBe("HANDOFF");
   });
 
   it("keeps a failed event claim retryable before the LLM call", async () => {
@@ -880,7 +885,7 @@ describe("incoming partner event workflow", () => {
   it("notifies a manager once on handoff and never for NO_FIT", async () => {
     const managerProvider = new FakeManagerNotificationProvider();
     const llm = new FakeLLMProvider([
-      extractionReply({ intent: "WANTS_HUMAN", signals: { wantsHuman: true } }),
+      extractionReply({ intent: "WANTS_HUMAN", facts: { phoneNumber: "+79991234567", phoneConfirmed: true }, signals: { wantsHuman: true } }),
       extractionReply({ intent: "DECLINE" }),
     ]);
     const processEvent = createIncomingEventProcessor({

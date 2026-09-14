@@ -10,7 +10,8 @@ import {
   money,
   notificationLabel,
   segmentLabels,
-  statusLabels,
+  qualificationLabel,
+  handoffLabel,
 } from "./crm-format";
 import { requireCrmPageAccess } from "./require-crm-page-access";
 
@@ -113,10 +114,10 @@ export default async function CrmPage({
                   <td className="px-3 py-3">{lead.startingUnits ?? ""}</td>
                   <td className="px-3 py-3">{lead.scalingPotentialUnits ?? ""}</td>
                   <td className="px-3 py-3">{lead.launchTiming ? launchTimingLabels[lead.launchTiming] ?? lead.launchTiming : ""}</td>
-                  <td className="px-3 py-3">{statusLabels[lead.qualificationStatus] ?? lead.qualificationStatus}</td>
+                  <td className="px-3 py-3">{qualificationLabel(lead)}</td>
                   <td className="px-3 py-3">{financialLabels[lead.financialReadiness] ?? lead.financialReadiness}</td>
                   <td className="px-3 py-3">{lead.buyingIntent ? buyingIntentLabels[lead.buyingIntent] ?? lead.buyingIntent : ""}</td>
-                  <td className="px-3 py-3">{lead.handoffAt ? "Передан" : ""}</td>
+                  <td className="px-3 py-3">{handoffLabel(lead)}</td>
                   <td className="px-3 py-3">{notificationLabel(lead)}</td>
                 </tr>
               ))}

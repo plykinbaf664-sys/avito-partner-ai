@@ -28,7 +28,7 @@ export function assessLeadSegment(
     | "scalingPotentialUnits"
     | "primaryGoal"
     | "businessModelReadiness"
-  >,
+  > & Partial<Pick<Lead, "buyingIntent" | "questions">>,
 ): LeadSegmentAssessment {
   let investorScore = 0;
   let smallBusinessScore = 0;
@@ -69,6 +69,10 @@ export function assessLeadSegment(
     lead.primaryGoal !== "UNKNOWN" &&
     lead.primaryGoal !== "INVESTMENT"
   ) {
+    smallBusinessScore += 1;
+  }
+  if (lead.buyingIntent === "GENERAL_INTEREST" ||
+      lead.questions?.some((question) => /бизнес|субаренд|запуск|начать/iu.test(question))) {
     smallBusinessScore += 1;
   }
 

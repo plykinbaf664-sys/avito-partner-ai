@@ -11,7 +11,7 @@ import { TelegramManagerNotificationProvider } from "@/integrations/telegram/tel
 import { AvitoApiClient } from "./avito-api-client";
 import { AvitoOutboundMessageProvider } from "./avito-outbound-message-provider";
 
-export async function createRuntimeAvitoPolling() {
+export async function createRuntimeAvitoPolling(options: { chatId?: string } = {}) {
   const avito = readAvitoChannelEnvironment(process.env);
   if (!avito.enabled || !avito.clientId || !avito.clientSecret) {
     throw new Error("AVITO_POLL_CONFIGURATION_REQUIRED");
@@ -26,14 +26,14 @@ export async function createRuntimeAvitoPolling() {
     persistence,
     extractMessage: createMessageExtractor({ llmProvider }),
     generateNaturalResponse: createNaturalResponseGenerator({ llmProvider }),
-    outboundProvider: new AvitoOutboundMessageProvider(client),
+    outboundProvider: new AvitoOutboundMessageProvider(client, logger),
     managerNotificationProvider: telegram.enabled
       ? new TelegramManagerNotificationProvider({ botToken: telegram.botToken! }, persistence)
       : undefined,
     logger,
   });
   return {
-    pollAvitoMessages: createAvitoMessagePoller({ client, persistence,
+    pollAvitoMessages: createAvitoMessagePoller({ client, persistence, chatId: options.chatId,
       stateRepository: persistence.pollingStates, processIncomingEvent, logger }),
     close: () => persistence.close(),
   };

@@ -9,6 +9,7 @@ import type { ManagerSummary } from "@/domain/handoff/manager-summary";
 import { SqlitePersistence } from "@/infrastructure/database/sqlite-persistence";
 import { createCrmCsv } from "./csv-export";
 import { createCrmService } from "./crm-service";
+import { qualificationLabel, handoffLabel, notificationLabel } from "@/app/crm/crm-format";
 
 const now = new Date("2026-09-09T10:00:00.000Z");
 
@@ -130,6 +131,8 @@ describe("local CRM read model", () => {
       qualificationStatus: "HOT",
       managerNotificationStatus: "SENT",
     });
+    expect([qualificationLabel(searched.records[0]!), handoffLabel(searched.records[0]!), notificationLabel(searched.records[0]!)])
+      .toEqual(["Горячий", "Передан менеджеру", "Отправлено"]);
     expect(
       (await service.listLeads({ search: "+7 999 123-45-67" })).records,
     ).toHaveLength(1);
@@ -161,6 +164,21 @@ describe("local CRM read model", () => {
     expect(details?.messages).toHaveLength(1);
     expect(details?.messages[0]?.content).toContain("+7 999");
     expect(details?.phoneNumber).toBe("+79991234567");
+  });
+
+  it("presents a legacy transfer separately from business qualification without rewriting history", async () => {
+    await persistence.leads.insert(lead(2, { source: "AVITO", city: "Химки", serviceability: "SUPPORTED", availableCapital: 150_000,
+      availableCapitalConfirmed: true, qualificationStatus: "HANDOFF", qualificationReason: "USER_REQUESTED_HUMAN",
+      handoffAt: now, questions: ["Как проходит организация бизнеса?"] }));
+    const record = (await createCrmService(persistence).getLead("lead-2"))!;
+    expect(record).toMatchObject({ segment: "SMALL_BUSINESS", qualificationStatus: "NEEDS_MORE_INFO",
+      shouldHandoffToManager: false, phoneNumber: null, handoffAt: now });
+    expect(qualificationLabel(record)).toBe("Требуется информация");
+    expect(handoffLabel(record)).toBe("Передан ранее без телефона");
+    expect(await persistence.leads.findById("lead-2")).toMatchObject({ qualificationStatus: "HANDOFF", handoffAt: now });
+    const csv = createCrmCsv([record]);
+    expect(csv).not.toContain('"HANDOFF"');
+    expect(csv.split("\r\n")[1]!.split(",")[5]).toBe('""');
   });
 
   it("exports UTF-8 CSV with correct escaping and no internal data", async () => {

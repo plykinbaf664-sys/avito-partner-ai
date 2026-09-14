@@ -6,12 +6,14 @@ async function main() {
   const { values } = parseArgs({ options: {
     continuous: { type: "boolean", default: false },
     "interval-ms": { type: "string", default: "10000" },
+    "chat-id": { type: "string" },
   } });
   const intervalMs = Number(values["interval-ms"]);
   if (!Number.isSafeInteger(intervalMs) || intervalMs < 1_000 || intervalMs > 3_600_000) {
     throw new Error("AVITO_POLL_INVALID_INTERVAL");
   }
-  const runtime = await createRuntimeAvitoPolling();
+  const chatId = values["chat-id"] ?? process.env.AVITO_POLL_CHAT_ID;
+  const runtime = await createRuntimeAvitoPolling({ chatId });
   const stop = new AbortController();
   const onStop = () => stop.abort();
   process.on("SIGINT", onStop);

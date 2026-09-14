@@ -103,6 +103,10 @@ export function mergeExtractedFacts(
   }
   if (extraction.intent === "DECLINE") {
     patch.buyingIntent = "DECLINED";
+  } else if (extraction.signals.wantsHuman) {
+    patch.buyingIntent = "WANTS_HUMAN";
+  } else if (extraction.intent === "GENERAL_INTEREST" && lead.buyingIntent === null) {
+    patch.buyingIntent = "GENERAL_INTEREST";
   }
 
   let merged = {

@@ -9,7 +9,7 @@ import type { KnowledgeAnswer } from "../knowledge/knowledge-base";
 
 const qualificationQuestions: Record<InformationNeed, string> = {
   PHONE_NUMBER:
-    "Тогда можно переходить к предметному разговору с Дмитрием. Оставьте, пожалуйста, номер телефона, по которому с вами удобнее связаться.",
+    "Оставьте, пожалуйста, номер телефона, чтобы менеджер мог с вами связаться.",
   AVAILABLE_CAPITAL:
     "Какую сумму вы реально готовы выделить на проект: это бюджет только на первый этап или общий доступный капитал?",
   ADDITIONAL_EXPENSES:
@@ -77,16 +77,23 @@ export function buildConversationResponse(params: {
   }
 
   const parts = [...knowledge.answerFragments];
+  const phoneDeclined = nextInformationNeed === "PHONE_NUMBER" && params.lead.objections.some((objection) =>
+    /телефон|номер/iu.test(objection) && /не хочу|не дам|не буду|отказыва|не готов|пока не/iu.test(objection));
   if (knowledge.unresolvedQuestions.length > 0) {
-    parts.push("Этот момент лучше уточнить у менеджера.");
+    const topics = knowledge.unresolvedQuestions
+      .map((question) => question.replace(/[?\r\n]+/gu, " ").trim()).join("; ");
+    parts.push(`По вопросу «${topics}» у меня нет подтверждённых деталей — эту часть лучше уточнить у менеджера.`);
   }
 
   if (decision.shouldHandoffToManager) {
     parts.push(
-      extraction.signals.wantsHuman || knowledge.unresolvedQuestions.length > 0
+      extraction.signals.wantsHuman || knowledge.unresolvedQuestions.length > 0 ||
+        ["USER_REQUESTED_HUMAN", "UNKNOWN_BUSINESS_QUESTION"].includes(decision.reason)
         ? "Передам менеджеру контекст разговора, чтобы он мог продолжить с вами предметно."
         : "Основные данные собраны. Передам менеджеру краткий контекст, чтобы продолжить предметно.",
     );
+  } else if (phoneDeclined) {
+    parts.push("Понимаю, номер сейчас можно не оставлять. Можем продолжить общение здесь; для финальной передачи менеджеру он понадобится, когда вы будете готовы.");
   } else if (nextInformationNeed !== null) {
     parts.push(questionForInformationNeed(nextInformationNeed, params.lead));
   }
@@ -100,10 +107,12 @@ export function buildConversationResponse(params: {
     text: `${prefix}${parts.join(" ")}`.trim(),
     nextInformationNeed,
     asksUserQuestion:
-      !decision.shouldHandoffToManager && nextInformationNeed !== null,
+      !decision.shouldHandoffToManager && nextInformationNeed !== null && !phoneDeclined,
     knowledgeEntryIds: knowledge.entryIds,
     unresolvedQuestions: knowledge.unresolvedQuestions,
     useNaturalAdaptation:
+      nextInformationNeed === "PHONE_NUMBER" ||
+      knowledge.answerFragments.length > 0 ||
       parts.length >= 3 ||
       extraction.signals.questions.length + extraction.signals.objections.length > 1,
   };
@@ -113,6 +122,9 @@ export function questionForInformationNeed(
   need: InformationNeed,
   lead?: Lead,
 ): string {
+  if (need === "PHONE_NUMBER" && lead && ["HOT", "PRIORITY", "QUALIFIED"].includes(lead.qualificationStatus)) {
+    return "По основным параметрам вам подходит этот формат. Оставьте, пожалуйста, номер телефона, чтобы менеджер мог с вами связаться.";
+  }
   if (
     need === "ADDITIONAL_EXPENSES" &&
     lead &&

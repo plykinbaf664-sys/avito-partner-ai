@@ -109,8 +109,11 @@ function classifyHttpError(status: number, payload: unknown): AvitoApiError {
 async function safeResponsePayload(response: Response): Promise<unknown> {
   try {
     return await response.json();
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof SyntaxError) return null;
+    // Fetch may resolve after headers and abort while consuming the body.
+    // Preserve the network failure classification without exposing its details.
+    throw new AvitoApiError("AVITO_NETWORK_ERROR", null, true);
   }
 }
 

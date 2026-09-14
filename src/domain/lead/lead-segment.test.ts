@@ -26,6 +26,12 @@ function facts(overrides: Partial<SegmentFacts> = {}): SegmentFacts {
 }
 
 describe("lead segmentation", () => {
+  it("uses a business-launch context with 150k, but never the amount alone", () => {
+    expect(assessLeadSegment(facts({ availableCapital: 150_000 })).segment).toBe("UNDETERMINED");
+    expect(assessLeadSegment({ ...facts({ availableCapital: 150_000 }), buyingIntent: "GENERAL_INTEREST" }).segment).toBe("SMALL_BUSINESS");
+    expect(assessLeadSegment({ ...facts({ availableCapital: 150_000 }), questions: ["Как проходит организация бизнеса?"] }).segment).toBe("SMALL_BUSINESS");
+    expect(assessLeadSegment(facts({ availableCapital: 150_000, startingUnits: 2 })).segment).toBe("SMALL_BUSINESS");
+  });
   it("keeps sparse information undetermined", () => {
     expect(assessLeadSegment(facts())).toEqual({
       segment: "UNDETERMINED",

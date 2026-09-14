@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExtractedMessage } from "@/domain/extraction/extracted-message";
 import { SqlitePersistence } from "@/infrastructure/database/sqlite-persistence";
@@ -8,6 +8,11 @@ import { FakeLLMProvider } from "@/integrations/fake/fake-llm-provider";
 
 import { createMessageExtractor } from "../extraction/extract-message";
 import { createIncomingEventProcessor } from "./process-incoming-event";
+import { createNaturalResponseGenerator } from "../conversation/generate-natural-response";
+import { createCrmService } from "../crm/crm-service";
+import { createCrmCsv } from "../crm/csv-export";
+import { qualificationLabel, handoffLabel, notificationLabel } from "@/app/crm/crm-format";
+import type { ManagerSummary } from "@/domain/handoff/manager-summary";
 
 function reply({
   intent = "QUALIFICATION_INFORMATION",
@@ -94,6 +99,132 @@ describe("multi-turn qualification conversation", () => {
     text,
   });
 
+  it.each([
+    ["Какие условия предлагаете?", ["субаренде", "50 000 ₽", "120 000 ₽", "20 000 ₽", "доход не гарантируется"]],
+    ["Как вообще проходит организация бизнеса?", ["подобрать объект", "комплектации", "площадках", "администратор", "горничную", "персональный менеджер", "CRM"]],
+    ["Кто занимается гостями?", ["администратор", "гостями"]],
+    ["Сколько нужно денег?", ["50 000 ₽", "аренду", "залог", "120 000 ₽", "20 000 ₽", "не фиксированная смета"]],
+    ["Сколько заработаю?", ["около 20 000 ₽", "Гарантированного дохода нет"]],
+    ["Что вообще предлагает компания?", ["субаренде", "команда помогает"]],
+    ["Как устроена схема работы?", ["подобрать", "бронирования"]],
+    ["Что делает управляющая компания?", ["поиском и запуском", "Расходы"]],
+    ["Что делает партнёр?", ["Расходы по бизнесу несёт партнёр"]],
+    ["Какие расходы несёт партнёр?", ["аренду", "залог", "комплектацию"]],
+    ["Что входит в первый этап?", ["50 000 ₽", "подбором", "чек-лист"]],
+    ["Какая стоимость первого этапа?", ["50 000 ₽", "120 000 ₽"]],
+    ["Кто должен оплатить аренду и залог?", ["Отдельно партнёр оплачивает"]],
+    ["Какой ориентир по стартовому бюджету?", ["120 000 ₽", "20 000 ₽"]],
+    ["Аренда, залог и комплектация входят?", ["Отдельно партнёр оплачивает"]],
+    ["Есть ли гарантии?", ["Гарантированного дохода нет"]],
+    ["Кто координирует горничных?", ["администратор", "координирует горничную"]],
+    ["Что происходит после запуска?", ["персональный менеджер", "CRM"]],
+    ["Как работает CRM?", ["онлайн-режиме", "брони", "площадок"]],
+    ["Как партнёр видит брони?", ["CRM", "онлайн-режиме"]],
+    ["Можно ли начать с одного объекта?", ["старт с одного объекта"]],
+    ["Как инвестору смотреть брони?", ["CRM", "онлайн-режиме"]],
+    ["Кто будет заниматься гостями моей квартиры?", ["администратор"]],
+  ])("answers the approved KB question before continuing qualification: %s", async (question, fragments) => {
+    const { processEvent } = harness([
+      reply({ intent: "QUESTION", signals: { questions: [question] } }),
+    ]);
+    const result = await processEvent(input(1, question));
+    for (const fragment of fragments) expect(result.outboundMessage).toContain(fragment);
+    expect(result.shouldHandoffToManager).toBe(false);
+    expect(result.outboundMessage).not.toContain("уточнить у менеджера");
+    expect(result.outboundMessage).not.toContain("Передам менеджеру");
+    expect(result.outboundMessage!.length).toBeLessThanOrEqual(1_000);
+    expect(result.outboundMessage!.match(/\?/gu)).toHaveLength(1);
+    expect(result.outboundMessage!.indexOf(fragments[0]!)).toBeLessThan(result.outboundMessage!.indexOf("Какую сумму"));
+  });
+
+  it("answers a question and asks only the next gap without repeating a known budget", async () => {
+    const { processEvent } = harness([reply({ intent: "QUESTION",
+      facts: { availableCapital: 200_000, availableCapitalConfirmed: true },
+      signals: { questions: ["Кто занимается гостями?"] } })]);
+    const result = await processEvent(input(1, "У меня 200 тысяч. Кто занимается гостями?"));
+    expect(result.outboundMessage).toContain("администратор");
+    expect(result.shouldHandoffToManager).toBe(false);
+    expect(result.suggestedNextInformationNeed).not.toBe("AVAILABLE_CAPITAL");
+    expect(result.outboundMessage).not.toContain("Какую сумму");
+    expect(result.outboundMessage!.match(/\?/gu)).toHaveLength(1);
+  });
+
+  it.each([
+    ["Кто занимается гостями и какая страховая компания покроет ущерб?", "администратор", "какая страховая компания покроет ущерб"],
+    ["Как работает CRM и есть ли API?", "онлайн-режиме", "есть ли API"],
+    ["Чем отличается малый бизнес от инвесторского сценария?", "бизнес на субаренде", "инвесторского сценария"],
+    ["Сколько заработаю на моей квартире по адресу Ленина, 10?", "20 000 ₽", "моей квартире"],
+    ["Какие условия предлагаете и можно ли оплатить в рассрочку?", "120 000 ₽", "можно ли оплатить в рассрочку"],
+  ])("answers the known part before escalating the specific gap: %s", async (question, known, unknown) => {
+    const { processEvent } = harness([reply({ intent: "QUESTION", facts: { phoneNumber: "+79991234567", phoneConfirmed: true }, signals: { questions: [question] } })]);
+    const result = await processEvent(input(1, question));
+    expect(result.shouldHandoffToManager).toBe(true);
+    expect(result.qualificationReason).toBe("UNKNOWN_BUSINESS_QUESTION");
+    expect(result.outboundMessage).toContain(known);
+    expect(result.outboundMessage).toContain(unknown);
+    expect(result.outboundMessage!.indexOf(known)).toBeLessThan(result.outboundMessage!.indexOf("эту часть лучше уточнить"));
+    expect(result.outboundMessage).not.toContain("Какую сумму");
+  });
+
+  it("still honors an explicit human request even when the KB answers the question", async () => {
+    const { processEvent } = harness([reply({ intent: "QUESTION",
+      facts: { phoneNumber: "+79991234567", phoneConfirmed: true },
+      signals: { questions: ["Кто занимается гостями?"], wantsHuman: true } })]);
+    const result = await processEvent(input(1, "Кто занимается гостями? Хочу поговорить с человеком."));
+    expect(result.outboundMessage).toContain("администратор");
+    expect(result.shouldHandoffToManager).toBe(true);
+    expect(result.qualificationReason).toBe("USER_REQUESTED_HUMAN");
+  });
+
+  it("answers from the KB and preserves handoff for an already ready lead", async () => {
+    const { processEvent } = harness([reply({ intent: "QUESTION",
+      facts: { city: "Химки", phoneNumber: "+79991234567", phoneConfirmed: true,
+        availableCapital: 200_000, availableCapitalConfirmed: true,
+        startingUnits: 1, launchTiming: "READY_NOW", primaryGoal: "ADDITIONAL_INCOME",
+        businessModelReadiness: "ACCEPTS", managementReadiness: "READY" },
+      signals: { questions: ["Кто занимается гостями?"] } })]);
+    const result = await processEvent(input(1, "Готов начать. Кто занимается гостями?"));
+    expect(result.outboundMessage).toContain("администратор");
+    expect(result.shouldHandoffToManager).toBe(true);
+    expect(result.qualificationReason).toBe("SMALL_BUSINESS_READY");
+    expect(result.outboundMessage).not.toContain("Какую сумму");
+  });
+
+  it("adapts even a single known answer through the LLM and persists the resulting reply", async () => {
+    const adapted = "Гостей ведёт администратор, он же координирует горничную. После запуска с вами работает персональный менеджер. Какую сумму готовы выделить — это общий капитал или бюджет только на первый этап?";
+    const llm = new FakeLLMProvider([JSON.stringify({ text: adapted })]);
+    const extractMessage = createMessageExtractor({ llmProvider: new FakeLLMProvider([
+      reply({ intent: "QUESTION", signals: { questions: ["Кто занимается гостями?"] } }),
+    ]) });
+    const generate = vi.fn(createNaturalResponseGenerator({ llmProvider: llm }));
+    const processEvent = createIncomingEventProcessor({ persistence, extractMessage, generateNaturalResponse: generate });
+    const result = await processEvent(input(1, "Кто занимается гостями?"));
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(generate.mock.calls[0]![0].plan.knowledgeEntryIds).toContain("operations-guests");
+    expect(result.outboundMessage).toBe(adapted);
+    expect(result.shouldHandoffToManager).toBe(false);
+    const messages = await persistence.messages.listByConversationId(result.conversationId!);
+    expect(messages.find((message) => message.direction === "OUTBOUND")?.content).toBe(adapted);
+  });
+
+  it.each(["unavailable", "unsafe"])("keeps the KB answer and next question when adaptation is %s", async (failure) => {
+    const extractMessage = createMessageExtractor({ llmProvider: new FakeLLMProvider([
+      reply({ intent: "QUESTION", signals: { questions: ["Какие условия предлагаете?"] } }),
+    ]) });
+    const generateNaturalResponse = failure === "unsafe"
+      ? createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
+        JSON.stringify({ text: "Первый этап — 50 000 ₽, затем 120 000 ₽ на аренду и залог. Остальное уточните у менеджера." }),
+      ]) })
+      : async () => { throw new Error("LLM_UNAVAILABLE"); };
+    const processEvent = createIncomingEventProcessor({ persistence, extractMessage, generateNaturalResponse });
+    const result = await processEvent(input(1, "Какие условия предлагаете?"));
+    expect(result.shouldHandoffToManager).toBe(false);
+    expect(result.outboundMessage).toContain("субаренде");
+    expect(result.outboundMessage).toContain("120 000 ₽");
+    expect(result.outboundMessage).toContain("Какую сумму");
+    expect(result.outboundMessage).not.toContain("уточнить у менеджера");
+  });
+
   it("moves a strong investor directly to PRIORITY and prepares a manager summary", async () => {
     const { processEvent } = harness([
       reply({
@@ -165,11 +296,19 @@ describe("multi-turn qualification conversation", () => {
       input(1, "Хочу запустить один объект в Химках через месяц, на запуск есть 160 тысяч"),
     );
     expect(beforePhone).toMatchObject({
+      qualificationStatus: "HOT",
       shouldHandoffToManager: false,
       suggestedNextInformationNeed: "PHONE_NUMBER",
       conversationState: "WAITING_PHONE",
     });
     expect(beforePhone.outboundMessage).toContain("номер телефона");
+    expect(await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${beforePhone.leadId}`)).toBeNull();
+    expect((await persistence.leads.findById(beforePhone.leadId!))?.handoffAt).toBeNull();
+    const crm = createCrmService(persistence);
+    const waiting = (await crm.getLead(beforePhone.leadId!))!;
+    expect([qualificationLabel(waiting), handoffLabel(waiting), notificationLabel(waiting)])
+      .toEqual(["Квалифицирован", "Ожидает телефон", "Не отправлялось"]);
+    expect(waiting.phoneNumber ?? "").toBe("");
 
     const afterPhone = await processEvent(input(2, "Позвоните 89991234567"));
     expect(afterPhone).toMatchObject({
@@ -177,6 +316,67 @@ describe("multi-turn qualification conversation", () => {
       qualificationStatus: "HOT",
       managerSummary: { phoneNumber: "+79991234567" },
     });
+    expect(await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${afterPhone.leadId}`))
+      .toMatchObject({ deliveryStatus: "PENDING", summary: { phoneNumber: "+79991234567" } });
+    expect(afterPhone.outboundMessage).not.toContain("Оставьте");
+    expect((await persistence.leads.findById(afterPhone.leadId!))?.phoneNumber).toBe("+79991234567");
+    const handed = (await crm.getLead(afterPhone.leadId!))!;
+    expect([qualificationLabel(handed), handoffLabel(handed), notificationLabel(handed)])
+      .toEqual(["Горячий", "Передан менеджеру", "Ожидает отправки"]);
+    expect((await crm.listLeads({ search: "8 (999) 123-45-67" })).records.map((record) => record.leadId)).toEqual([afterPhone.leadId]);
+    expect(createCrmCsv(await crm.exportLeads())).toContain('"+79991234567"');
+    expect((await processEvent(input(2, "Позвоните 89991234567"))).duplicate).toBe(true);
+  });
+
+  it("keeps a phone refusal as a barrier and answers KB questions while waiting", async () => {
+    const { processEvent } = harness([
+      reply({ facts: { city: "Химки", availableCapital: 150_000, availableCapitalConfirmed: true,
+        startingUnits: 1, businessModelReadiness: "ACCEPTS", launchTiming: "READY_NOW",
+        managementReadiness: "READY", primaryGoal: "ADDITIONAL_INCOME" } }),
+      reply({ intent: "OBJECTION", signals: { objections: ["Телефон пока давать не хочу"] } }),
+      reply({ intent: "QUESTION", signals: { questions: ["Кто занимается гостями?"] } }),
+    ]);
+    const first = await processEvent(input(1, "150 тысяч, Химки, хочу запуск малого бизнеса с одного объекта"));
+    expect(first).toMatchObject({ segment: "SMALL_BUSINESS", qualificationStatus: "HOT", shouldHandoffToManager: false });
+    const refused = await processEvent(input(2, "Телефон пока давать не хочу"));
+    expect(refused).toMatchObject({ qualificationStatus: "HOT", suggestedNextInformationNeed: "PHONE_NUMBER", shouldHandoffToManager: false });
+    expect(await persistence.leads.findById(first.leadId!)).toMatchObject({ phoneNumber: null,
+      objections: ["Телефон пока давать не хочу"], handoffAt: null });
+    const answer = await processEvent(input(3, "Кто занимается гостями?"));
+    expect(answer.outboundMessage).toContain("администратор");
+    expect(answer.outboundMessage).not.toContain("Оставьте");
+    expect(answer.shouldHandoffToManager).toBe(false);
+    expect(await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${first.leadId}`)).toBeNull();
+  });
+
+  it("resumes an old premature handoff and refreshes its untouched summary after the phone", async () => {
+    const { processEvent } = harness([
+      reply({ facts: { city: "Химки", availableCapital: 150_000, availableCapitalConfirmed: true,
+        startingUnits: 1, businessModelReadiness: "ACCEPTS", launchTiming: "READY_NOW",
+        managementReadiness: "READY", primaryGoal: "ADDITIONAL_INCOME" } }),
+      reply({ intent: "QUESTION", signals: { questions: ["Кто занимается гостями?"] } }),
+      reply({ facts: { phoneNumber: "+79991234567", phoneConfirmed: true } }),
+    ]);
+    const first = await processEvent(input(1, "Хочу начать"));
+    const lead = (await persistence.leads.findById(first.leadId!))!;
+    const conversation = (await persistence.conversations.findById(first.conversationId!))!;
+    const oldTime = lead.updatedAt;
+    await persistence.leads.update({ ...lead, qualificationStatus: "HANDOFF", qualificationReason: "USER_REQUESTED_HUMAN", handoffAt: oldTime });
+    await persistence.conversations.update({ ...conversation, state: "HANDOFF", qualificationCompleted: true });
+    await persistence.managerNotifications.insertIfAbsent({ id: "legacy-notification", leadId: lead.id,
+      conversationId: conversation.id, qualificationStatus: "HANDOFF", summary: { phoneNumber: null } as ManagerSummary,
+      idempotencyKey: `manager-handoff:${lead.id}`, deliveryStatus: "PENDING", deliveryAttempts: 0,
+      deliveryRetryable: null, lastDeliveryErrorCode: null, externalNotificationId: null,
+      createdAt: oldTime, updatedAt: oldTime, sentAt: null });
+    const resumed = await processEvent(input(2, "Кто занимается гостями?"));
+    expect(resumed).toMatchObject({ qualificationStatus: "HOT", conversationState: "WAITING_PHONE", shouldHandoffToManager: false });
+    expect(resumed.outboundMessage).toContain("администратор");
+    expect(resumed.outboundMessage).toContain("номер телефона");
+    const completed = await processEvent(input(3, "+79991234567"));
+    expect(completed.shouldHandoffToManager).toBe(true);
+    expect(await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${lead.id}`))
+      .toMatchObject({ id: "legacy-notification", summary: { phoneNumber: "+79991234567" }, deliveryAttempts: 0 });
+    expect((await persistence.leads.findById(lead.id))?.handoffAt).toEqual(oldTime);
   });
 
   it("does not reject a qualified lead who has not shared a phone", async () => {
@@ -335,6 +535,7 @@ describe("multi-turn qualification conversation", () => {
       "По одному размеру капитала нельзя корректно определить количество объектов",
     );
     expect(result.outboundMessage).toContain("предполагаемое число объектов");
+    expect(result.outboundMessage).toContain("около 20 000 ₽ с одного объекта");
     expect(result.outboundMessage).not.toContain("200 000 ₽");
     expect(result.suggestedNextInformationNeed).toBe("STARTING_UNITS");
     expect(result.shouldHandoffToManager).toBe(false);
@@ -548,11 +749,11 @@ describe("multi-turn qualification conversation", () => {
   it("hands an unknown business question to a manager instead of inventing an answer", async () => {
     const question = "Какая страховая компания покроет ущерб на объекте?";
     const { processEvent } = harness([
-      reply({ intent: "QUESTION", signals: { questions: [question] } }),
+      reply({ intent: "QUESTION", facts: { phoneNumber: "+79991234567", phoneConfirmed: true }, signals: { questions: [question] } }),
     ]);
     const result = await processEvent(input(1, question));
     expect(result).toMatchObject({
-      qualificationStatus: "HANDOFF",
+      qualificationStatus: "NEEDS_MORE_INFO",
       shouldHandoffToManager: true,
       qualificationReason: "UNKNOWN_BUSINESS_QUESTION",
     });
