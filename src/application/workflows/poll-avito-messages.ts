@@ -9,6 +9,7 @@ import { incomingPartnerEventSchema, type IncomingPartnerEvent, type ProcessInco
 import { AvitoApiError, type AvitoApiClient, type AvitoMessage } from "@/integrations/avito/avito-api-client";
 import { AvitoInboundChannel } from "@/integrations/avito/avito-inbound-channel";
 import { generateId } from "@/shared/id";
+import { externalErrorCode } from "../delivery/retry-policy";
 
 const PAGE_SIZE = 100;
 const MAX_OFFSET = 1_000;
@@ -33,6 +34,7 @@ export interface AvitoPollResult {
   duplicates: number;
   ignored: number;
   failed: number;
+  terminalSkipped: number;
   apiRequests: number;
   durationMs: number;
 }
@@ -59,7 +61,7 @@ export function createAvitoMessagePoller({
     const started = performance.now();
     const result: AvitoPollResult = { status: "PASS", chats: 0, checkedChats: 0,
       skippedOldChats: 0, historyErrors: 0, previewAccepted: 0, fetched: 0,
-      accepted: 0, processed: 0, duplicates: 0, ignored: 0, failed: 0,
+      accepted: 0, processed: 0, duplicates: 0, ignored: 0, failed: 0, terminalSkipped: 0,
       apiRequests: 0, durationMs: 0 };
     let key: string | null = null;
     let acquired = false;
@@ -85,10 +87,11 @@ export function createAvitoMessagePoller({
           conversationId: processed.conversationId, eventStatus: processed.eventStatus,
           duplicate: processed.duplicate,
         });
-      } catch {
+      } catch (error) {
         result.failed += 1;
         logger.error("avito.poll.processing_failed", {
           source: "AVITO", externalEventId: input.externalEventId,
+          errorCode: externalErrorCode(error),
         });
       }
     };
@@ -207,6 +210,22 @@ export function createAvitoMessagePoller({
               if (!messagesComplete && message.id === chat.lastMessage?.id) result.previewAccepted += 1;
             }
             if (accepted.event.status === "PROCESSED") { result.duplicates += 1; continue; }
+            // Recovery already excludes terminal failures, but Messenger can
+            // return them on every overlap sweep. Do not retry rejected events
+            // or let them pin the account cursor forever; keep FAILED in SQLite.
+            if (accepted.event.status === "FAILED" &&
+                (accepted.event.processingRetryable === false ||
+                 accepted.event.processingAttempts >= MAX_INCOMING_PROCESSING_ATTEMPTS)) {
+              result.terminalSkipped += 1;
+              logger.error("avito.poll.terminal_event_skipped", {
+                source: "AVITO", chatId: chat.id, eventId: accepted.event.id,
+                externalEventId: input.externalEventId,
+                attempts: accepted.event.processingAttempts,
+                errorCode: accepted.event.error,
+                retryable: false,
+              });
+              continue;
+            }
             inputs.push(input);
           }
           // Persist the fetched batch before any LLM call or outbound operation.

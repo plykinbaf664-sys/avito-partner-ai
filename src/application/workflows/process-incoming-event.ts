@@ -572,10 +572,8 @@ export function createIncomingEventProcessor({
         source: input.source,
         llmLatencyMs,
         llmSuccess: false,
-        retryable:
-          error instanceof Error && "retryable" in error
-            ? Boolean(error.retryable)
-            : true,
+        retryable: isRetryableProcessingError(error),
+        errorCode: safeErrorCode(error),
         errorType: error instanceof Error ? error.name : "UnknownError",
       });
       throw error;

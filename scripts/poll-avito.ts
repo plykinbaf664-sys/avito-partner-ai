@@ -21,7 +21,7 @@ async function main() {
   try {
     do {
       const result = await runtime.pollAvitoMessages(new Date());
-      console.log(`AVITO_POLLING=${result.status} accepted=${result.accepted} processed=${result.processed} duplicates=${result.duplicates} failed=${result.failed}`);
+      console.log(`AVITO_POLLING=${result.status} accepted=${result.accepted} processed=${result.processed} duplicates=${result.duplicates} failed=${result.failed} terminalSkipped=${result.terminalSkipped}`);
       if (!values.continuous) {
         process.exitCode = result.status === "FAIL" ? 1 : 0;
         break;

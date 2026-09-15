@@ -2,6 +2,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import Anthropic from "@anthropic-ai/sdk";
+import { AnthropicLLMProvider } from "@/integrations/anthropic/anthropic-llm-provider";
+import { createMessageExtractor } from "../extraction/extract-message";
 
 import type { ExtractMessageResult } from "../extraction/extract-message";
 import { RetryableInfrastructureError } from "../errors/infrastructure-error";
@@ -57,13 +60,14 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
       sendTextMessage: vi.fn().mockResolvedValue("out-1"),
     };
     const extractMessage = vi.fn().mockResolvedValue(extraction);
+    const logger = { info: vi.fn(), error: vi.fn() };
     const processIncomingEvent = createIncomingEventProcessor({ persistence: database,
-      extractMessage, now: () => current,
+      extractMessage, now: () => current, logger,
       outboundProvider: new AvitoOutboundMessageProvider(client as unknown as AvitoApiClient),
     });
     const poll = createAvitoMessagePoller({ client, persistence: database, chatId,
-      stateRepository: database.pollingStates, processIncomingEvent, clock: () => current });
-    return { client, extractMessage, processIncomingEvent, poll };
+      stateRepository: database.pollingStates, processIncomingEvent, clock: () => current, logger });
+    return { client, extractMessage, processIncomingEvent, poll, logger };
   }
 
   it("persists a new inbound, processes it, and sends exactly one Avito response", async () => {
@@ -226,6 +230,57 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     current = new Date(current.getTime() + 60_000);
     expect(await h.poll(current)).toMatchObject({ status: "PASS", processed: 1 });
     expect(h.client.sendTextMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("quarantines the production Anthropic 403 failure without blocking other chats or the cursor", async () => {
+    const h = harness();
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      error: { type: "forbidden", message: "Request not allowed" },
+    }), { status: 403, headers: { "content-type": "application/json" } }));
+    const provider = new AnthropicLLMProvider({ apiKey: "test-key", model: "test-model", timeoutMs: 1000 },
+      new Anthropic({ apiKey: "test-key", maxRetries: 0, fetch: fetcher }));
+    h.extractMessage.mockImplementationOnce(createMessageExtractor({ llmProvider: provider }));
+    h.client.listChats.mockResolvedValue([{ id: "chat", updatedAtUnix: null }, { id: "second-item-chat", updatedAtUnix: null }]);
+    h.client.listMessages.mockImplementation(async chat => [message(chat === "chat" ? "forbidden" : "healthy")]);
+    expect(await h.poll(current)).toMatchObject({ status: "FAIL", accepted: 2, failed: 1, processed: 1 });
+    expect(await persistence.incomingEvents.findByIdentity("AVITO", "forbidden")).toMatchObject({
+      status: "FAILED", error: "ANTHROPIC_HTTP_403", processingRetryable: false, processingAttempts: 1 });
+    expect(h.logger.error).toHaveBeenCalledWith("extraction.failed", expect.objectContaining({
+      errorCode: "ANTHROPIC_HTTP_403", retryable: false }));
+    expect(h.logger.error).toHaveBeenCalledWith("avito.poll.processing_failed", expect.objectContaining({
+      errorCode: "ANTHROPIC_HTTP_403" }));
+    current = new Date(current.getTime() + 10_000);
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", failed: 0, processed: 0, terminalSkipped: 1 });
+    expect((await persistence.pollingStates.initialize(key, current)).lastCompletedAt).toEqual(current);
+    expect(h.extractMessage).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(h.client.sendTextMessage).toHaveBeenCalledExactlyOnceWith("second-item-chat", expect.any(String));
+    expect(await persistence.incomingEvents.findByIdentity("AVITO", "forbidden")).toMatchObject({ status: "FAILED", processingAttempts: 1 });
+  });
+
+  it("stops exhausted retries even if Avito keeps returning the failed message", async () => {
+    const h = harness();
+    h.extractMessage.mockRejectedValue(new RetryableInfrastructureError("LLM_UNAVAILABLE"));
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      expect(await h.poll(current)).toMatchObject({ status: "FAIL", failed: 1 });
+      current = new Date(current.getTime() + 10_000);
+    }
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", failed: 0, terminalSkipped: 1 });
+    expect(h.extractMessage).toHaveBeenCalledTimes(3);
+    expect(h.client.sendTextMessage).not.toHaveBeenCalled();
+    expect((await persistence.pollingStates.initialize(key, current)).lastCompletedAt).toEqual(current);
+    expect(await persistence.incomingEvents.findByIdentity("AVITO", "m1")).toMatchObject({ status: "FAILED", processingAttempts: 3 });
+  });
+
+  it("skips existing legacy terminal Error records and still answers a fresh message in that chat", async () => {
+    const h = harness();
+    h.extractMessage.mockRejectedValueOnce(new Error("legacy provider failure"));
+    await h.poll(current);
+    h.client.listMessages.mockResolvedValue([message(), message("fresh")]);
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", processed: 1, failed: 0, terminalSkipped: 1 });
+    expect(h.extractMessage).toHaveBeenCalledTimes(2);
+    expect(h.client.sendTextMessage).toHaveBeenCalledTimes(1);
+    expect(await persistence.incomingEvents.findByIdentity("AVITO", "m1")).toMatchObject({ status: "FAILED", error: "Error", processingAttempts: 1 });
   });
 
   it("paginates chats and messages, persists and processes messages chronologically", async () => {

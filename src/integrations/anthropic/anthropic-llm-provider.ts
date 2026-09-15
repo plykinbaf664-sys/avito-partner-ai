@@ -103,6 +103,18 @@ export class AnthropicLLMProvider implements LlmProvider {
         outputTokens: response.usage.output_tokens,
       };
     } catch (error) {
+      if (error instanceof APIError && error.status !== undefined) {
+        const retryable = isRetryableAnthropicError(error);
+        const message = `Anthropic request failed (HTTP ${error.status})`;
+        // SDK API errors have name="Error". Preserve a stable diagnostic code
+        // without logging the provider body, request headers or credentials.
+        throw Object.assign(
+          retryable
+            ? new RetryableInfrastructureError(message, { cause: error })
+            : new Error(message, { cause: error }),
+          { code: `ANTHROPIC_HTTP_${error.status}`, status: error.status, retryable },
+        );
+      }
       if (isRetryableAnthropicError(error)) {
         throw new RetryableInfrastructureError(
           "Anthropic is temporarily unavailable",
