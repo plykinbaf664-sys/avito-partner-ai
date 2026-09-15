@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "smoke:telegram": "node --env-file-if-exists=.env.local --import tsx scripts/smoke-telegram.ts",
+    "notify:telegram": "node --env-file-if-exists=.env.local --import tsx scripts/notify-telegram.ts",
     "poll:avito": "node --env-file-if-exists=.env.local --import tsx scripts/poll-avito.ts",
     "dev": "next dev",
     "build": "next build",

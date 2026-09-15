@@ -38,6 +38,7 @@ export function createRuntimeInboundProcessor() {
   const managerNotificationProvider = telegram.enabled
     ? new TelegramManagerNotificationProvider({
         botToken: telegram.botToken!,
+        logger: new ConsoleStructuredLogger(),
       }, persistence)
     : undefined;
   return createIncomingEventProcessor({

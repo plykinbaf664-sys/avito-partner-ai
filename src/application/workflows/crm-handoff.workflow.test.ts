@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createCrmService } from "@/application/crm/crm-service";
 import type { ExtractMessageResult } from "@/application/extraction/extract-message";
@@ -8,6 +8,9 @@ import type { ExtractedMessage } from "@/domain/extraction/extracted-message";
 import { SqlitePersistence } from "@/infrastructure/database/sqlite-persistence";
 import { FakeManagerNotificationProvider } from "@/integrations/fake/fake-manager-notification-provider";
 import { createIncomingEventProcessor } from "./process-incoming-event";
+import { TelegramManagerNotificationProvider } from "@/integrations/telegram/telegram-manager-notification-provider";
+import { createPendingManagerNotificationDelivery } from "@/application/delivery/deliver-pending-manager-notifications";
+import type { TelegramTextSender } from "@/integrations/telegram/telegram-bot-api-client";
 
 function extraction(
   facts: Partial<ExtractedMessage["facts"]>,
@@ -125,5 +128,61 @@ describe("local CRM handoff workflow", () => {
     expect(duplicate.duplicate).toBe(true);
     expect(manager.requests).toHaveLength(1);
   });
-});
 
+  it("delivers a final Avito handoff to every manager, recovers partial failure, and never repeats the card", async () => {
+    persistence = await SqlitePersistence.createMigrated("file::memory:");
+    const timestamp = new Date("2026-09-15T12:00:00Z");
+    for (const chatId of ["101", "202"]) {
+      await persistence.telegramManagerRecipients.upsertAuthorized({ id: chatId, telegramChatId: chatId,
+        telegramUserId: chatId, username: null, firstName: null, isActive: true,
+        authorizedAt: timestamp, createdAt: timestamp, updatedAt: timestamp });
+    }
+    let failSecond = true;
+    const sendMessage = vi.fn<TelegramTextSender["sendMessage"]>(async (chatId) => {
+      if (chatId === "202" && failSecond) {
+        failSecond = false;
+        return { status: "FAILED", retryable: true, errorCode: "TELEGRAM_HTTP_503" };
+      }
+      return { status: "SENT", externalId: `message-${chatId}` };
+    });
+    const manager = new TelegramManagerNotificationProvider({ botToken: "unused" }, persistence,
+      fetch, () => timestamp, undefined, { sendMessage });
+    const replies = [extraction({ city: "Химки", availableCapital: 150_000, availableCapitalConfirmed: true,
+      entryBudget: 50_000, additionalLaunchCapital: 100_000, capitalScope: "ADDITIONAL_AVAILABLE",
+      additionalExpensesReadiness: "READY", businessModelReadiness: "ACCEPTS", startingUnits: 1,
+      launchTiming: "WITHIN_MONTH", managementReadiness: "READY", primaryGoal: "ADDITIONAL_INCOME" }),
+      extraction({ phoneNumber: "89991234567", phoneConfirmed: true }), extraction({})];
+    const extractMessage = vi.fn(async () => replies.shift()!);
+    const processEvent = createIncomingEventProcessor({ persistence, extractMessage,
+      managerNotificationProvider: manager, now: () => timestamp });
+    const common = { source: "avito", externalLeadId: "test-avito-chat" };
+    const first = await processEvent({ ...common, externalEventId: "a1", messageId: "a1", text: "Готов к запуску" });
+    expect(first.suggestedNextInformationNeed).toBe("PHONE_NUMBER");
+    expect(sendMessage).not.toHaveBeenCalled();
+    const phone = { ...common, externalEventId: "a2", messageId: "a2", text: "89991234567" };
+    const second = await processEvent(phone);
+    expect(second.shouldHandoffToManager).toBe(true);
+    const lead = (await persistence.leads.findById(second.leadId!))!;
+    expect(lead.phoneNumber).toBe("+79991234567");
+    expect(lead.handoffAt).toEqual(timestamp);
+    expect(sendMessage.mock.calls.map(([chatId]) => chatId)).toEqual(["101", "202"]);
+    const card = sendMessage.mock.calls[0][1];
+    expect(card).toContain("Телефон: +79991234567");
+    expect(card).toContain("ID диалога: test-avito-chat");
+    expect(card).toContain("Сегмент: малый бизнес");
+    expect((await processEvent(phone)).duplicate).toBe(true);
+    expect(extractMessage).toHaveBeenCalledTimes(2);
+    const deliverPending = createPendingManagerNotificationDelivery({ persistence, provider: manager });
+    await deliverPending();
+    await deliverPending();
+    await processEvent({ ...common, externalEventId: "a3", messageId: "a3", text: "Спасибо" });
+    expect(sendMessage.mock.calls.map(([chatId]) => chatId)).toEqual(["101", "202", "202"]);
+    expect(extractMessage).toHaveBeenCalledTimes(3);
+    const notification = (await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${lead.id}`))!;
+    expect(notification.deliveryStatus).toBe("SENT");
+    for (const recipientId of ["101", "202"]) {
+      const delivered = await persistence.telegramManagerDeliveries.findByIdempotencyKey(`${notification.idempotencyKey}:telegram:${recipientId}`);
+      expect(delivered).toMatchObject({ deliveryStatus: "SENT", externalMessageId: `message-${recipientId}` });
+    }
+  });
+});

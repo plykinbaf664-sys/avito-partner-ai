@@ -27,7 +27,7 @@ export function createRuntimeAvitoWebhook() {
   });
   const managerNotificationProvider = telegram.enabled
     ? new TelegramManagerNotificationProvider(
-        { botToken: telegram.botToken! },
+        { botToken: telegram.botToken!, logger },
         persistence,
       )
     : undefined;
@@ -46,4 +46,3 @@ export function createRuntimeAvitoWebhook() {
     processIncomingEvent,
   };
 }
-

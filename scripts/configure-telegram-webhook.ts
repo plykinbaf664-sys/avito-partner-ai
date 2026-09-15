@@ -6,7 +6,7 @@ const webhookUrl = process.env.TELEGRAM_WEBHOOK_URL?.trim();
 
 if (
   !token ||
-  !secret ||
+  !secret || !/^[A-Za-z0-9_-]{16,128}$/.test(secret) ||
   !webhookUrl ||
   !z.string().url().safeParse(webhookUrl).success ||
   !webhookUrl.startsWith("https://")
@@ -24,15 +24,16 @@ if (
         signal: AbortSignal.timeout(10_000),
       },
     );
+    const result = z.object({ ok: z.literal(true), result: z.literal(true) }).safeParse(await response.json());
+    const configured = response.ok && result.success;
     console.log(
-      response.ok
+      configured
         ? "TELEGRAM_WEBHOOK=PASS configured=true"
         : `TELEGRAM_WEBHOOK=FAIL http=${response.status}`,
     );
-    if (!response.ok) process.exitCode = 1;
+    if (!configured) process.exitCode = 1;
   } catch {
     console.error("TELEGRAM_WEBHOOK=FAIL reason=NETWORK_ERROR");
     process.exitCode = 1;
   }
 }
-

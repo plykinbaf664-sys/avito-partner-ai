@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createManagerNotificationDelivery } from "@/application/delivery/deliver-manager-notification";
 import type {
@@ -13,6 +13,7 @@ import type { ManagerNotification } from "@/domain/notification/manager-notifica
 import { SqlitePersistence } from "@/infrastructure/database/sqlite-persistence";
 
 import type { TelegramTextSender } from "./telegram-bot-api-client";
+import { sendTelegramSmokeNotification } from "./telegram-smoke";
 import {
   formatTelegramManagerCard,
   TelegramManagerNotificationProvider,
@@ -81,12 +82,12 @@ async function seedNotification(
   if (!(await persistence.leads.findById("lead-1"))) {
     const lead: Lead = {
       id: "lead-1",
-      source: "test",
+      source: "avito",
       externalLeadId: "external-lead-1",
       name: null,
       contact: null,
-      phoneNumber: null,
-      phoneConfirmed: false,
+      phoneNumber: "+79991234567",
+      phoneConfirmed: true,
       city: null,
       serviceability: "NEEDS_REVIEW",
       budget: null,
@@ -326,7 +327,7 @@ describe("Telegram manager notifications", () => {
     expect(delivered).toMatchObject({
       deliveryStatus: "FAILED",
       deliveryAttempts: 0,
-      deliveryRetryable: true,
+      deliveryRetryable: false,
       lastDeliveryErrorCode: "TELEGRAM_NO_ACTIVE_RECIPIENTS",
     });
   });
@@ -366,10 +367,144 @@ describe("Telegram manager notifications", () => {
   it("omits empty fields and uses safe plain text", () => {
     const card = formatTelegramManagerCard(
       request("notification-1", { city: null, scalingPotentialUnits: null }),
+      { source: "avito", externalLeadId: "real-chat-id" },
     );
     expect(card).not.toContain("Город:");
     expect(card).not.toContain("Потенциал:");
     expect(card).toContain("Александр <script>");
+    expect(card).toContain("🔥 Новый квалифицированный лид");
+    expect(card).toContain("Цель: дополнительный доход");
+    expect(card).toContain("Срок запуска: в течение месяца");
+    expect(card).toContain("Источник: Avito");
+    expect(card).toContain("ID диалога: real-chat-id");
+    expect(card).not.toMatch(/WITHIN_MONTH|ADDITIONAL_INCOME|HIGH|HOT/);
     expect(card.length).toBeLessThanOrEqual(3_500);
+  });
+
+  async function register(chatId = 101) {
+    const processUpdate = createTelegramManagerUpdateProcessor({ persistence,
+      sender: new RecordingSender(), inviteCode: "valid_invite_code_123", now: () => timestamp });
+    await processUpdate(update(chatId, chatId, "valid_invite_code_123"));
+  }
+
+  it.each([
+    { qualificationStatus: "NO_FIT" as const },
+    { phoneNumber: null, phoneConfirmed: false },
+    { phoneNumber: "123", phoneConfirmed: true },
+    { handoffAt: null },
+  ])("does not deliver an ineligible saved lead: %j", async (overrides) => {
+    await register();
+    const notification = request();
+    await seedNotification(persistence, notification);
+    const lead = (await persistence.leads.findById("lead-1"))!;
+    await persistence.leads.update({ ...lead, ...overrides });
+    const sender = new RecordingSender();
+    const provider = new TelegramManagerNotificationProvider({ botToken: "unused" }, persistence, fetch,
+      () => timestamp, () => "delivery-id", sender);
+    await expect(provider.notify(notification)).resolves.toMatchObject({ status: "FAILED", attempted: false,
+      retryable: false, errorCode: "TELEGRAM_HANDOFF_NOT_ELIGIBLE" });
+    expect(sender.calls).toHaveLength(0);
+  });
+
+  it("uses the saved phone instead of stale summary and deduplicates concurrent delivery", async () => {
+    await register();
+    const notification = request("notification-1", { phoneNumber: "+70000000000" });
+    await seedNotification(persistence, notification);
+    const sender = new RecordingSender();
+    const provider = new TelegramManagerNotificationProvider({ botToken: "unused" }, persistence, fetch,
+      () => timestamp, () => "delivery-id", sender);
+    await Promise.all([provider.notify(notification), provider.notify(notification)]);
+    expect(sender.calls).toHaveLength(1);
+    expect(sender.calls[0].text).toContain("Телефон: +79991234567");
+    expect(sender.calls[0].text).not.toContain("+70000000000");
+    expect(sender.calls[0].text).toContain("ID диалога: external-lead-1");
+  });
+
+  it("contains a thrown sender failure and retries only that manager", async () => {
+    await register(101);
+    await register(202);
+    let first = true;
+    const sender = new RecordingSender((chatId) => {
+      if (chatId === "101" && first) { first = false; throw new Error("network failed"); }
+      return { status: "SENT", externalId: chatId };
+    });
+    const notification = request();
+    await seedNotification(persistence, notification);
+    const provider = new TelegramManagerNotificationProvider({ botToken: "unused" }, persistence, fetch,
+      () => timestamp, (() => { let id = 0; return () => `delivery-${++id}`; })(), sender);
+    const deliver = createManagerNotificationDelivery({ persistence, provider });
+    await expect(deliver(notification.notificationId)).resolves.toMatchObject({ deliveryStatus: "FAILED", deliveryRetryable: true });
+    await expect(deliver(notification.notificationId)).resolves.toMatchObject({ deliveryStatus: "SENT" });
+    expect(sender.calls.map(({ chatId }) => chatId)).toEqual(["101", "202", "101"]);
+  });
+
+  it("retains authorization time on repeated invite and shows chat ID in status", async () => {
+    await register();
+    const sender = new RecordingSender();
+    const processUpdate = createTelegramManagerUpdateProcessor({ persistence, sender,
+      inviteCode: "valid_invite_code_123", now: () => new Date(timestamp.getTime() + 1000) });
+    await processUpdate(update(501, 101, "valid_invite_code_123"));
+    expect((await persistence.telegramManagerRecipients.findByChatId("101"))?.authorizedAt).toEqual(timestamp);
+    await processUpdate(update(502, 101, "/status"));
+    expect(sender.calls[1].text).toContain("Chat ID: 101");
+  });
+
+  it("does not exhaust notification retries while another worker owns the delivery", async () => {
+    await register();
+    const notification = request();
+    await seedNotification(persistence, notification);
+    let complete!: () => void;
+    const gate = new Promise<void>((resolve) => { complete = resolve; });
+    const sendMessage = vi.fn<TelegramTextSender["sendMessage"]>(async () => {
+      await gate;
+      return { status: "SENT", externalId: "telegram-message-1" };
+    });
+    const provider = new TelegramManagerNotificationProvider({ botToken: "unused" }, persistence,
+      fetch, () => timestamp, undefined, { sendMessage });
+    const deliver = createManagerNotificationDelivery({ persistence, provider });
+    const inProgress = deliver(notification.notificationId);
+    try {
+      await vi.waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
+      for (let i = 0; i < 4; i++) {
+        await expect(deliver(notification.notificationId)).resolves.toMatchObject({ deliveryAttempts: 0 });
+      }
+    } finally { complete(); }
+    await expect(inProgress).resolves.toMatchObject({ deliveryStatus: "SENT", deliveryAttempts: 1 });
+    await expect(deliver(notification.notificationId)).resolves.toMatchObject({ deliveryStatus: "SENT" });
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([403, 503])("keeps successful recipients sent and bounds retries for HTTP %s", async (status) => {
+    await register(101);
+    await register(202);
+    const sender = new RecordingSender((chatId) => chatId === "101"
+      ? { status: "SENT", externalId: "message-101" }
+      : { status: "FAILED", retryable: status >= 500, errorCode: `TELEGRAM_HTTP_${status}` });
+    const notification = request();
+    await seedNotification(persistence, notification);
+    const provider = new TelegramManagerNotificationProvider({ botToken: "unused" }, persistence,
+      fetch, () => timestamp, undefined, sender);
+    const deliver = createManagerNotificationDelivery({ persistence, provider });
+    for (let i = 0; i < 5; i++) await deliver(notification.notificationId);
+    expect(sender.calls.filter(({ chatId }) => chatId === "101")).toHaveLength(1);
+    expect(sender.calls.filter(({ chatId }) => chatId === "202")).toHaveLength(status === 403 ? 1 : 3);
+    expect(await persistence.managerNotifications.findById(notification.notificationId)).toMatchObject({
+      deliveryStatus: "FAILED", deliveryRetryable: false });
+  });
+
+  it("sends smoke only to the explicitly selected active private manager without writing a lead", async () => {
+    await register(101);
+    await register(202);
+    const sender = new RecordingSender();
+    const insert = vi.spyOn(persistence.leads, "insert");
+    const notificationInsert = vi.spyOn(persistence.managerNotifications, "insertIfAbsent");
+    await expect(sendTelegramSmokeNotification(persistence, sender, "101")).resolves.toMatchObject({ status: "SENT" });
+    await expect(sendTelegramSmokeNotification(persistence, sender, "303")).rejects.toThrow("REGISTERED_TEST_MANAGER_REQUIRED");
+    await persistence.telegramManagerRecipients.deactivate("202", timestamp);
+    await expect(sendTelegramSmokeNotification(persistence, sender, "202")).rejects.toThrow("REGISTERED_TEST_MANAGER_REQUIRED");
+    await expect(sendTelegramSmokeNotification(persistence, sender, "-101")).rejects.toThrow("INVALID_CHAT_ID");
+    expect(sender.calls.map(({ chatId }) => chatId)).toEqual(["101"]);
+    expect(insert).not.toHaveBeenCalled();
+    expect(notificationInsert).not.toHaveBeenCalled();
   });
 });

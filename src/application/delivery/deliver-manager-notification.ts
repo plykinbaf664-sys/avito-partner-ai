@@ -51,6 +51,13 @@ export function createManagerNotificationDelivery({
         idempotencyKey: notification.idempotencyKey,
         createdAt: notification.createdAt,
       });
+      // The immediate workflow and queue worker can overlap. A recipient claim
+      // is not a failed delivery, and a late result must not downgrade SENT.
+      const latest = await persistence.managerNotifications.findById(notificationId);
+      if (latest?.deliveryStatus === "SENT") return latest;
+      if (result.status === "FAILED" && result.attempted === false && result.retryable) {
+        return latest ?? notification;
+      }
       const attempts =
         notification.deliveryAttempts +
         (result.status === "FAILED" && result.attempted === false ? 0 : 1);

@@ -92,6 +92,7 @@ export function createTelegramManagerUpdateProcessor({
         responseText = current?.isActive
           ? "Уведомления о горячих лидах включены."
           : "Уведомления выключены. Для подключения отправьте /start и код приглашения.";
+        responseText += `\nChat ID: ${chatId}`;
       } else if (command === "/stop") {
         await persistence.telegramManagerRecipients.deactivate(chatId, clock());
         result = "STOPPED";
@@ -105,7 +106,7 @@ export function createTelegramManagerUpdateProcessor({
           username: message.from.username ?? null,
           firstName: message.from.first_name ?? null,
           isActive: true,
-          authorizedAt: timestamp,
+          authorizedAt: current?.isActive ? current.authorizedAt : timestamp,
           createdAt: current?.createdAt ?? timestamp,
           updatedAt: timestamp,
         });

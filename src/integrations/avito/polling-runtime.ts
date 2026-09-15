@@ -28,7 +28,7 @@ export async function createRuntimeAvitoPolling(options: { chatId?: string } = {
     generateNaturalResponse: createNaturalResponseGenerator({ llmProvider }),
     outboundProvider: new AvitoOutboundMessageProvider(client, logger),
     managerNotificationProvider: telegram.enabled
-      ? new TelegramManagerNotificationProvider({ botToken: telegram.botToken! }, persistence)
+      ? new TelegramManagerNotificationProvider({ botToken: telegram.botToken!, logger }, persistence)
       : undefined,
     logger,
   });

@@ -6,6 +6,9 @@ import type {
 } from "@/application/ports/channels";
 import type { Persistence } from "@/application/ports/repositories";
 import type { ManagerSummary } from "@/domain/handoff/manager-summary";
+import type { Lead } from "@/domain/lead/lead";
+import { hasConfirmedPhone } from "@/domain/qualification/qualification-policy";
+import { silentLogger, type StructuredLogger } from "@/application/observability/structured-logger";
 import type { TelegramManagerDelivery } from "@/domain/notification/telegram-manager-delivery";
 import { generateId, type IdGenerator } from "@/shared/id";
 
@@ -18,6 +21,7 @@ export interface TelegramManagerNotificationConfig {
   botToken: string;
   timeoutMs?: number;
   deliveryClaimTimeoutMs?: number;
+  logger?: StructuredLogger;
 }
 
 function compact(value: unknown, maxLength = 500): string {
@@ -26,7 +30,7 @@ function compact(value: unknown, maxLength = 500): string {
 
 function addLine(lines: string[], label: string, value: unknown): void {
   if (value === null || value === undefined || value === "") return;
-  lines.push(`${label}: ${compact(value)}`);
+  lines.push(`${label}: ${compact(value, 240)}`);
 }
 
 function formatMoney(value: number | null): string | null {
@@ -41,44 +45,70 @@ const segmentLabels: Record<string, string> = {
   UNDETERMINED: "не определён",
 };
 
+const timingLabels: Record<string, string> = {
+  READY_NOW: "готов сейчас", WITHIN_MONTH: "в течение месяца",
+  WITHIN_THREE_MONTHS: "в течение трёх месяцев", LATER: "позже",
+  NO_PLANS: "запуск не планирует", UNKNOWN: "Не указано",
+};
+const goalLabels: Record<string, string> = {
+  ADDITIONAL_INCOME: "дополнительный доход", MAIN_BUSINESS: "основной бизнес",
+  LEAVE_EMPLOYMENT: "уйти из найма", INVESTMENT: "инвестиции",
+  SCALE_EXISTING_BUSINESS: "масштабирование бизнеса", USE_OWN_PROPERTY: "использовать свою недвижимость",
+  RECOVER_PREVIOUS_FAILURE: "новый запуск после неудачного опыта", UNKNOWN: "Не указано",
+};
+const barrierLabels: Record<string, string> = {
+  FEAR_LOSE_MONEY: "опасается потерять деньги", FEAR_LOW_DEMAND: "сомневается в спросе",
+  FEAR_NO_PROPERTY: "сложно найти объект", FEAR_OPERATIONAL_LOAD: "опасается операционной нагрузки",
+  FEAR_GUEST_PROBLEMS: "опасается проблем с гостями", FEAR_LEGAL: "юридические опасения",
+  FEAR_NO_EXPERIENCE: "не хватает опыта", FEAR_DISTRUST_NUMBERS: "сомневается в расчётах",
+  FEAR_PLATFORM_DEPENDENCY: "опасается зависимости от площадок", FEAR_PREVIOUS_FAILURE: "был неудачный опыт",
+};
+
 export function formatTelegramManagerCard(
   request: ManagerNotificationRequest,
+  origin?: Pick<Lead, "source" | "externalLeadId">,
 ): string {
   const { summary } = request;
-  const lines = ["🔥 Горячий лид"];
+  const lines = ["🔥 Новый квалифицированный лид"];
   addLine(lines, "Имя", summary.name);
   addLine(lines, "Телефон", summary.phoneNumber);
   lines.push("");
-  addLine(lines, "Сегмент", segmentLabels[summary.segment] ?? summary.segment);
+  addLine(lines, "Сегмент", segmentLabels[summary.segment] ?? "Не указано");
   addLine(lines, "Город", summary.city);
   addLine(lines, "Капитал", formatMoney(summary.availableCapital));
   addLine(
     lines,
-    "Старт",
+    "Стартовый объём",
     summary.startingUnits === null ? null : `${summary.startingUnits} объект(а)`,
   );
   addLine(
     lines,
-    "Потенциал",
+    "Потенциал масштабирования",
     summary.scalingPotentialUnits === null
       ? null
       : `до ${summary.scalingPotentialUnits} объект(ов)`,
   );
-  addLine(lines, "Срок", summary.launchTiming);
-  addLine(lines, "Финансовая готовность", summary.financialReadiness);
-  addLine(lines, "Статус", request.qualificationStatus);
-  addLine(lines, "Кратко", compactManagerSummary(summary));
+  addLine(lines, "Срок запуска", timingLabels[summary.launchTiming ?? "UNKNOWN"] ?? "Не указано");
+  addLine(lines, "Цель", goalLabels[summary.goal ?? "UNKNOWN"] ?? "Не указано");
+  addLine(lines, "Ключевые факты", compactManagerSummary(summary));
+  const concerns = [
+    ...summary.questions, ...summary.objections,
+    barrierLabels[summary.primaryBarrier ?? ""], barrierLabels[summary.secondaryBarrier ?? ""],
+  ].filter(Boolean);
+  addLine(lines, "Вопросы / возражения", [...new Set(concerns)].slice(0, 4).join("; "));
   addLine(lines, "Следующий шаг", summary.recommendedNextStep);
+  addLine(lines, "Источник", origin?.source.toLowerCase() === "avito" ? "Avito" : origin?.source ?? "Не указано");
+  addLine(lines, "ID диалога", origin?.externalLeadId ?? "Не указано");
   return lines.join("\n").slice(0, 3_500);
 }
 
 function compactManagerSummary(summary: ManagerSummary): string | null {
   const values = [
-    summary.goal,
-    summary.primaryBarrier,
-    summary.secondaryBarrier,
-    ...summary.objections.slice(0, 2),
-    ...summary.questions.slice(0, 2),
+    summary.businessModelReadiness === "ACCEPTS" ? "модель бизнеса принимает" : null,
+    summary.additionalExpensesReadiness === "READY" ? "готов к дополнительным расходам" : null,
+    summary.businessExperience ? `опыт: ${compact(summary.businessExperience, 70)}` : null,
+    summary.shortTermRentalExperience ? `опыт посуточной аренды: ${compact(summary.shortTermRentalExperience, 70)}` : null,
+    summary.availableTime ? `время: ${compact(summary.availableTime, 70)}` : null,
   ].filter((value): value is string => Boolean(value));
   return values.length > 0 ? values.join("; ") : null;
 }
@@ -87,6 +117,7 @@ interface RecipientDeliveryResult {
   sent: boolean;
   retryable: boolean;
   errorCode: string | null;
+  attempted?: boolean;
 }
 
 export class TelegramManagerNotificationProvider
@@ -112,6 +143,14 @@ export class TelegramManagerNotificationProvider
   async notify(
     notification: ManagerNotificationRequest,
   ): Promise<ProviderDeliveryResult> {
+    // Read the authoritative Lead, including for notifications queued before the
+    // phone-before-handoff policy was introduced. Never trust an old summary phone.
+    const lead = await this.persistence.leads.findById(notification.leadId);
+    if (!lead?.handoffAt || lead.qualificationStatus === "NO_FIT" ||
+        notification.qualificationStatus === "NO_FIT" || !hasConfirmedPhone(lead)) {
+      return { status: "FAILED", retryable: false, attempted: false,
+        errorCode: "TELEGRAM_HANDOFF_NOT_ELIGIBLE" };
+    }
     const recipients = (
       await this.persistence.telegramManagerRecipients.listActive()
     ).filter(
@@ -120,21 +159,22 @@ export class TelegramManagerNotificationProvider
     if (recipients.length === 0) {
       return {
         status: "FAILED",
-        retryable: true,
+        retryable: false,
         attempted: false,
         errorCode: "TELEGRAM_NO_ACTIVE_RECIPIENTS",
       };
     }
 
-    const text = formatTelegramManagerCard(notification);
-    const results = await Promise.all(
+    const text = formatTelegramManagerCard({ ...notification,
+      summary: { ...notification.summary, phoneNumber: lead.phoneNumber } }, lead);
+    const settled = await Promise.allSettled(
       recipients.map(async (recipient) => {
         const current =
           await this.persistence.telegramManagerRecipients.findByChatId(
             recipient.telegramChatId,
           );
-        if (!current?.isActive) {
-          return { sent: true, retryable: false, errorCode: null };
+        if (!current?.isActive || current.authorizedAt > notification.createdAt) {
+          return { sent: true, retryable: false, errorCode: null, attempted: false };
         }
         return this.deliverToRecipient(
           notification,
@@ -144,6 +184,8 @@ export class TelegramManagerNotificationProvider
         );
       }),
     );
+    const results: RecipientDeliveryResult[] = settled.map((result) => result.status === "fulfilled"
+      ? result.value : { sent: false, retryable: true, errorCode: "TELEGRAM_RECIPIENT_DELIVERY_FAILED" });
 
     if (results.every((result) => result.sent)) {
       return { status: "SENT", externalId: null };
@@ -152,6 +194,7 @@ export class TelegramManagerNotificationProvider
     return {
       status: "FAILED",
       retryable,
+      attempted: results.some((result) => result.attempted !== false),
       errorCode:
         results.find((result) => !result.sent)?.errorCode ??
         "TELEGRAM_RECIPIENT_DELIVERY_FAILED",
@@ -193,7 +236,7 @@ export class TelegramManagerNotificationProvider
       };
     }
     if (stored.deliveryStatus === "SENT") {
-      return { sent: true, retryable: false, errorCode: null };
+      return { sent: true, retryable: false, errorCode: null, attempted: false };
     }
     if (
       stored.deliveryAttempts >= MAX_EXTERNAL_DELIVERY_ATTEMPTS ||
@@ -203,6 +246,7 @@ export class TelegramManagerNotificationProvider
         sent: false,
         retryable: false,
         errorCode: stored.lastDeliveryErrorCode ?? "TELEGRAM_RETRY_EXHAUSTED",
+        attempted: false,
       };
     }
 
@@ -218,15 +262,21 @@ export class TelegramManagerNotificationProvider
           idempotencyKey,
         );
       return latest?.deliveryStatus === "SENT"
-        ? { sent: true, retryable: false, errorCode: null }
+        ? { sent: true, retryable: false, errorCode: null, attempted: false }
         : {
             sent: false,
             retryable: true,
             errorCode: "TELEGRAM_DELIVERY_IN_PROGRESS",
+            attempted: false,
           };
     }
 
-    const result = await this.sender.sendMessage(chatId, text);
+    let result: ProviderDeliveryResult;
+    try {
+      result = await this.sender.sendMessage(chatId, text);
+    } catch {
+      result = { status: "FAILED", retryable: true, errorCode: "TELEGRAM_SENDER_ERROR" };
+    }
     const completedAt = this.now();
     const updated: TelegramManagerDelivery =
       result.status === "SENT"
@@ -251,6 +301,14 @@ export class TelegramManagerNotificationProvider
             updatedAt: completedAt,
           };
     await this.persistence.telegramManagerDeliveries.update(updated);
+    const logger = this.config.logger ?? silentLogger;
+    logger[result.status === "SENT" ? "info" : "error"](
+      result.status === "SENT" ? "telegram_manager_delivery.sent" : "telegram_manager_delivery.failed",
+      { notificationId: notification.notificationId, leadId: notification.leadId, recipientId,
+        providerMessageId: updated.externalMessageId, attempts: updated.deliveryAttempts,
+        errorCode: updated.lastDeliveryErrorCode, retryable: updated.deliveryRetryable,
+        latencyMs: completedAt.getTime() - timestamp.getTime() },
+    );
     return result.status === "SENT"
       ? { sent: true, retryable: false, errorCode: null }
       : {
