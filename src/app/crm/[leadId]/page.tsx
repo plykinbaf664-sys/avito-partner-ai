@@ -12,6 +12,7 @@ import {
   segmentLabels,
   qualificationLabel,
   handoffLabel,
+  informationNeedLabels,
 } from "../crm-format";
 import { requireCrmPageAccess } from "../require-crm-page-access";
 
@@ -76,6 +77,7 @@ export default async function CrmLeadPage({
           <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <Field label="Квалификация" value={qualificationLabel(record)} />
             <Field label="Причина" value={record.qualificationReason ?? ""} />
+            <Field label="Осталось выяснить" value={record.missingCriticalFacts.map((need) => informationNeedLabels[need] ?? need).join(", ")} />
             <Field label="Состояние диалога" value={record.conversationState ?? ""} />
             <Field label="Handoff" value={handoffLabel(record)} />
             <Field label="Дата передачи" value={dateTime(record.handoffAt)} />

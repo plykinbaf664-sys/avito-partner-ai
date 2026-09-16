@@ -3,6 +3,7 @@ import type { DeliveryStatus } from "@/domain/delivery/delivery-state";
 import type { ManagerSummary } from "@/domain/handoff/manager-summary";
 import type { Lead } from "@/domain/lead/lead";
 import type { FinancialReadiness } from "@/domain/qualification/financial-readiness";
+import type { InformationNeed } from "@/domain/conversation/information-needs";
 
 export const crmLeadFilters = [
   "all",
@@ -37,11 +38,13 @@ export interface CrmLeadRecord {
   launchTiming: Lead["launchTiming"];
   qualificationStatus: Lead["qualificationStatus"];
   qualificationReason: Lead["qualificationReason"];
+  missingCriticalFacts: InformationNeed[];
   buyingIntent: string | null;
   financialReadiness: FinancialReadiness;
   shouldHandoffToManager: boolean;
   waitingForPhone: boolean;
   handoffAt: Date | null;
+  handoffQualificationComplete: boolean;
   objections: string[];
   barriers: Array<NonNullable<Lead["primaryFear"]>>;
   managerSummary: ManagerSummary | null;

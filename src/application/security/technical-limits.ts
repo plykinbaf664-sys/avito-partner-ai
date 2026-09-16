@@ -7,7 +7,8 @@ export const MAX_EXTRACTED_TEXT_LENGTH = 2_000;
 export const MAX_EXTRACTED_SIGNAL_ITEMS = 20;
 
 export const MAX_STORED_LEAD_SIGNAL_ITEMS = 100;
-export const MAX_RECENT_LLM_MESSAGES = 3;
+// Enough for a compact multi-turn sales exchange while keeping the prompt bounded.
+export const MAX_RECENT_LLM_MESSAGES = 12;
 export const MAX_RECENT_LLM_MESSAGE_LENGTH = 2_000;
 
 export const MAX_INCOMING_PROCESSING_ATTEMPTS = 3;

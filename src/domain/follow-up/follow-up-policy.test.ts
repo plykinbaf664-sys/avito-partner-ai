@@ -157,4 +157,13 @@ describe("qualification follow-up policy", () => {
     expect(text.toLocaleLowerCase("ru-RU")).toContain("бюджет");
     expect(text).not.toContain("Вы ещё заинтересованы");
   });
+
+  it("asks whether the disclosed launch budget fits instead of repeating a generic budget question", () => {
+    const text = buildQualificationFollowUp(
+      conversation(),
+      "Для квалификации нужен бюджет от 150 000 ₽ на запуск.",
+    );
+    expect(text).toContain("такой бюджет на запуск вам подходит?");
+    expect(text).not.toContain("Какую сумму");
+  });
 });

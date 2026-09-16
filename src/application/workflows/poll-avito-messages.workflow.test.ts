@@ -293,7 +293,8 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
         ...Array.from({ length: 99 }, (_, i) => message(`own-${i}`, { direction: "out" }))]
       : [message("older", { text: "older" })]);
     expect(await h.poll(current)).toMatchObject({ status: "PASS", processed: 2 });
-    expect(h.extractMessage.mock.calls.map(([text]) => text)).toEqual(["older", "new"]);
+    expect(h.extractMessage.mock.calls.map(([request]) =>
+      typeof request === "string" ? request : request.text)).toEqual(["older", "new"]);
     expect(h.client.listChats).toHaveBeenLastCalledWith({ unreadOnly: false, limit: 100, offset: 100 });
   });
 

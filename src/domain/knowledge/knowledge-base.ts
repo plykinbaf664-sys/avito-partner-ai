@@ -1,5 +1,6 @@
 import type { ExtractedMessage } from "../extraction/extracted-message";
 import { calculateEconomicsEstimate } from "../economics/economics-calculator";
+import { SERVICEABILITY_POLICY } from "../lead/serviceability";
 
 export const knowledgeCategories = [
   "BUSINESS_MODEL",
@@ -72,10 +73,17 @@ function formatUnitCount(units: number): string {
 
 export const PARTNER_KNOWLEDGE_BASE: readonly KnowledgeEntry[] = [
   {
+    id: "supported-cities",
+    category: "LIMITATIONS",
+    answer: `Подтверждённые города работы: ${SERVICEABILITY_POLICY.supportedCities.join(", ")}. По другим городам возможность запуска нужно проверять отдельно; отсутствие города в списке не означает автоматический отказ.`,
+    matches: (text) =>
+      /(?:можно|работ|запуск|схем).{0,35}(?:москв|город)|(?:москв|город).{0,35}(?:можно|работ|запуск|схем)/u.test(text),
+  },
+  {
     id: "offer-overview",
     category: "BUSINESS_MODEL",
     answer:
-      "Вы запускаете свой бизнес на субаренде, а команда помогает подобрать и запустить объект. Первый этап — около 50 000 ₽ за помощь с подбором и рекомендации по комплектации; аренду, залог и комплектацию оплачиваете отдельно. Ориентир минимального запуска — около 120 000 ₽, плюс желательно около 20 000 ₽ на базовое оснащение. Дальше управляющая компания помогает с бронированиями, гостями и координацией персонала. Это не фиксированная смета, доход не гарантируется.",
+      "Вы запускаете свой бизнес на субаренде, а команда помогает подобрать и запустить объект. Первый этап — около 50 000 ₽ за помощь с подбором и рекомендации по комплектации; аренду, залог и комплектацию оплачиваете отдельно. Для квалификации нужен бюджет от 150 000 ₽: ориентир базового запуска — около 120 000 ₽, плюс желательно около 20 000 ₽ на оснащение и запас на отклонения конкретного объекта. Дальше управляющая компания помогает с бронированиями, гостями и координацией персонала. Это не фиксированная смета, доход не гарантируется.",
     matches: (text) => /(?:услови|предлага|предложени|схем[аы]|модель работ|формат работ|суть бизнес|что за бизнес|чем занимаетесь)/u.test(text),
   },
   {
@@ -103,7 +111,7 @@ export const PARTNER_KNOWLEDGE_BASE: readonly KnowledgeEntry[] = [
     id: "small-business-entry",
     category: "BUSINESS_MODEL",
     answer:
-      "Около 50 000 ₽ — ориентир оплаты услуги команды: помощь с подбором подходящего объекта и рекомендации или чек-лист по базовой комплектации. Отдельно партнёр оплачивает аренду, залог, комплектацию и другие расходы по объекту. Текущие ориентиры — около 35 000 ₽ на аренду, около 35 000 ₽ на залог и около 120 000 ₽ минимального капитала на запуск; дополнительно желательно предусмотреть порядка 20 000 ₽ на базовое оснащение. Это не фиксированная смета: итог зависит от конкретного объекта.",
+      "Около 50 000 ₽ — ориентир оплаты услуги команды: помощь с подбором подходящего объекта и рекомендации или чек-лист по базовой комплектации. Отдельно партнёр оплачивает аренду, залог, комплектацию и другие расходы по объекту. Текущие ориентиры — около 35 000 ₽ на аренду, около 35 000 ₽ на залог и около 120 000 ₽ базового запуска; дополнительно желательно предусмотреть порядка 20 000 ₽ на оснащение. Для квалификации нужен общий бюджет от 150 000 ₽. Это не фиксированная смета: итог зависит от конкретного объекта.",
     matches: (text) =>
       mentionsFiftyThousand(text) ||
       containsAny(text, [
@@ -154,6 +162,7 @@ export const PARTNER_KNOWLEDGE_BASE: readonly KnowledgeEntry[] = [
         "цен",
         "комисси",
         "оплат",
+        "оплач",
       ]),
   },
   {
@@ -214,29 +223,64 @@ export interface KnowledgeAnswer {
   answerFragments: string[];
   entryIds: string[];
   unresolvedQuestions: string[];
+  contextualReferenceResolved: boolean;
 }
+
+export interface KnowledgeConversationContext {
+  previousEntryIds?: readonly string[];
+  recentMessages?: readonly { direction: "INBOUND" | "OUTBOUND"; content: string }[];
+}
+
+const refersToPreviousContext = (text: string) =>
+  /(?:^|\s)(?:а\s+)?(?:это|эта|эти|такой|такая|также|так же|в эту|входит|получается|итого|всего|если (?:один|два|три|\d+)|на (?:один|два|три|\d+))(?:\s|\?|$)/u.test(text) ||
+  /(?:^|[^\d])\d[\d\s]*(?:тыс(?:яч[аиу]?)?|₽|руб)/u.test(text);
 
 export function answerFromKnowledgeBase(
   extraction: ExtractedMessage,
+  context: KnowledgeConversationContext = {},
 ): KnowledgeAnswer {
   const userStatements = [
     ...extraction.signals.questions,
     ...extraction.signals.objections,
   ].flatMap(questionParts);
-  const candidates = PARTNER_KNOWLEDGE_BASE.filter((entry) =>
+  const directCandidates = PARTNER_KNOWLEDGE_BASE.filter((entry) =>
     userStatements.some((statement) =>
       entry.matches(normalizeQuestion(statement)),
     ),
   );
+  const contextualReference = userStatements.some((statement) =>
+    refersToPreviousContext(normalizeQuestion(statement)),
+  );
+  const allPreviousCandidates = PARTNER_KNOWLEDGE_BASE.filter((entry) =>
+    context.previousEntryIds?.includes(entry.id),
+  );
+  const latestOutbound = context.recentMessages?.findLast(
+    (message) => message.direction === "OUTBOUND",
+  );
+  const recentGroundedCandidates = latestOutbound
+    ? allPreviousCandidates.filter((entry) =>
+      entry.matches(normalizeQuestion(latestOutbound.content)),
+    )
+    : [];
+  const previousCandidates = contextualReference
+    ? (recentGroundedCandidates.length > 0
+      ? recentGroundedCandidates.slice(0, 3)
+      : allPreviousCandidates.slice(-1))
+    : [];
+  const candidates = [...new Map([...directCandidates, ...previousCandidates]
+    .map((entry) => [entry.id, entry])).values()];
   const unresolvedQuestions = extraction.signals.questions.flatMap(questionParts).filter((question) => {
     const normalized = normalizeQuestion(question);
-    return needsIndividualAnswer(normalized) || !candidates.some((entry) => entry.matches(normalized));
+    const contextualGroundingExists = contextualReference && previousCandidates.length > 0;
+    return needsIndividualAnswer(normalized) ||
+      (!directCandidates.some((entry) => entry.matches(normalized)) && !contextualGroundingExists);
   });
   // Overviews already contain these facts; avoid repeating entire KB paragraphs.
   const hasOffer = candidates.some((entry) => entry.id === "offer-overview");
   const hasProcess = candidates.some((entry) => entry.id === "launch-process");
   const matched = candidates.filter((entry) =>
     !(hasOffer && ["small-business-entry", "company-responsibilities"].includes(entry.id)) &&
+    !(hasProcess && entry.id === "offer-overview") &&
     !(hasProcess && ["company-responsibilities", "operations-guests", "crm-visibility"].includes(entry.id)));
 
   const asksAboutEconomics = userStatements.some((statement) =>
@@ -244,7 +288,9 @@ export function answerFromKnowledgeBase(
       ...economicsTerms,
       "гарант",
     ]),
-  );
+  ) || (contextualReference && previousCandidates.some(
+    (entry) => entry.id === "guarantees-and-economics",
+  ));
   const asksWhetherLaunchBudgetIsGuaranteed = userStatements.some(
     (statement) => {
       const normalized = statement.trim().toLocaleLowerCase("ru-RU");
@@ -291,5 +337,7 @@ export function answerFromKnowledgeBase(
     answerFragments: [...new Set(answerFragments)],
     entryIds: matched.map((entry) => entry.id),
     unresolvedQuestions,
+    contextualReferenceResolved:
+      contextualReference && previousCandidates.length > 0 && unresolvedQuestions.length === 0,
   };
 }

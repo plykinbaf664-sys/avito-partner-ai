@@ -31,6 +31,8 @@ const qualificationQuestions: Record<InformationNeed, string> = {
 const rejectionMessages: Partial<Record<QualificationReasonCode, string>> = {
   NO_LAUNCH_CAPITAL:
     "Для запуска в этой модели нужен собственный капитал на услугу команды, аренду, залог и подготовку объекта. Без доступных средств начать сейчас не получится. Если финансовая ситуация изменится, можно вернуться к разговору.",
+  INSUFFICIENT_LAUNCH_CAPITAL:
+    "Для запуска нужен подтверждённый бюджет от 150 000 ₽. С указанной суммой текущий формат не подходит; если доступный бюджет изменится, можно вернуться к разговору.",
   NO_LAUNCH_INTENT:
     "Понял. Раз запуск вы сейчас не рассматриваете, не буду продолжать квалификацию. Если планы изменятся, можно вернуться к разговору.",
   NO_MANAGEMENT_INTERACTION:
@@ -52,6 +54,7 @@ export interface ConversationResponsePlan {
   knowledgeEntryIds: string[];
   unresolvedQuestions: string[];
   useNaturalAdaptation: boolean;
+  contextualReference?: boolean;
 }
 
 export function buildConversationResponse(params: {
@@ -64,15 +67,19 @@ export function buildConversationResponse(params: {
   const { extraction, decision, nextInformationNeed, knowledge } = params;
 
   if (decision.nextAction === "REJECT_POLITELY") {
-    return {
-      text:
-        rejectionMessages[decision.reason] ??
+    const answeredThenRejected = [
+      ...knowledge.answerFragments,
+      rejectionMessages[decision.reason] ??
         "К сожалению, текущий формат вам не подойдёт. Спасибо за разговор.",
+    ];
+    return {
+      text: answeredThenRejected.join(" "),
       nextInformationNeed: null,
       asksUserQuestion: false,
       knowledgeEntryIds: knowledge.entryIds,
       unresolvedQuestions: [],
-      useNaturalAdaptation: false,
+      useNaturalAdaptation: knowledge.answerFragments.length > 0,
+      contextualReference: knowledge.contextualReferenceResolved,
     };
   }
 
@@ -87,7 +94,9 @@ export function buildConversationResponse(params: {
 
   if (decision.shouldHandoffToManager) {
     parts.push(
-      extraction.signals.wantsHuman || knowledge.unresolvedQuestions.length > 0 ||
+      extraction.facts.phoneNumber && extraction.facts.phoneConfirmed
+        ? "Спасибо, передал номер менеджеру. Он свяжется с вами."
+        : extraction.signals.wantsHuman || knowledge.unresolvedQuestions.length > 0 ||
         ["USER_REQUESTED_HUMAN", "UNKNOWN_BUSINESS_QUESTION"].includes(decision.reason)
         ? "Передам менеджеру контекст разговора, чтобы он мог продолжить с вами предметно."
         : "Основные данные собраны. Передам менеджеру краткий контекст, чтобы продолжить предметно.",
@@ -115,6 +124,7 @@ export function buildConversationResponse(params: {
       knowledge.answerFragments.length > 0 ||
       parts.length >= 3 ||
       extraction.signals.questions.length + extraction.signals.objections.length > 1,
+    contextualReference: knowledge.contextualReferenceResolved,
   };
 }
 

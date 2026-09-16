@@ -108,6 +108,13 @@ export function assessFinancialReadiness(
   }
 
   if (statedCapital === null) {
+    if (facts.additionalExpensesReadiness === "READY") {
+      return {
+        launchCostAwareness,
+        financialReadiness: "READY",
+        financialBarrier: null,
+      };
+    }
     return {
       launchCostAwareness,
       financialReadiness: "UNKNOWN",

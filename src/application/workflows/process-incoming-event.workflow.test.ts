@@ -200,7 +200,7 @@ describe("incoming partner event workflow", () => {
     });
   });
 
-  it("does not apply the obsolete budget blocker to 100,000 rubles", async () => {
+  it("rejects a confirmed total below the current 150,000-ruble minimum", async () => {
     const { processEvent } = createHarness([
       extractionReply({
         facts: {
@@ -226,9 +226,9 @@ describe("incoming partner event workflow", () => {
     });
     expect(result).toMatchObject({
       shouldHandoffToManager: false,
-      nextAction: "CONTINUE_QUALIFICATION",
+      nextAction: "REJECT_POLITELY",
+      qualificationStatus: "NO_FIT",
     });
-    expect(result.qualificationStatus).not.toBe("NO_FIT");
   });
 
   it("keeps a 50,000-ruble one-unit lead eligible without owned property", async () => {
@@ -399,7 +399,7 @@ describe("incoming partner event workflow", () => {
 
     expect(second.leadId).toBe(first.leadId);
     expect(lead?.budget).toBe(100_000);
-    expect(lead?.qualificationStatus).not.toBe("NO_FIT");
+    expect(lead?.qualificationStatus).toBe("NO_FIT");
     expect(
       messages
         .filter((message) => message.direction === "INBOUND")
@@ -638,7 +638,7 @@ describe("incoming partner event workflow", () => {
     expect(result.qualificationStatus).not.toBe("NO_FIT");
   });
 
-  it("collects a phone before completing a direct request for a person", async () => {
+  it("saves a phone but does not let a direct human request bypass qualification", async () => {
     const { processEvent } = createHarness([
       extractionReply({
         intent: "WANTS_HUMAN",
@@ -658,8 +658,10 @@ describe("incoming partner event workflow", () => {
     });
     expect(await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${result.leadId}`)).toBeNull();
     const completed = await processEvent(input("event-human-phone", "+79991234567"));
-    expect(completed).toMatchObject({ shouldHandoffToManager: true, qualificationReason: "USER_REQUESTED_HUMAN" });
-    expect(completed.qualificationStatus).not.toBe("HANDOFF");
+    expect(completed).toMatchObject({ shouldHandoffToManager: false,
+      qualificationReason: "USER_REQUESTED_HUMAN", suggestedNextInformationNeed: "AVAILABLE_CAPITAL" });
+    expect((await persistence.leads.findById(completed.leadId!))?.phoneNumber).toBe("+79991234567");
+    expect(await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${result.leadId}`)).toBeNull();
   });
 
   it("keeps a failed event claim retryable before the LLM call", async () => {
@@ -761,7 +763,7 @@ describe("incoming partner event workflow", () => {
     const olderResult = new Promise<ExtractMessageResult>((resolve) => {
       releaseOlder = resolve;
     });
-    const extractMessage = async (text: string) => {
+    const extractMessage = async ({ text }: { text: string }) => {
       if (text === "older") {
         olderStarted();
         return olderResult;
@@ -885,7 +887,15 @@ describe("incoming partner event workflow", () => {
   it("notifies a manager once on handoff and never for NO_FIT", async () => {
     const managerProvider = new FakeManagerNotificationProvider();
     const llm = new FakeLLMProvider([
-      extractionReply({ intent: "WANTS_HUMAN", facts: { phoneNumber: "+79991234567", phoneConfirmed: true }, signals: { wantsHuman: true } }),
+      extractionReply({ intent: "WANTS_HUMAN", facts: {
+        phoneNumber: "+79991234567", phoneConfirmed: true,
+        city: "Химки", availableCapital: 150_000,
+        availableCapitalConfirmed: true, capitalScope: "TOTAL_LIMIT",
+        additionalExpensesReadiness: "READY",
+        businessModelReadiness: "ACCEPTS", startingUnits: 1,
+        launchTiming: "WITHIN_MONTH", managementReadiness: "READY",
+        primaryGoal: "MAIN_BUSINESS",
+      }, signals: { wantsHuman: true } }),
       extractionReply({ intent: "DECLINE" }),
     ]);
     const processEvent = createIncomingEventProcessor({

@@ -5,6 +5,7 @@ import { assessFinancialReadiness } from "./financial-readiness";
 import { normalizePhoneNumber } from "../lead/phone-number";
 
 export const PARTNER_QUALIFICATION_POLICY = Object.freeze({
+  minimumConfirmedLaunchCapital: 150_000,
   smallBusinessEntryCapitalReference:
     SEGMENTATION_REFERENCE.smallBusinessEntryCapital,
   investorCapitalReference: SEGMENTATION_REFERENCE.investorCapital,
@@ -13,6 +14,7 @@ export const PARTNER_QUALIFICATION_POLICY = Object.freeze({
 
 export const hardBlockingReasonCodes = [
   "NO_LAUNCH_CAPITAL",
+  "INSUFFICIENT_LAUNCH_CAPITAL",
   "NO_LAUNCH_INTENT",
   "NO_MANAGEMENT_INTERACTION",
   "DECLINED_BY_LEAD",
@@ -148,6 +150,10 @@ export function evaluateQualification(
     (facts.availableCapital === null &&
       facts.budget === 0 &&
       facts.budgetConfirmed);
+  const confirmedTotalCapital = facts.availableCapitalConfirmed &&
+    facts.capitalScope !== "ENTRY_ONLY"
+    ? facts.availableCapital
+    : null;
   if (facts.buyingIntent === "DECLINED") {
     blockingReasons.push("DECLINED_BY_LEAD");
   }
@@ -175,6 +181,14 @@ export function evaluateQualification(
   ) {
     blockingReasons.push("UNWILLING_TO_FUND_REQUIRED_EXPENSES");
   }
+  if (
+    !confirmedNoLaunchCapital &&
+    financialAssessment.financialBarrier !== "UNWILLING_TO_FUND_REQUIRED_EXPENSES" &&
+    confirmedTotalCapital !== null &&
+    confirmedTotalCapital < PARTNER_QUALIFICATION_POLICY.minimumConfirmedLaunchCapital
+  ) {
+    blockingReasons.push("INSUFFICIENT_LAUNCH_CAPITAL");
+  }
 
   if (blockingReasons.length > 0) {
     return {
@@ -190,18 +204,23 @@ export function evaluateQualification(
 
   if (context.wantsHuman || context.unknownBusinessQuestion) {
     const business = evaluateQualification(facts);
-    const canHandoff = hasConfirmedPhone(facts);
     const reason = context.wantsHuman
       ? "USER_REQUESTED_HUMAN"
       : "UNKNOWN_BUSINESS_QUESTION";
+    // A request for a person or an unknown question never substitutes for
+    // qualification. It only changes the handoff reason after the ordinary
+    // policy has already established that the lead is ready.
+    if (!business.shouldHandoffToManager) {
+      return {
+        ...business,
+        reason,
+        reasonCodes: unique([reason, ...business.reasonCodes]),
+      };
+    }
     return {
       ...business,
       reason,
       reasonCodes: unique([reason, ...business.reasonCodes]),
-      blockingReasons: [],
-      weakSignals: [],
-      shouldHandoffToManager: canHandoff,
-      nextAction: canHandoff ? "HANDOFF_TO_MANAGER" : "CONTINUE_QUALIFICATION",
     };
   }
 
@@ -231,7 +250,8 @@ export function evaluateQualification(
   }
 
   const informationGaps: QualificationReasonCode[] = [];
-  if (availableCapital === null && facts.entryBudget === null) {
+  if (availableCapital === null && facts.entryBudget === null &&
+      financialAssessment.financialReadiness !== "READY") {
     informationGaps.push("CAPITAL_UNKNOWN");
   } else if (
     facts.availableCapital !== null &&

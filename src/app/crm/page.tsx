@@ -12,6 +12,7 @@ import {
   segmentLabels,
   qualificationLabel,
   handoffLabel,
+  informationNeedLabels,
 } from "./crm-format";
 import { requireCrmPageAccess } from "./require-crm-page-access";
 
@@ -97,7 +98,7 @@ export default async function CrmPage({
                   "Источник",
                   "Последняя активность", "Имя", "Телефон", "Сегмент", "Город",
                   "Капитал", "Старт", "Потенциал", "Срок", "Квалификация",
-                  "Финансы", "Намерение", "Handoff", "Telegram",
+                  "Финансы", "Осталось выяснить", "Намерение", "Handoff", "Telegram",
                 ].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}
               </tr>
             </thead>
@@ -116,13 +117,14 @@ export default async function CrmPage({
                   <td className="px-3 py-3">{lead.launchTiming ? launchTimingLabels[lead.launchTiming] ?? lead.launchTiming : ""}</td>
                   <td className="px-3 py-3">{qualificationLabel(lead)}</td>
                   <td className="px-3 py-3">{financialLabels[lead.financialReadiness] ?? lead.financialReadiness}</td>
+                  <td className="px-3 py-3">{lead.missingCriticalFacts.map((need) => informationNeedLabels[need] ?? need).join(", ")}</td>
                   <td className="px-3 py-3">{lead.buyingIntent ? buyingIntentLabels[lead.buyingIntent] ?? lead.buyingIntent : ""}</td>
                   <td className="px-3 py-3">{handoffLabel(lead)}</td>
                   <td className="px-3 py-3">{notificationLabel(lead)}</td>
                 </tr>
               ))}
               {result.records.length === 0 ? (
-                <tr><td colSpan={15} className="px-4 py-10 text-center text-slate-500">Лиды не найдены</td></tr>
+                <tr><td colSpan={16} className="px-4 py-10 text-center text-slate-500">Лиды не найдены</td></tr>
               ) : null}
             </tbody>
           </table>

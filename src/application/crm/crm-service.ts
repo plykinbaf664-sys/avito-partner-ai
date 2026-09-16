@@ -6,6 +6,7 @@ import { assessFinancialReadiness } from "@/domain/qualification/financial-readi
 import { normalizePhoneNumber } from "@/domain/lead/phone-number";
 import { assessLeadSegment } from "@/domain/lead/lead-segment";
 import { evaluateQualification, hasConfirmedPhone } from "@/domain/qualification/qualification-policy";
+import { assessInformationNeeds } from "@/domain/conversation/information-needs";
 import type {
   CrmLeadDetails,
   CrmLeadFilter,
@@ -21,11 +22,13 @@ function toRecord(snapshot: CrmLeadSnapshot): CrmLeadRecord {
   const { lead, conversation, managerNotification } = snapshot;
   const financial = assessFinancialReadiness(lead);
   const segment = assessLeadSegment(lead);
-  const reassessed = lead.qualificationStatus === "HANDOFF" || lead.qualificationReason === "PHONE_UNKNOWN"
-    ? evaluateQualification({ ...lead, segment: segment.segment }) : null;
-  const qualificationStatus = reassessed?.status ?? lead.qualificationStatus;
+  const presentationLead = { ...lead, segment: segment.segment };
+  const reassessed = evaluateQualification(presentationLead);
+  const needs = assessInformationNeeds(presentationLead);
+  const qualificationStatus = reassessed.status;
+  const handoffQualificationComplete = reassessed.shouldHandoffToManager;
   const waitingForPhone = !hasConfirmedPhone(lead) &&
-    (conversation?.pendingInformationNeed === "PHONE_NUMBER" || lead.qualificationStatus === "HANDOFF" ||
+    (conversation?.pendingInformationNeed === "PHONE_NUMBER" ||
       ["HOT", "PRIORITY", "QUALIFIED"].includes(qualificationStatus));
   return {
     leadId: lead.id,
@@ -48,12 +51,14 @@ function toRecord(snapshot: CrmLeadSnapshot): CrmLeadRecord {
     goal: lead.primaryGoal,
     launchTiming: lead.launchTiming,
     qualificationStatus,
-    qualificationReason: reassessed?.reason ?? lead.qualificationReason,
+    qualificationReason: reassessed.reason,
+    missingCriticalFacts: needs.missingCriticalFacts,
     buyingIntent: lead.buyingIntent,
     financialReadiness: financial.financialReadiness,
-    shouldHandoffToManager: lead.handoffAt !== null && hasConfirmedPhone(lead),
+    shouldHandoffToManager: lead.handoffAt !== null && handoffQualificationComplete,
     waitingForPhone,
     handoffAt: lead.handoffAt,
+    handoffQualificationComplete,
     objections: lead.objections,
     barriers: [lead.primaryFear, lead.secondaryFear].filter(
       (value): value is NonNullable<typeof value> => value !== null,

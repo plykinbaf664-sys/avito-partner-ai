@@ -50,18 +50,32 @@ export const buyingIntentLabels: Record<string, string> = {
   WANTS_HUMAN: "Просит связаться",
 };
 
+export const informationNeedLabels: Record<string, string> = {
+  PHONE_NUMBER: "телефон", AVAILABLE_CAPITAL: "финансовая готовность",
+  ADDITIONAL_EXPENSES: "готовность к расходам", BUSINESS_MODEL: "готовность к модели",
+  CITY: "город", LAUNCH_TIMING: "срок запуска", FREE_TIME: "свободное время",
+  MANAGEMENT_READINESS: "готовность взаимодействовать", STARTING_UNITS: "стартовый объём",
+  SCALING_POTENTIAL_UNITS: "потенциал масштаба", GOAL: "цель",
+  EXPERIENCE: "опыт", BARRIER: "барьер",
+};
+
 export function qualificationLabel(record: CrmLeadRecord): string {
   return record.waitingForPhone && ["HOT", "PRIORITY", "QUALIFIED"].includes(record.qualificationStatus)
     ? "Квалифицирован" : statusLabels[record.qualificationStatus] ?? record.qualificationStatus;
 }
 
 export function handoffLabel(record: CrmLeadRecord): string {
-  if (record.handoffAt && !record.shouldHandoffToManager) return "Передан ранее без телефона";
+  if (record.handoffAt && !record.handoffQualificationComplete) return "Передан ранее до завершения квалификации";
   if (record.shouldHandoffToManager) return "Передан менеджеру";
   return record.waitingForPhone ? "Ожидает телефон" : "Не передан";
 }
 
 export function notificationLabel(record: CrmLeadRecord): string {
+  if (record.managerNotificationStatus && !record.handoffQualificationComplete) {
+    return record.managerNotificationStatus === "SENT"
+      ? "Отправлено ранее до завершения квалификации"
+      : "Создано ранее до завершения квалификации";
+  }
   return record.managerNotificationStatus
     ? notificationLabels[record.managerNotificationStatus]
     : "Не отправлялось";

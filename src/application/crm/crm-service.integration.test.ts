@@ -174,7 +174,8 @@ describe("local CRM read model", () => {
     expect(record).toMatchObject({ segment: "SMALL_BUSINESS", qualificationStatus: "NEEDS_MORE_INFO",
       shouldHandoffToManager: false, phoneNumber: null, handoffAt: now });
     expect(qualificationLabel(record)).toBe("Требуется информация");
-    expect(handoffLabel(record)).toBe("Передан ранее без телефона");
+    expect(handoffLabel(record)).toBe("Передан ранее до завершения квалификации");
+    expect(record.missingCriticalFacts).toContain("STARTING_UNITS");
     expect(await persistence.leads.findById("lead-2")).toMatchObject({ qualificationStatus: "HANDOFF", handoffAt: now });
     const csv = createCrmCsv([record]);
     expect(csv).not.toContain('"HANDOFF"');

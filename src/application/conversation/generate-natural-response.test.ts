@@ -14,7 +14,7 @@ describe("natural response generation", () => {
     nextInformationNeed: "AVAILABLE_CAPITAL", asksUserQuestion: true,
     knowledgeEntryIds: ["offer-overview"], unresolvedQuestions: [], useNaturalAdaptation: true,
   };
-  const validOffer = "Помогаем запустить бизнес на субаренде. Первый этап — около 50 000 ₽ за подбор и рекомендации по комплектации; всего на запуск ориентир около 120 000 ₽, плюс желательно около 20 000 ₽ на оснащение. Аренда, залог и комплектация — расходы партнёра, а команда помогает с бронированиями и гостями. Смета зависит от объекта, доход не гарантируется. Это ваш общий капитал или бюджет только на первый этап?";
+  const validOffer = "Помогаем запустить бизнес на субаренде. Первый этап — около 50 000 ₽ за подбор и рекомендации по комплектации; для квалификации нужен бюджет от 150 000 ₽, базовый запуск — около 120 000 ₽, плюс желательно около 20 000 ₽ на оснащение. Аренда, залог и комплектация — расходы партнёра, а команда помогает с бронированиями и гостями. Смета зависит от объекта, доход не гарантируется. Это ваш общий капитал или бюджет только на первый этап?";
 
   it.each([
     validOffer,
@@ -26,7 +26,7 @@ describe("natural response generation", () => {
 
   it.each([
     validOffer.replace(", доход не гарантируется", ""),
-    validOffer.replace("всего на запуск ориентир около 120 000 ₽", "затем нужно примерно 120 000 ₽ на аренду и залог"),
+    validOffer.replace("базовый запуск — около 120 000 ₽", "аренда и залог — около 120 000 ₽"),
     validOffer.replace("20 000 ₽", "30 000 ₽"),
     validOffer.replace("первый этап?", "первый объект?"),
     validOffer.replace("Это ваш общий капитал или бюджет только на первый этап?", "Это ваш общий капитал или бюджет только на первый этап? В каком городе?"),
@@ -84,13 +84,89 @@ describe("natural response generation", () => {
     const sentContext = JSON.parse(llm.requests[0]!.userMessage) as {
       recentMessages: { content: string }[];
     };
-    expect(sentContext.recentMessages).toHaveLength(3);
+    expect(sentContext.recentMessages).toHaveLength(4);
     expect(llm.requests[0]?.systemPrompt).toContain("SECURITY BOUNDARY");
     expect(llm.requests[0]?.systemPrompt).toContain("Не заменяй известный ответ");
     expect(llm.requests[0]?.systemPrompt).toContain("только один следующий вопрос");
     expect(JSON.parse(llm.requests[0]!.userMessage)).toMatchObject({
       asksNextQuestion: true, unresolvedQuestions: [],
     });
-    expect(llm.requests[0]?.userMessage).not.toContain("Первое");
+    expect(llm.requests[0]?.userMessage).toContain("Первое");
+  });
+
+  it.each([
+    [
+      "Получается всего 120 тысяч?",
+      "Да, по перечисленным ориентирам получается около 120 000 ₽. Это расчёт по примерным составляющим, итоговая смета зависит от объекта.",
+    ],
+    [
+      "Получается всего 190 тысяч?",
+      "Не совсем: по перечисленным ориентирам получается около 120 000 ₽. Это расчёт по примерным составляющим, итоговая смета зависит от объекта.",
+    ],
+  ])("checks a contextual total instead of trusting the client's number: %s", async (question, answer) => {
+    const plan: ConversationResponsePlan = {
+      text: "Первый этап — около 50 000 ₽, аренда — около 35 000 ₽, залог — около 35 000 ₽. Это ориентиры, точная смета зависит от объекта.",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: ["small-business-entry"],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      contextualReference: true,
+    };
+    const generate = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([JSON.stringify({ text: answer })]),
+    });
+
+    await expect(generate({
+      lead: {} as Lead,
+      plan,
+      recentMessages: [
+        { direction: "OUTBOUND", content: plan.text },
+        { direction: "INBOUND", content: question },
+      ],
+    })).resolves.toMatchObject({ text: answer });
+  });
+
+  it("understands a two-object reference and permits only grounded arithmetic", async () => {
+    const plan: ConversationResponsePlan = {
+      text: "Ориентир по доходу — около 20 000 ₽ с одного объекта в месяц, без гарантии результата.",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: ["guarantees-and-economics"],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      contextualReference: true,
+    };
+    const text = "Для двух объектов ориентир получается около 40 000 ₽ в месяц, но доход не гарантируется.";
+    const generate = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([JSON.stringify({ text })]),
+    });
+
+    await expect(generate({
+      lead: {} as Lead,
+      plan,
+      recentMessages: [
+        { direction: "OUTBOUND", content: plan.text },
+        { direction: "INBOUND", content: "А если два объекта?" },
+      ],
+    })).resolves.toMatchObject({ text });
+  });
+
+  it("rejects an ungrounded business condition in a contextual answer", async () => {
+    const plan: ConversationResponsePlan = {
+      text: "Первый этап — около 50 000 ₽. Это ориентир, итог зависит от объекта.",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: ["small-business-entry"],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      contextualReference: true,
+    };
+    const generate = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([JSON.stringify({ text: "В сумму входит первый этап, также доступна рассрочка." })]),
+    });
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .rejects.toThrow("RESPONSE_POLICY_VIOLATION");
   });
 });

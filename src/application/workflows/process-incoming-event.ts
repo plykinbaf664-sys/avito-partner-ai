@@ -5,7 +5,7 @@ import { EventProcessingRejectedError } from "../errors/event-processing-error";
 import { RetryableInfrastructureError } from "../errors/infrastructure-error";
 import { createManagerNotificationDelivery } from "../delivery/deliver-manager-notification";
 import { createOutboundMessageDelivery } from "../delivery/deliver-outbound-message";
-import type { ExtractMessageResult } from "../extraction/extract-message";
+import type { ExtractMessageResult, MessageExtractionInput } from "../extraction/extract-message";
 import { mergeExtractedFacts } from "../extraction/merge-extracted-facts";
 import {
   silentLogger,
@@ -19,6 +19,7 @@ import type {
 import {
   MAX_INBOUND_MESSAGE_LENGTH,
   MAX_INCOMING_PROCESSING_ATTEMPTS,
+  MAX_RECENT_LLM_MESSAGES,
 } from "../security/technical-limits";
 import { buildConversationResponse } from "../../domain/conversation/conversation-response";
 import {
@@ -102,7 +103,7 @@ export interface ProcessIncomingEventResult {
 }
 
 export type MessageExtractor = (
-  text: string,
+  input: MessageExtractionInput,
 ) => Promise<ExtractMessageResult>;
 
 export interface ProcessIncomingEventDependencies {
@@ -558,7 +559,16 @@ export function createIncomingEventProcessor({
 
     let extracted: ExtractMessageResult;
     try {
-      extracted = await extractMessage(input.text);
+      const extractionHistory = await persistence.messages.listRecentByConversationId(
+        prepared.conversation!.id,
+        MAX_RECENT_LLM_MESSAGES,
+      );
+      extracted = await extractMessage({
+        text: input.text,
+        currentLead: prepared.lead!,
+        pendingInformationNeed: prepared.conversation!.pendingInformationNeed,
+        recentMessages: extractionHistory.map(({ direction, content }) => ({ direction, content })),
+      });
     } catch (error) {
       const llmLatencyMs = elapsedMilliseconds(llmStartedAt, timer);
       await persistence.incomingEvents.markFailed(
@@ -666,7 +676,13 @@ export function createIncomingEventProcessor({
         extracted.extraction,
         evaluatedAt,
       );
-      const knowledge = answerFromKnowledgeBase(extracted.extraction);
+      const history = await persistence.messages.listByConversationId(
+        currentConversation.id,
+      );
+      const knowledge = answerFromKnowledgeBase(extracted.extraction, {
+        previousEntryIds: parseStoredKnowledgeIds(currentConversation.summary),
+        recentMessages: history.map(({ direction, content }) => ({ direction, content })),
+      });
       const decision = evaluateQualification(evaluatedLead, qualificationContextForLead(evaluatedLead, {
         wantsHuman: extracted.extraction.signals.wantsHuman,
         unknownBusinessQuestion: knowledge.unresolvedQuestions.length > 0,
@@ -688,9 +704,6 @@ export function createIncomingEventProcessor({
         nextInformationNeed,
         knowledge,
       });
-      const history = await persistence.messages.listByConversationId(
-        currentConversation.id,
-      );
       let responseLlm: Awaited<ReturnType<NaturalResponseGenerator>> | null =
         null;
       if (responsePlan.useNaturalAdaptation && generateNaturalResponse) {

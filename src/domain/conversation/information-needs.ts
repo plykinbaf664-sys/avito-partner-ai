@@ -43,7 +43,8 @@ function isKnown(lead: Lead, need: InformationNeed): boolean {
       return (
         lead.entryBudget !== null ||
         (lead.availableCapital !== null && lead.availableCapitalConfirmed) ||
-        (lead.budget !== null && lead.budgetConfirmed)
+        (lead.budget !== null && lead.budgetConfirmed) ||
+        assessFinancialReadiness(lead).financialReadiness === "READY"
       );
     case "PHONE_NUMBER":
       return hasConfirmedPhone(lead);
@@ -81,9 +82,6 @@ function isKnown(lead: Lead, need: InformationNeed): boolean {
 }
 
 function criticalInformationNeedsFor(lead: Lead): InformationNeed[] {
-  if (!hasConfirmedPhone(lead) && ["PHONE_UNKNOWN", "USER_REQUESTED_HUMAN", "UNKNOWN_BUSINESS_QUESTION"].includes(lead.qualificationReason ?? "")) {
-    return ["PHONE_NUMBER"];
-  }
   if (lead.segment === "INVESTOR") {
     const needs: InformationNeed[] = [
       "AVAILABLE_CAPITAL",
@@ -126,6 +124,14 @@ function criticalInformationNeedsFor(lead: Lead): InformationNeed[] {
           LAUNCH_COST_REFERENCE.furnishingReserveReference)
   ) {
     needs.push("ADDITIONAL_EXPENSES");
+  }
+  if (
+    !hasConfirmedPhone(lead) &&
+    ["PHONE_UNKNOWN", "USER_REQUESTED_HUMAN", "UNKNOWN_BUSINESS_QUESTION"].includes(
+      lead.qualificationReason ?? "",
+    )
+  ) {
+    needs.push("PHONE_NUMBER");
   }
   return needs;
 }
@@ -179,6 +185,15 @@ function selectNextInformationNeed(
     EXPERIENCE: 30,
     BARRIER: 25,
   };
+
+  if (
+    !hasConfirmedPhone(lead) &&
+    ["PHONE_UNKNOWN", "USER_REQUESTED_HUMAN", "UNKNOWN_BUSINESS_QUESTION"].includes(
+      lead.qualificationReason ?? "",
+    )
+  ) {
+    scores.PHONE_NUMBER = 110;
+  }
 
   if (lead.segment === "INVESTOR") {
     scores.STARTING_UNITS += 20;

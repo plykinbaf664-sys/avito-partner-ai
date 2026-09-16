@@ -128,7 +128,7 @@ describe("multi-turn qualification conversation", () => {
       reply({ intent: "QUESTION", signals: { questions: [question] } }),
     ]);
     const result = await processEvent(input(1, question));
-    for (const fragment of fragments) expect(result.outboundMessage).toContain(fragment);
+    for (const fragment of fragments) expect(result.outboundMessage?.toLocaleLowerCase("ru")).toContain(fragment.toLocaleLowerCase("ru"));
     expect(result.shouldHandoffToManager).toBe(false);
     expect(result.outboundMessage).not.toContain("уточнить у менеджера");
     expect(result.outboundMessage).not.toContain("Передам менеджеру");
@@ -149,6 +149,19 @@ describe("multi-turn qualification conversation", () => {
     expect(result.outboundMessage!.match(/\?/gu)).toHaveLength(1);
   });
 
+  it("answers Moscow availability and service payment before continuing qualification", async () => {
+    const question = "В Москве можно по такой схеме работать? Ваши услуги как оплачиваются?";
+    const { processEvent } = harness([reply({ intent: "QUESTION",
+      signals: { questions: [question] } })]);
+    const result = await processEvent(input(1, question));
+    expect(result.outboundMessage).toContain("Подтверждённые города");
+    expect(result.outboundMessage).toContain("500 ₽");
+    expect(result.outboundMessage).toContain("100 ₽");
+    expect(result.outboundMessage).toContain("Какую сумму");
+    expect(result.outboundMessage).not.toContain("Оставьте, пожалуйста, номер");
+    expect(result.shouldHandoffToManager).toBe(false);
+  });
+
   it.each([
     ["Кто занимается гостями и какая страховая компания покроет ущерб?", "администратор", "какая страховая компания покроет ущерб"],
     ["Как работает CRM и есть ли API?", "онлайн-режиме", "есть ли API"],
@@ -158,12 +171,12 @@ describe("multi-turn qualification conversation", () => {
   ])("answers the known part before escalating the specific gap: %s", async (question, known, unknown) => {
     const { processEvent } = harness([reply({ intent: "QUESTION", facts: { phoneNumber: "+79991234567", phoneConfirmed: true }, signals: { questions: [question] } })]);
     const result = await processEvent(input(1, question));
-    expect(result.shouldHandoffToManager).toBe(true);
+    expect(result.shouldHandoffToManager).toBe(false);
     expect(result.qualificationReason).toBe("UNKNOWN_BUSINESS_QUESTION");
     expect(result.outboundMessage).toContain(known);
     expect(result.outboundMessage).toContain(unknown);
     expect(result.outboundMessage!.indexOf(known)).toBeLessThan(result.outboundMessage!.indexOf("эту часть лучше уточнить"));
-    expect(result.outboundMessage).not.toContain("Какую сумму");
+    expect(result.outboundMessage).toContain("Какую сумму");
   });
 
   it("still honors an explicit human request even when the KB answers the question", async () => {
@@ -172,7 +185,7 @@ describe("multi-turn qualification conversation", () => {
       signals: { questions: ["Кто занимается гостями?"], wantsHuman: true } })]);
     const result = await processEvent(input(1, "Кто занимается гостями? Хочу поговорить с человеком."));
     expect(result.outboundMessage).toContain("администратор");
-    expect(result.shouldHandoffToManager).toBe(true);
+    expect(result.shouldHandoffToManager).toBe(false);
     expect(result.qualificationReason).toBe("USER_REQUESTED_HUMAN");
   });
 
@@ -262,7 +275,7 @@ describe("multi-turn qualification conversation", () => {
         qualificationStatus: "PRIORITY",
       },
     });
-    expect(result.outboundMessage).toContain("Основные данные собраны");
+    expect(result.outboundMessage).toContain("Спасибо, передал номер менеджеру");
     expect((await persistence.conversations.findById(result.conversationId!))?.qualificationCompleted).toBe(true);
   });
 
@@ -754,7 +767,7 @@ describe("multi-turn qualification conversation", () => {
     const result = await processEvent(input(1, question));
     expect(result).toMatchObject({
       qualificationStatus: "NEEDS_MORE_INFO",
-      shouldHandoffToManager: true,
+      shouldHandoffToManager: false,
       qualificationReason: "UNKNOWN_BUSINESS_QUESTION",
     });
     expect(result.outboundMessage).toContain("лучше уточнить у менеджера");
@@ -834,6 +847,45 @@ describe("multi-turn qualification conversation", () => {
     expect(result.qualificationStatus).toBe("BORDERLINE");
     expect(result.qualificationStatus).not.toBe("NO_FIT");
     expect(result.suggestedNextInformationNeed).toBe("MANAGEMENT_READINESS");
+  });
+
+  it("does not treat acknowledgement as financial readiness but accepts an explicit contextual confirmation", async () => {
+    const question = "Сколько нужно денег?";
+    const { llm, processEvent } = harness([
+      reply({
+        intent: "QUESTION",
+        facts: {
+          city: "Химки", startingUnits: 1, launchTiming: "WITHIN_MONTH",
+          primaryGoal: "MAIN_BUSINESS", businessModelReadiness: "ACCEPTS",
+          managementReadiness: "READY", phoneNumber: "+79991234567",
+          phoneConfirmed: true,
+        },
+        signals: { questions: [question] },
+      }),
+      reply(),
+      reply({ facts: { additionalExpensesReadiness: "READY" } }),
+    ]);
+
+    const disclosed = await processEvent(input(1, question));
+    const acknowledged = await processEvent(input(2, "Понял"));
+    const confirmed = await processEvent(input(3, "Да, такой бюджет на запуск мне подходит"));
+
+    expect(disclosed).toMatchObject({ shouldHandoffToManager: false,
+      suggestedNextInformationNeed: "AVAILABLE_CAPITAL" });
+    expect(acknowledged).toMatchObject({ shouldHandoffToManager: false,
+      suggestedNextInformationNeed: "AVAILABLE_CAPITAL" });
+    expect(confirmed).toMatchObject({ qualificationStatus: "HOT",
+      shouldHandoffToManager: true });
+    const confirmationContext = JSON.parse(llm.requests[2]!.userMessage) as {
+      CURRENT_MESSAGE: string;
+      RECENT_MESSAGES: Array<{ direction: string; content: string }>;
+    };
+    expect(confirmationContext.CURRENT_MESSAGE).toContain("такой бюджет");
+    expect(confirmationContext.RECENT_MESSAGES.some((message) =>
+      message.direction === "OUTBOUND" && message.content.includes("150 000 ₽"))).toBe(true);
+    expect(await persistence.managerNotifications.findByIdempotencyKey(
+      `manager-handoff:${confirmed.leadId}`,
+    )).not.toBeNull();
   });
 
   it("accumulates facts through a full dialogue without repeating known questions", async () => {

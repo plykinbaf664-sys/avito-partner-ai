@@ -128,6 +128,22 @@ describe("segment-aware partner qualification", () => {
     });
   });
 
+  it("accepts an explicit confirmation that the disclosed full launch budget fits", () => {
+    const decision = evaluateQualification(readySmallBusiness({
+      availableCapital: null,
+      availableCapitalConfirmed: false,
+      entryBudget: null,
+      additionalLaunchCapital: null,
+      capitalScope: "UNKNOWN",
+      additionalExpensesReadiness: "READY",
+    }));
+    expect(decision).toMatchObject({
+      status: "HOT",
+      shouldHandoffToManager: true,
+      blockingReasons: [],
+    });
+  });
+
   it("does not make refusal to share a phone a hard blocker", () => {
     const decision = evaluateQualification(
       readySmallBusiness({ phoneNumber: null, phoneConfirmed: false }),
@@ -197,7 +213,7 @@ describe("segment-aware partner qualification", () => {
     });
   });
 
-  it("can qualify 130,000 when required expenses are understood", () => {
+  it("rejects a confirmed total below the minimum launch budget", () => {
     expect(
       evaluateQualification(
         readySmallBusiness({
@@ -208,12 +224,13 @@ describe("segment-aware partner qualification", () => {
         }),
       ),
     ).toMatchObject({
-      status: "HOT",
-      shouldHandoffToManager: true,
+      status: "NO_FIT",
+      reason: "INSUFFICIENT_LAUNCH_CAPITAL",
+      shouldHandoffToManager: false,
     });
   });
 
-  it("does not restore a universal low-capital hard blocker", () => {
+  it("rejects an explicitly confirmed insufficient total", () => {
     expect(
       evaluateQualification(
         facts({
@@ -221,7 +238,33 @@ describe("segment-aware partner qualification", () => {
           availableCapitalConfirmed: true,
         }),
       ).status,
-    ).not.toBe("NO_FIT");
+    ).toBe("NO_FIT");
+  });
+
+  it("clarifies an unconfirmed capital amount instead of qualifying or rejecting it", () => {
+    expect(evaluateQualification(readySmallBusiness({
+      availableCapital: 200_000,
+      availableCapitalConfirmed: false,
+      entryBudget: null,
+      additionalLaunchCapital: null,
+      capitalScope: "TOTAL_LIMIT",
+    }))).toMatchObject({
+      status: "BORDERLINE",
+      reasonCodes: expect.arrayContaining(["CAPITAL_NOT_CONFIRMED"]),
+      shouldHandoffToManager: false,
+      nextAction: "CONTINUE_QUALIFICATION",
+    });
+  });
+
+  it("does not let a phone plus a human request bypass missing qualification facts", () => {
+    expect(evaluateQualification(facts({ phoneNumber: "+79991234567", phoneConfirmed: true }), {
+      wantsHuman: true,
+    })).toMatchObject({
+      status: "NEEDS_MORE_INFO",
+      reason: "USER_REQUESTED_HUMAN",
+      shouldHandoffToManager: false,
+      nextAction: "CONTINUE_QUALIFICATION",
+    });
   });
 
   it("prioritizes a ready investor by capital and scale", () => {
