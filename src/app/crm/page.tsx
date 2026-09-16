@@ -5,6 +5,7 @@ import { withCrmService } from "@/application/crm/crm-runtime";
 import {
   dateTime,
   buyingIntentLabels,
+  goalLabels,
   financialLabels,
   launchTimingLabels,
   money,
@@ -97,7 +98,7 @@ export default async function CrmPage({
                 {[
                   "Источник",
                   "Последняя активность", "Имя", "Телефон", "Сегмент", "Город",
-                  "Капитал", "Старт", "Потенциал", "Срок", "Квалификация",
+                  "Капитал", "Старт", "Потенциал", "Срок", "Цель", "Время", "Квалификация",
                   "Финансы", "Осталось выяснить", "Намерение", "Handoff", "Telegram",
                 ].map((label) => <th key={label} className="px-3 py-3">{label}</th>)}
               </tr>
@@ -115,6 +116,8 @@ export default async function CrmPage({
                   <td className="px-3 py-3">{lead.startingUnits ?? ""}</td>
                   <td className="px-3 py-3">{lead.scalingPotentialUnits ?? ""}</td>
                   <td className="px-3 py-3">{lead.launchTiming ? launchTimingLabels[lead.launchTiming] ?? lead.launchTiming : ""}</td>
+                  <td className="px-3 py-3">{lead.goal ? goalLabels[lead.goal] ?? lead.goal : ""}</td>
+                  <td className="px-3 py-3">{lead.availableTimeDetails ?? (lead.hasFreeTime === true ? "Есть" : lead.hasFreeTime === false ? "Мало" : "")}</td>
                   <td className="px-3 py-3">{qualificationLabel(lead)}</td>
                   <td className="px-3 py-3">{financialLabels[lead.financialReadiness] ?? lead.financialReadiness}</td>
                   <td className="px-3 py-3">{lead.missingCriticalFacts.map((need) => informationNeedLabels[need] ?? need).join(", ")}</td>
@@ -124,7 +127,7 @@ export default async function CrmPage({
                 </tr>
               ))}
               {result.records.length === 0 ? (
-                <tr><td colSpan={16} className="px-4 py-10 text-center text-slate-500">Лиды не найдены</td></tr>
+                <tr><td colSpan={18} className="px-4 py-10 text-center text-slate-500">Лиды не найдены</td></tr>
               ) : null}
             </tbody>
           </table>

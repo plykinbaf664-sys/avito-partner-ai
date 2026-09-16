@@ -19,7 +19,7 @@ function facts(
 
 describe("small-business financial readiness", () => {
   it("treats 50,000 for the first stage as incomplete context", () => {
-    expect(assessFinancialReadiness(facts({ entryBudget: 50_000 }))).toEqual({
+    expect(assessFinancialReadiness(facts({ entryBudget: 50_000 }))).toMatchObject({
       launchCostAwareness: "UNKNOWN",
       financialReadiness: "BORDERLINE",
       financialBarrier: "ADDITIONAL_LAUNCH_CAPITAL_UNKNOWN",
@@ -38,14 +38,14 @@ describe("small-business financial readiness", () => {
           additionalExpensesReadiness: "READY",
         }),
       ),
-    ).toEqual({
+    ).toMatchObject({
       launchCostAwareness: "CONFIRMED",
-      financialReadiness: "HIGH",
+      financialReadiness: "READY",
       financialBarrier: null,
     });
   });
 
-  it("treats confirmed 150,000 as strong but not exact capital", () => {
+  it("treats capital inside the calculated range as borderline until confirmed", () => {
     expect(
       assessFinancialReadiness(
         facts({
@@ -53,10 +53,10 @@ describe("small-business financial readiness", () => {
           availableCapitalConfirmed: true,
         }),
       ),
-    ).toEqual({
+    ).toMatchObject({
       launchCostAwareness: "UNKNOWN",
-      financialReadiness: "HIGH",
-      financialBarrier: null,
+      financialReadiness: "BORDERLINE",
+      financialBarrier: "ADDITIONAL_LAUNCH_CAPITAL_UNKNOWN",
     });
   });
 
@@ -71,10 +71,29 @@ describe("small-business financial readiness", () => {
           additionalExpensesReadiness: "NOT_READY",
         }),
       ),
-    ).toEqual({
+    ).toMatchObject({
       launchCostAwareness: "REJECTED",
       financialReadiness: "INCOMPATIBLE",
       financialBarrier: "UNWILLING_TO_FUND_REQUIRED_EXPENSES",
+    });
+  });
+
+  it("rejects confirmed capital below the calculated range and accepts its upper bound", () => {
+    expect(assessFinancialReadiness(facts({
+      availableCapital: 149_000,
+      availableCapitalConfirmed: true,
+      capitalScope: "TOTAL_LIMIT",
+    }))).toMatchObject({
+      financialReadiness: "INCOMPATIBLE",
+      financialBarrier: "CAPITAL_BELOW_LAUNCH_RANGE",
+    });
+    expect(assessFinancialReadiness(facts({
+      availableCapital: 180_000,
+      availableCapitalConfirmed: true,
+      capitalScope: "TOTAL_LIMIT",
+    }))).toMatchObject({
+      financialReadiness: "HIGH",
+      financialBarrier: null,
     });
   });
 });

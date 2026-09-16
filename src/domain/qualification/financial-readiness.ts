@@ -1,4 +1,9 @@
-import { LAUNCH_COST_REFERENCE } from "../economics/economics-calculator";
+import {
+  calculateLaunchBudgetRange,
+  findRegionalRentReference,
+  GENERAL_RENT_RANGE_REFERENCE,
+  type LaunchBudgetRange,
+} from "../economics/economics-calculator";
 import type { Lead } from "../lead/lead";
 
 export const launchCostAwarenessValues = [
@@ -24,12 +29,15 @@ export type FinancialReadiness = (typeof financialReadinessValues)[number];
 export type FinancialBarrier =
   | "ADDITIONAL_LAUNCH_CAPITAL_UNKNOWN"
   | "UNWILLING_TO_FUND_REQUIRED_EXPENSES"
+  | "CAPITAL_BELOW_LAUNCH_RANGE"
   | null;
 
 export interface FinancialReadinessAssessment {
   launchCostAwareness: LaunchCostAwareness;
   financialReadiness: FinancialReadiness;
   financialBarrier: FinancialBarrier;
+  launchBudgetRange: LaunchBudgetRange;
+  usesCitySpecificRent: boolean;
 }
 
 export type FinancialReadinessFacts = Pick<
@@ -40,85 +48,101 @@ export type FinancialReadinessFacts = Pick<
   | "additionalLaunchCapital"
   | "capitalScope"
   | "additionalExpensesReadiness"
->;
+> & Partial<Pick<Lead, "city" | "budget" | "budgetConfirmed" | "startingUnits">>;
+
+function confirmedTotalCapital(facts: FinancialReadinessFacts): number | null {
+  if (
+    facts.availableCapitalConfirmed &&
+    facts.availableCapital !== null &&
+    facts.capitalScope !== "ENTRY_ONLY"
+  ) {
+    return facts.availableCapital;
+  }
+  if (
+    facts.entryBudget !== null &&
+    facts.additionalLaunchCapital !== null &&
+    facts.capitalScope === "ADDITIONAL_AVAILABLE"
+  ) {
+    return facts.entryBudget + facts.additionalLaunchCapital;
+  }
+  if (facts.budgetConfirmed && facts.budget != null && facts.capitalScope !== "ENTRY_ONLY") {
+    return facts.budget;
+  }
+  return null;
+}
 
 export function assessFinancialReadiness(
   facts: FinancialReadinessFacts,
 ): FinancialReadinessAssessment {
+  const cityReference = findRegionalRentReference(facts.city ?? null);
+  const launchBudgetRange = calculateLaunchBudgetRange({
+    units: facts.startingUnits ?? 1,
+    rentReference: cityReference ?? GENERAL_RENT_RANGE_REFERENCE,
+  })!;
   const launchCostAwareness: LaunchCostAwareness =
     facts.additionalExpensesReadiness === "NOT_READY"
       ? "REJECTED"
       : facts.additionalExpensesReadiness === "READY" ||
-    facts.additionalLaunchCapital !== null ||
-    facts.capitalScope === "ADDITIONAL_AVAILABLE"
+          facts.additionalLaunchCapital !== null ||
+          facts.capitalScope === "ADDITIONAL_AVAILABLE"
         ? "CONFIRMED"
         : facts.additionalExpensesReadiness === "LIMITED"
           ? "PARTIAL"
           : "UNKNOWN";
+  const totalCapital = confirmedTotalCapital(facts);
 
-  const statedCapital = facts.availableCapital ?? facts.entryBudget;
-  const explicitlyUnwillingWithInsufficientTotal =
-    facts.additionalExpensesReadiness === "NOT_READY" &&
-    statedCapital !== null &&
-    statedCapital < LAUNCH_COST_REFERENCE.baseLaunchReference &&
-    (facts.additionalLaunchCapital ?? 0) <= 0;
-
-  if (explicitlyUnwillingWithInsufficientTotal) {
+  if (facts.additionalExpensesReadiness === "NOT_READY") {
     return {
       launchCostAwareness,
       financialReadiness: "INCOMPATIBLE",
       financialBarrier: "UNWILLING_TO_FUND_REQUIRED_EXPENSES",
+      launchBudgetRange,
+      usesCitySpecificRent: cityReference !== null,
     };
   }
 
-  const reasonableLaunchCapital =
-    LAUNCH_COST_REFERENCE.baseLaunchReference +
-    LAUNCH_COST_REFERENCE.furnishingReserveReference;
-  const combinedExplicitCapital =
-    facts.entryBudget !== null && facts.additionalLaunchCapital !== null
-      ? facts.entryBudget + facts.additionalLaunchCapital
-      : null;
+  if (totalCapital !== null && totalCapital < launchBudgetRange.totalMin) {
+    return {
+      launchCostAwareness,
+      financialReadiness: "INCOMPATIBLE",
+      financialBarrier: "CAPITAL_BELOW_LAUNCH_RANGE",
+      launchBudgetRange,
+      usesCitySpecificRent: cityReference !== null,
+    };
+  }
 
-  if (
-    launchCostAwareness !== "REJECTED" &&
-    ((facts.availableCapitalConfirmed &&
-      (facts.availableCapital ?? 0) >= reasonableLaunchCapital) ||
-      (combinedExplicitCapital ?? 0) >= reasonableLaunchCapital)
-  ) {
+  if (totalCapital !== null && totalCapital >= launchBudgetRange.totalMax) {
     return {
       launchCostAwareness,
       financialReadiness: "HIGH",
       financialBarrier: null,
+      launchBudgetRange,
+      usesCitySpecificRent: cityReference !== null,
     };
   }
 
   if (
     launchCostAwareness === "CONFIRMED" &&
-    ((facts.availableCapitalConfirmed &&
-      (facts.availableCapital ?? 0) >=
-        LAUNCH_COST_REFERENCE.baseLaunchReference) ||
-      (combinedExplicitCapital ?? 0) >=
-        LAUNCH_COST_REFERENCE.baseLaunchReference)
+    (totalCapital !== null
+      ? totalCapital >= launchBudgetRange.totalMin
+      : facts.availableCapital === null && facts.entryBudget === null)
   ) {
     return {
       launchCostAwareness,
       financialReadiness: "READY",
       financialBarrier: null,
+      launchBudgetRange,
+      usesCitySpecificRent: cityReference !== null,
     };
   }
 
-  if (statedCapital === null) {
-    if (facts.additionalExpensesReadiness === "READY") {
-      return {
-        launchCostAwareness,
-        financialReadiness: "READY",
-        financialBarrier: null,
-      };
-    }
+  if (totalCapital === null && facts.availableCapital === null && facts.entryBudget === null) {
     return {
       launchCostAwareness,
       financialReadiness: "UNKNOWN",
       financialBarrier: "ADDITIONAL_LAUNCH_CAPITAL_UNKNOWN",
+      launchBudgetRange,
+      usesCitySpecificRent: cityReference !== null,
     };
   }
 
@@ -126,5 +150,7 @@ export function assessFinancialReadiness(
     launchCostAwareness,
     financialReadiness: "BORDERLINE",
     financialBarrier: "ADDITIONAL_LAUNCH_CAPITAL_UNKNOWN",
+    launchBudgetRange,
+    usesCitySpecificRent: cityReference !== null,
   };
 }

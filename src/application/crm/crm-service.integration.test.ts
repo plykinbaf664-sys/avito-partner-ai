@@ -37,8 +37,8 @@ function lead(index: number, overrides: Partial<Lead> = {}): Lead {
     segmentConfidence: index === 1 ? 0.9 : 0,
     startingUnits: index === 1 ? 1 : null,
     scalingPotentialUnits: index === 1 ? 5 : null,
-    hasFreeTime: null,
-    availableTimeDetails: null,
+    hasFreeTime: index === 1 ? true : null,
+    availableTimeDetails: index === 1 ? "Могу уделять 3 часа в день" : null,
     businessExperience: null,
     shortTermRentalExperience: null,
     ownsProperty: null,
@@ -52,7 +52,7 @@ function lead(index: number, overrides: Partial<Lead> = {}): Lead {
     rejectsBusinessModel: null,
     questions: [],
     objections: [],
-    buyingIntent: null,
+    buyingIntent: index === 1 ? "READY_TO_START" : null,
     qualificationStatus: index === 1 ? "HOT" : "QUALIFYING",
     qualificationReason: index === 1 ? "SMALL_BUSINESS_READY" : null,
     conversationSummary: null,
@@ -130,6 +130,10 @@ describe("local CRM read model", () => {
       phoneNumber: "+79991234567",
       qualificationStatus: "HOT",
       managerNotificationStatus: "SENT",
+      hasFreeTime: true,
+      availableTimeDetails: "Могу уделять 3 часа в день",
+      goal: "ADDITIONAL_INCOME",
+      buyingIntent: "READY_TO_START",
     });
     expect([qualificationLabel(searched.records[0]!), handoffLabel(searched.records[0]!), notificationLabel(searched.records[0]!)])
       .toEqual(["Горячий", "Передан менеджеру", "Отправлено"]);
@@ -171,9 +175,9 @@ describe("local CRM read model", () => {
       availableCapitalConfirmed: true, qualificationStatus: "HANDOFF", qualificationReason: "USER_REQUESTED_HUMAN",
       handoffAt: now, questions: ["Как проходит организация бизнеса?"] }));
     const record = (await createCrmService(persistence).getLead("lead-2"))!;
-    expect(record).toMatchObject({ segment: "SMALL_BUSINESS", qualificationStatus: "NEEDS_MORE_INFO",
+    expect(record).toMatchObject({ segment: "SMALL_BUSINESS", qualificationStatus: "BORDERLINE",
       shouldHandoffToManager: false, phoneNumber: null, handoffAt: now });
-    expect(qualificationLabel(record)).toBe("Требуется информация");
+    expect(qualificationLabel(record)).toBe("Пограничный");
     expect(handoffLabel(record)).toBe("Передан ранее до завершения квалификации");
     expect(record.missingCriticalFacts).toContain("STARTING_UNITS");
     expect(await persistence.leads.findById("lead-2")).toMatchObject({ qualificationStatus: "HANDOFF", handoffAt: now });
@@ -189,6 +193,8 @@ describe("local CRM read model", () => {
     expect(csv.startsWith("\uFEFF")).toBe(true);
     expect(csv).toContain('"Иван, ""тест"""');
     expect(csv).toContain('"+79991234567"');
+    expect(csv).toContain('"Могу уделять 3 часа в день"');
+    expect(csv).toContain('"ADDITIONAL_INCOME"');
     expect(csv).not.toContain("systemPrompt");
   });
 });

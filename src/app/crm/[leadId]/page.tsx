@@ -5,6 +5,7 @@ import { withCrmService } from "@/application/crm/crm-runtime";
 import {
   dateTime,
   buyingIntentLabels,
+  goalLabels,
   financialLabels,
   launchTimingLabels,
   money,
@@ -64,8 +65,9 @@ export default async function CrmLeadPage({
             <Field label="Стартовый объём" value={record.startingUnits ?? ""} />
             <Field label="Потенциал масштаба" value={record.scalingPotentialUnits ?? ""} />
             <Field label="Срок запуска" value={record.launchTiming ? launchTimingLabels[record.launchTiming] ?? record.launchTiming : ""} />
-            <Field label="Цель" value={record.goal ?? ""} />
-            <Field label="Желаемый доход" value={money(record.lead.desiredIncome)} />
+            <Field label="Цель" value={record.goal ? goalLabels[record.goal] ?? record.goal : ""} />
+            <Field label="Желаемый доход" value={money(record.desiredIncome)} />
+            <Field label="Свободное время" value={record.availableTimeDetails ?? (record.hasFreeTime === true ? "Есть несколько часов в день" : record.hasFreeTime === false ? "Ограничено" : "")} />
             <Field label="Финансовая готовность" value={financialLabels[record.financialReadiness] ?? record.financialReadiness} />
             <Field label="Намерение" value={record.buyingIntent ? buyingIntentLabels[record.buyingIntent] ?? record.buyingIntent : ""} />
             <Field label="Последняя активность" value={dateTime(record.lastActivityAt)} />

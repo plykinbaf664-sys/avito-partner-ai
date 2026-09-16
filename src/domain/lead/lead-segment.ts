@@ -15,8 +15,9 @@ export interface LeadSegmentAssessment {
 
 export const SEGMENTATION_REFERENCE = Object.freeze({
   smallBusinessEntryCapital: 50_000,
+  smallBusinessTargetMinUnits: 3,
+  smallBusinessTargetMaxUnits: 5,
   investorCapital: 1_500_000,
-  investorScaleUnits: 10,
 });
 
 export function assessLeadSegment(
@@ -42,14 +43,26 @@ export function assessLeadSegment(
   }
   if (lead.primaryGoal === "INVESTMENT") investorScore += 2;
   if (
-    (lead.startingUnits ?? 0) >= 7 ||
-    (lead.scalingPotentialUnits ?? 0) >= SEGMENTATION_REFERENCE.investorScaleUnits
+    lead.primaryGoal === "INVESTMENT" &&
+    ((lead.startingUnits ?? 0) > SEGMENTATION_REFERENCE.smallBusinessTargetMaxUnits ||
+      (lead.scalingPotentialUnits ?? 0) > SEGMENTATION_REFERENCE.smallBusinessTargetMaxUnits)
   ) {
     investorScore += 2;
   }
 
-  if (lead.startingUnits !== null && lead.startingUnits >= 1 && lead.startingUnits <= 4) {
+  if (
+    lead.startingUnits !== null &&
+    lead.startingUnits >= 1 &&
+    lead.startingUnits <= SEGMENTATION_REFERENCE.smallBusinessTargetMaxUnits
+  ) {
     smallBusinessScore += 3;
+  }
+  if (
+    lead.scalingPotentialUnits !== null &&
+    lead.scalingPotentialUnits >= SEGMENTATION_REFERENCE.smallBusinessTargetMinUnits &&
+    lead.scalingPotentialUnits <= SEGMENTATION_REFERENCE.smallBusinessTargetMaxUnits
+  ) {
+    smallBusinessScore += 2;
   }
   if (
     capital !== null &&

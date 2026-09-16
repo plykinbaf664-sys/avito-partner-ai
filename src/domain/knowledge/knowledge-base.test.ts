@@ -36,12 +36,21 @@ describe("contextual partner knowledge", () => {
 
     expect(answer.entryIds).toEqual(expect.arrayContaining(["supported-cities", "pricing"]));
     expect(answer.answerFragments.join(" ")).toContain("Подтверждённые города");
-    expect(answer.answerFragments.join(" ")).toContain("500 ₽");
+    expect(answer.answerFragments.join(" ")).toContain("50 000 ₽");
+    expect(answer.answerFragments.join(" ")).toContain("юридическое сопровождение");
   });
 
   it("answers that a partner can start with one object", () => {
     const answer = answerFromKnowledgeBase(question("Можно начать с одного объекта?"));
     expect(answer.entryIds).toContain("single-unit-start");
+    expect(answer.unresolvedQuestions).toEqual([]);
+  });
+
+  it("states the approved 3–5 object small-business target without blocking a one-unit start", () => {
+    const answer = answerFromKnowledgeBase(question("Сколько объектов лучше запускать и можно ли масштабироваться?"));
+    expect(answer.entryIds).toContain("small-business-scale");
+    expect(answer.answerFragments.join(" ")).toContain("3–5 объектов");
+    expect(answer.answerFragments.join(" ")).toContain("Начать можно с одного");
     expect(answer.unresolvedQuestions).toEqual([]);
   });
 

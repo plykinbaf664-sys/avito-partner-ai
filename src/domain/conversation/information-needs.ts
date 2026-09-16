@@ -1,4 +1,3 @@
-import { LAUNCH_COST_REFERENCE } from "../economics/economics-calculator";
 import type { Lead } from "../lead/lead";
 import { assessFinancialReadiness } from "../qualification/financial-readiness";
 import { hasConfirmedPhone } from "../qualification/qualification-policy";
@@ -89,6 +88,7 @@ function criticalInformationNeedsFor(lead: Lead): InformationNeed[] {
       "GOAL",
       "MANAGEMENT_READINESS",
       "CITY",
+      "ADDITIONAL_EXPENSES",
       "PHONE_NUMBER",
     ];
     if (lead.startingUnits === null && lead.scalingPotentialUnits === null) {
@@ -118,10 +118,7 @@ function criticalInformationNeedsFor(lead: Lead): InformationNeed[] {
   ];
   if (
     lead.entryBudget !== null &&
-    (lead.availableCapital === null ||
-      lead.availableCapital <
-        LAUNCH_COST_REFERENCE.baseLaunchReference +
-          LAUNCH_COST_REFERENCE.furnishingReserveReference)
+    !isKnown(lead, "ADDITIONAL_EXPENSES")
   ) {
     needs.push("ADDITIONAL_EXPENSES");
   }
@@ -169,6 +166,19 @@ function selectNextInformationNeed(
   const candidates =
     missingCriticalFacts.length > 0 ? missingCriticalFacts : missingOptionalFacts;
   if (candidates.length === 0) return null;
+
+  // Before asking for the final phone, use the remaining natural turn to
+  // capture useful non-blocking context. If the phone is already known these
+  // optional facts never delay handoff.
+  if (
+    missingCriticalFacts.length === 1 &&
+    missingCriticalFacts[0] === "PHONE_NUMBER"
+  ) {
+    if (missingOptionalFacts.includes("SCALING_POTENTIAL_UNITS")) {
+      return "SCALING_POTENTIAL_UNITS";
+    }
+    if (missingOptionalFacts.includes("FREE_TIME")) return "FREE_TIME";
+  }
 
   const scores: Record<InformationNeed, number> = {
     PHONE_NUMBER: 65,

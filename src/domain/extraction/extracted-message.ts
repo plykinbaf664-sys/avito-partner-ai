@@ -11,6 +11,20 @@ export const messageIntents = [
 
 export type MessageIntent = (typeof messageIntents)[number];
 
+export const buyingIntentValues = [
+  "GENERAL_INTEREST",
+  "EXPLORING",
+  "CONSIDERING",
+  "CONDITIONS_ACCEPTED",
+  "READY_TO_START",
+  "WANTS_NEXT_STEP",
+  "WANTS_HUMAN",
+  "DECLINED",
+  "UNKNOWN",
+] as const;
+
+export type BuyingIntent = (typeof buyingIntentValues)[number];
+
 export const primaryGoals = [
   "ADDITIONAL_INCOME",
   "MAIN_BUSINESS",
@@ -110,6 +124,7 @@ export interface ExtractedFacts {
   ownsProperty: boolean | null;
   desiredIncome: number | null;
   primaryGoal: PrimaryGoal | null;
+  buyingIntent?: BuyingIntent;
   launchTiming: LaunchTiming | null;
   managementReadiness: ManagementReadiness | null;
   requiresGuaranteedIncome: boolean | null;

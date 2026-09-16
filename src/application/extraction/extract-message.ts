@@ -5,6 +5,7 @@ import {
   additionalExpensesReadinessValues,
   businessBarriers,
   businessModelReadinessValues,
+  buyingIntentValues,
   capitalScopes,
   launchTimings,
   managementReadinessValues,
@@ -81,6 +82,7 @@ export const extractedMessageSchema = z
         // UNKNOWN already represents an absent/unclear goal. Keeping this
         // non-null also avoids an unnecessary union in provider JSON Schema.
         primaryGoal: z.enum(primaryGoals),
+        buyingIntent: z.enum(buyingIntentValues),
         launchTiming: z.enum(launchTimings).nullable(),
         managementReadiness: z.enum(managementReadinessValues).nullable(),
         requiresGuaranteedIncome: z.boolean().nullable(),
@@ -197,6 +199,9 @@ PHONE EXTRACTION: phoneNumber is only a phone number explicitly provided by the 
 - «Сразу готов пять» → startingUnits=5, scalingPotentialUnits=5.
 - Не используй количество уже имеющихся квартир как эти поля. Отсутствие своей недвижимости не означает ноль объектов.
 - launchTiming=NO_PLANS только при прямом отказе запускаться. «Пока изучаю» или «просто смотрю» без прямого отказа — слабая/неопределённая готовность, но не NO_PLANS.
+- launchTiming=READY_NOW для «готов начинать сейчас/в ближайшее время», WITHIN_MONTH для явного горизонта до месяца, WITHIN_THREE_MONTHS для пары/нескольких месяцев, LATER для отложенного старта. Если срок неясен, используй UNKNOWN.
+- hasFreeTime=true, когда человек подтверждает несколько часов в день или сопоставимую регулярную вовлечённость. hasFreeTime=false означает, что времени мало; это риск, но не отказ. availableTimeDetails сохраняет фактическую формулировку без придуманного числа часов.
+- buyingIntent отражает текущую стадию: EXPLORING — только изучает; CONSIDERING — рассматривает; CONDITIONS_ACCEPTED — подтверждает, что условия подходят; READY_TO_START — явно готов запускаться; WANTS_NEXT_STEP — просит перейти к следующему действию; WANTS_HUMAN/DECLINED — прямой запрос человека/отказ. UNKNOWN — если сигнала нет. Используй историю только для разрешения смысла текущего сигнала.
 - managementReadiness=READY, если человек прямо говорит, что готов работать, взаимодействовать или сотрудничать с управляющей компанией. Не требуй от него отдельного обещания участвовать в ежедневной операционке. managementReadiness=NOT_READY только при прямом отказе участвовать, взаимодействовать и коммуницировать в любом формате. «Мало времени» само по себе не означает NOT_READY.
 - Явную положительную готовность работать с управляющей компанией не записывай в objections.
 - requiresGuaranteedIncome=true только когда гарантия дохода является явно обязательным условием. Страх, сомнение или вопрос о доходности не являются таким условием.
@@ -228,6 +233,7 @@ function withExtractionDefaults(value: unknown): unknown {
     facts: {
       phoneNumber: "",
       phoneConfirmed: false,
+      buyingIntent: "UNKNOWN",
       ...facts,
     },
   };
@@ -301,9 +307,17 @@ export function createMessageExtractor({
           businessModelReadiness: input.currentLead.businessModelReadiness,
           startingUnits: input.currentLead.startingUnits,
           scalingPotentialUnits: input.currentLead.scalingPotentialUnits,
+          hasFreeTime: input.currentLead.hasFreeTime,
+          availableTimeDetails: input.currentLead.availableTimeDetails,
           launchTiming: input.currentLead.launchTiming,
           managementReadiness: input.currentLead.managementReadiness,
           primaryGoal: input.currentLead.primaryGoal,
+          buyingIntent: input.currentLead.buyingIntent,
+          desiredIncome: input.currentLead.desiredIncome,
+          questions: input.currentLead.questions,
+          objections: input.currentLead.objections,
+          primaryFear: input.currentLead.primaryFear,
+          secondaryFear: input.currentLead.secondaryFear,
           phoneKnown: Boolean(input.currentLead.phoneNumber && input.currentLead.phoneConfirmed),
         },
         RECENT_MESSAGES: typeof input === "string" ? [] : (input.recentMessages ?? [])

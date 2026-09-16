@@ -46,6 +46,7 @@ export function mergeExtractedFacts(
     "ownsProperty",
     "desiredIncome",
     "primaryGoal",
+    "buyingIntent",
     "launchTiming",
     "managementReadiness",
     "requiresGuaranteedIncome",
@@ -54,6 +55,7 @@ export function mergeExtractedFacts(
     const value = extraction.facts[field];
     const isUnknownEnum =
       (field === "primaryGoal" ||
+        field === "buyingIntent" ||
         field === "launchTiming" ||
         field === "managementReadiness" ||
         field === "capitalScope" ||
@@ -105,8 +107,13 @@ export function mergeExtractedFacts(
     patch.buyingIntent = "DECLINED";
   } else if (extraction.signals.wantsHuman) {
     patch.buyingIntent = "WANTS_HUMAN";
+  } else if (
+    extraction.facts.buyingIntent !== undefined &&
+    extraction.facts.buyingIntent !== "UNKNOWN"
+  ) {
+    patch.buyingIntent = extraction.facts.buyingIntent;
   } else if (extraction.intent === "GENERAL_INTEREST" && lead.buyingIntent === null) {
-    patch.buyingIntent = "GENERAL_INTEREST";
+    patch.buyingIntent = "EXPLORING";
   }
 
   let merged = {

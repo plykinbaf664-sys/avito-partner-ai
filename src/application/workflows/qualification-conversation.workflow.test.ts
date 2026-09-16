@@ -100,27 +100,27 @@ describe("multi-turn qualification conversation", () => {
   });
 
   it.each([
-    ["Какие условия предлагаете?", ["субаренде", "50 000 ₽", "120 000 ₽", "20 000 ₽", "доход не гарантируется"]],
+    ["Какие условия предлагаете?", ["субаренде", "50 000 ₽", "80 000 ₽", "доход не гарантируется"]],
     ["Как вообще проходит организация бизнеса?", ["подобрать объект", "комплектации", "площадках", "администратор", "горничную", "персональный менеджер", "CRM"]],
     ["Кто занимается гостями?", ["администратор", "гостями"]],
-    ["Сколько нужно денег?", ["50 000 ₽", "аренду", "залог", "120 000 ₽", "20 000 ₽", "не фиксированная смета"]],
+    ["Сколько нужно денег?", ["50 000 ₽", "аренду", "залог", "30 000 ₽", "150 000 ₽", "180 000 ₽"]],
     ["Сколько заработаю?", ["около 20 000 ₽", "Гарантированного дохода нет"]],
     ["Что вообще предлагает компания?", ["субаренде", "команда помогает"]],
     ["Как устроена схема работы?", ["подобрать", "бронирования"]],
     ["Что делает управляющая компания?", ["поиском и запуском", "Расходы"]],
     ["Что делает партнёр?", ["Расходы по бизнесу несёт партнёр"]],
-    ["Какие расходы несёт партнёр?", ["аренду", "залог", "комплектацию"]],
-    ["Что входит в первый этап?", ["50 000 ₽", "подбором", "чек-лист"]],
-    ["Какая стоимость первого этапа?", ["50 000 ₽", "120 000 ₽"]],
+    ["Какие расходы несёт партнёр?", ["аренду", "залог", "подготовку объекта"]],
+    ["Что входит в первый этап?", ["50 000 ₽", "помощи в запуске"]],
+    ["Какая стоимость первого этапа?", ["50 000 ₽", "30 000 ₽"]],
     ["Кто должен оплатить аренду и залог?", ["Отдельно партнёр оплачивает"]],
-    ["Какой ориентир по стартовому бюджету?", ["120 000 ₽", "20 000 ₽"]],
+    ["Какой ориентир по стартовому бюджету?", ["150 000 ₽", "180 000 ₽"]],
     ["Аренда, залог и комплектация входят?", ["Отдельно партнёр оплачивает"]],
     ["Есть ли гарантии?", ["Гарантированного дохода нет"]],
     ["Кто координирует горничных?", ["администратор", "координирует горничную"]],
     ["Что происходит после запуска?", ["персональный менеджер", "CRM"]],
     ["Как работает CRM?", ["онлайн-режиме", "брони", "площадок"]],
     ["Как партнёр видит брони?", ["CRM", "онлайн-режиме"]],
-    ["Можно ли начать с одного объекта?", ["старт с одного объекта"]],
+    ["Можно ли начать с одного объекта?", ["начать можно с одного объекта", "3–5 объектов"]],
     ["Как инвестору смотреть брони?", ["CRM", "онлайн-режиме"]],
     ["Кто будет заниматься гостями моей квартиры?", ["администратор"]],
   ])("answers the approved KB question before continuing qualification: %s", async (question, fragments) => {
@@ -155,8 +155,8 @@ describe("multi-turn qualification conversation", () => {
       signals: { questions: [question] } })]);
     const result = await processEvent(input(1, question));
     expect(result.outboundMessage).toContain("Подтверждённые города");
-    expect(result.outboundMessage).toContain("500 ₽");
-    expect(result.outboundMessage).toContain("100 ₽");
+    expect(result.outboundMessage).toContain("50 000 ₽");
+    expect(result.outboundMessage).toContain("юридическое сопровождение");
     expect(result.outboundMessage).toContain("Какую сумму");
     expect(result.outboundMessage).not.toContain("Оставьте, пожалуйста, номер");
     expect(result.shouldHandoffToManager).toBe(false);
@@ -167,7 +167,7 @@ describe("multi-turn qualification conversation", () => {
     ["Как работает CRM и есть ли API?", "онлайн-режиме", "есть ли API"],
     ["Чем отличается малый бизнес от инвесторского сценария?", "бизнес на субаренде", "инвесторского сценария"],
     ["Сколько заработаю на моей квартире по адресу Ленина, 10?", "20 000 ₽", "моей квартире"],
-    ["Какие условия предлагаете и можно ли оплатить в рассрочку?", "120 000 ₽", "можно ли оплатить в рассрочку"],
+    ["Какие условия предлагаете и можно ли оплатить в рассрочку?", "80 000 ₽", "можно ли оплатить в рассрочку"],
   ])("answers the known part before escalating the specific gap: %s", async (question, known, unknown) => {
     const { processEvent } = harness([reply({ intent: "QUESTION", facts: { phoneNumber: "+79991234567", phoneConfirmed: true }, signals: { questions: [question] } })]);
     const result = await processEvent(input(1, question));
@@ -226,14 +226,14 @@ describe("multi-turn qualification conversation", () => {
     ]) });
     const generateNaturalResponse = failure === "unsafe"
       ? createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
-        JSON.stringify({ text: "Первый этап — 50 000 ₽, затем 120 000 ₽ на аренду и залог. Остальное уточните у менеджера." }),
+        JSON.stringify({ text: "Услуга — 50 000 ₽, а остальные расходы лучше уточнить у менеджера." }),
       ]) })
       : async () => { throw new Error("LLM_UNAVAILABLE"); };
     const processEvent = createIncomingEventProcessor({ persistence, extractMessage, generateNaturalResponse });
     const result = await processEvent(input(1, "Какие условия предлагаете?"));
     expect(result.shouldHandoffToManager).toBe(false);
     expect(result.outboundMessage).toContain("субаренде");
-    expect(result.outboundMessage).toContain("120 000 ₽");
+    expect(result.outboundMessage).toContain("80 000 ₽");
     expect(result.outboundMessage).toContain("Какую сумму");
     expect(result.outboundMessage).not.toContain("уточнить у менеджера");
   });
@@ -292,6 +292,8 @@ describe("multi-turn qualification conversation", () => {
           additionalExpensesReadiness: "READY",
           businessModelReadiness: "ACCEPTS",
           startingUnits: 1,
+          scalingPotentialUnits: 3,
+          hasFreeTime: true,
           launchTiming: "WITHIN_MONTH",
           primaryGoal: "ADDITIONAL_INCOME",
           managementReadiness: "READY",
@@ -343,16 +345,18 @@ describe("multi-turn qualification conversation", () => {
 
   it("keeps a phone refusal as a barrier and answers KB questions while waiting", async () => {
     const { processEvent } = harness([
-      reply({ facts: { city: "Химки", availableCapital: 150_000, availableCapitalConfirmed: true,
-        startingUnits: 1, businessModelReadiness: "ACCEPTS", launchTiming: "READY_NOW",
+      reply({ facts: { city: "Химки", availableCapital: 180_000, availableCapitalConfirmed: true,
+        additionalExpensesReadiness: "READY",
+        startingUnits: 1, scalingPotentialUnits: 3, hasFreeTime: true,
+        businessModelReadiness: "ACCEPTS", launchTiming: "READY_NOW",
         managementReadiness: "READY", primaryGoal: "ADDITIONAL_INCOME" } }),
       reply({ intent: "OBJECTION", signals: { objections: ["Телефон пока давать не хочу"] } }),
       reply({ intent: "QUESTION", signals: { questions: ["Кто занимается гостями?"] } }),
     ]);
-    const first = await processEvent(input(1, "150 тысяч, Химки, хочу запуск малого бизнеса с одного объекта"));
-    expect(first).toMatchObject({ segment: "SMALL_BUSINESS", qualificationStatus: "HOT", shouldHandoffToManager: false });
+    const first = await processEvent(input(1, "180 тысяч, Химки, хочу запуск малого бизнеса с одного объекта"));
+    expect(first).toMatchObject({ segment: "SMALL_BUSINESS", qualificationStatus: "PRIORITY", shouldHandoffToManager: false });
     const refused = await processEvent(input(2, "Телефон пока давать не хочу"));
-    expect(refused).toMatchObject({ qualificationStatus: "HOT", suggestedNextInformationNeed: "PHONE_NUMBER", shouldHandoffToManager: false });
+    expect(refused).toMatchObject({ qualificationStatus: "PRIORITY", suggestedNextInformationNeed: "PHONE_NUMBER", shouldHandoffToManager: false });
     expect(await persistence.leads.findById(first.leadId!)).toMatchObject({ phoneNumber: null,
       objections: ["Телефон пока давать не хочу"], handoffAt: null });
     const answer = await processEvent(input(3, "Кто занимается гостями?"));
@@ -364,8 +368,10 @@ describe("multi-turn qualification conversation", () => {
 
   it("resumes an old premature handoff and refreshes its untouched summary after the phone", async () => {
     const { processEvent } = harness([
-      reply({ facts: { city: "Химки", availableCapital: 150_000, availableCapitalConfirmed: true,
-        startingUnits: 1, businessModelReadiness: "ACCEPTS", launchTiming: "READY_NOW",
+      reply({ facts: { city: "Химки", availableCapital: 180_000, availableCapitalConfirmed: true,
+        additionalExpensesReadiness: "READY",
+        startingUnits: 1, scalingPotentialUnits: 3, hasFreeTime: true,
+        businessModelReadiness: "ACCEPTS", launchTiming: "READY_NOW",
         managementReadiness: "READY", primaryGoal: "ADDITIONAL_INCOME" } }),
       reply({ intent: "QUESTION", signals: { questions: ["Кто занимается гостями?"] } }),
       reply({ facts: { phoneNumber: "+79991234567", phoneConfirmed: true } }),
@@ -382,7 +388,7 @@ describe("multi-turn qualification conversation", () => {
       deliveryRetryable: null, lastDeliveryErrorCode: null, externalNotificationId: null,
       createdAt: oldTime, updatedAt: oldTime, sentAt: null });
     const resumed = await processEvent(input(2, "Кто занимается гостями?"));
-    expect(resumed).toMatchObject({ qualificationStatus: "HOT", conversationState: "WAITING_PHONE", shouldHandoffToManager: false });
+    expect(resumed).toMatchObject({ qualificationStatus: "PRIORITY", conversationState: "WAITING_PHONE", shouldHandoffToManager: false });
     expect(resumed.outboundMessage).toContain("администратор");
     expect(resumed.outboundMessage).toContain("номер телефона");
     const completed = await processEvent(input(3, "+79991234567"));
@@ -570,7 +576,7 @@ describe("multi-turn qualification conversation", () => {
 
     expect(result).toMatchObject({
       segment: "UNDETERMINED",
-      qualificationStatus: "NEEDS_MORE_INFO",
+      qualificationStatus: "BORDERLINE",
       suggestedNextInformationNeed: "ADDITIONAL_EXPENSES",
       shouldHandoffToManager: false,
     });
@@ -667,11 +673,11 @@ describe("multi-turn qualification conversation", () => {
     const result = await processEvent(input(1, question));
 
     expect(result.outboundMessage).toContain("50 000 ₽");
-    expect(result.outboundMessage).toContain("35 000 ₽ на аренду");
-    expect(result.outboundMessage).toContain("35 000 ₽ на залог");
-    expect(result.outboundMessage).toContain("120 000 ₽");
-    expect(result.outboundMessage).toContain("20 000 ₽");
-    expect(result.outboundMessage).toContain("зависит от конкретного объекта");
+    expect(result.outboundMessage).toContain("при аренде 35 000 ₽");
+    expect(result.outboundMessage).toContain("около 150 000 ₽");
+    expect(result.outboundMessage).toContain("при аренде 50 000 ₽");
+    expect(result.outboundMessage).toContain("около 180 000 ₽");
+    expect(result.outboundMessage).toContain("не фиксированная смета");
   });
 
   it("does not guarantee that 140,000 will cover a launch", async () => {
@@ -753,10 +759,10 @@ describe("multi-turn qualification conversation", () => {
       reply({ intent: "QUESTION", signals: { questions: [question] } }),
     ]);
     const result = await processEvent(input(1, question));
-    expect(result.outboundMessage).toContain("100% от стоимости объекта");
-    expect(result.outboundMessage).toContain("500 ₽");
-    expect(result.outboundMessage).toContain("100 ₽ в сутки");
-    expect(result.outboundMessage).toContain("лучше отдельно уточнить у менеджера");
+    expect(result.outboundMessage).toContain("50 000 ₽");
+    expect(result.outboundMessage).toContain("личный менеджер");
+    expect(result.outboundMessage).toContain("бухгалтерское и юридическое сопровождение");
+    expect(result.outboundMessage).not.toContain("уточнить у менеджера");
   });
 
   it("hands an unknown business question to a manager instead of inventing an answer", async () => {
@@ -952,7 +958,7 @@ describe("multi-turn qualification conversation", () => {
         entryBudget: 60_000,
         additionalLaunchCapital: 100_000,
         launchCostAwareness: "CONFIRMED",
-        financialReadiness: "HIGH",
+        financialReadiness: "READY",
         financialBarrier: null,
       },
     });
@@ -966,14 +972,14 @@ describe("multi-turn qualification conversation", () => {
       reply({
         facts: {
           city: "Волгоград",
-          budget: 300_000,
+          budget: 500_000,
           budgetConfirmed: true,
           startingUnits: 3,
         },
       }),
       reply({ facts: { launchTiming: "NO_PLANS" } }),
     ]);
-    const first = await processEvent(input(1, "Есть 300 тысяч, думаю о трёх объектах"));
+    const first = await processEvent(input(1, "Есть 500 тысяч, думаю о трёх объектах"));
     const second = await processEvent(input(2, "Запускаться вообще не планирую"));
     expect(first.qualificationStatus).not.toBe("NO_FIT");
     expect(second).toMatchObject({
@@ -982,5 +988,44 @@ describe("multi-turn qualification conversation", () => {
       conversationState: "CLOSED",
     });
     expect(second.outboundMessage).not.toContain("?");
+  });
+
+  it("updates buying intent as the conversation advances", async () => {
+    const { processEvent } = harness([
+      reply({ facts: { buyingIntent: "EXPLORING" } }),
+      reply({ facts: { buyingIntent: "READY_TO_START", launchTiming: "READY_NOW" } }),
+    ]);
+    const first = await processEvent(input(1, "Пока изучаю варианты"));
+    expect(await persistence.leads.findById(first.leadId!)).toMatchObject({
+      buyingIntent: "EXPLORING",
+    });
+    const second = await processEvent(input(2, "Условия подходят, готов начинать"));
+    expect(await persistence.leads.findById(second.leadId!)).toMatchObject({
+      buyingIntent: "READY_TO_START",
+      launchTiming: "READY_NOW",
+    });
+  });
+
+  it("keeps limited free time as a manager risk without blocking handoff", async () => {
+    const { processEvent } = harness([
+      reply({ facts: {
+        city: "Химки", availableCapital: 180_000,
+        availableCapitalConfirmed: true, capitalScope: "TOTAL_LIMIT",
+        additionalExpensesReadiness: "READY", businessModelReadiness: "ACCEPTS",
+        startingUnits: 1, scalingPotentialUnits: 3,
+        hasFreeTime: false, availableTimeDetails: "Могу уделять только час вечером",
+        launchTiming: "WITHIN_MONTH", primaryGoal: "MAIN_BUSINESS",
+        managementReadiness: "READY", phoneNumber: "+79991234567",
+        phoneConfirmed: true, buyingIntent: "READY_TO_START",
+      } }),
+    ]);
+    const result = await processEvent(input(1, "Есть 180 тысяч, времени только час вечером, но готов начинать"));
+    expect(result).toMatchObject({
+      shouldHandoffToManager: true,
+      managerSummary: {
+        availableTime: "Могу уделять только час вечером",
+      },
+    });
+    expect(result.qualificationStatus).not.toBe("NO_FIT");
   });
 });

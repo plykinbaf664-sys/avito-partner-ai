@@ -73,7 +73,7 @@ export function buildQualificationFollowUp(
   const need = conversation.pendingInformationNeed;
   if (need) {
     const disclosedLaunchBudget = lastOutboundText !== null &&
-      /(?:120\s*000|150\s*000|120\s*тыс|150\s*тыс).{0,100}(?:бюджет|запуск|старт)|(?:бюджет|запуск|старт).{0,100}(?:120\s*000|150\s*000|120\s*тыс|150\s*тыс)/iu.test(lastOutboundText);
+      /(?:150\s*000|180\s*000|150\s*тыс|180\s*тыс).{0,100}(?:бюджет|запуск|старт)|(?:бюджет|запуск|старт).{0,100}(?:150\s*000|180\s*000|150\s*тыс|180\s*тыс)/iu.test(lastOutboundText);
     const question = need === "AVAILABLE_CAPITAL" && disclosedLaunchBudget
       ? "Подскажите, такой бюджет на запуск вам подходит?"
       : questionForInformationNeed(need);

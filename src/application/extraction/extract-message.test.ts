@@ -302,6 +302,9 @@ describe("message extraction schema", () => {
         businessModelReadiness: "CONSIDERING", startingUnits: 1,
         scalingPotentialUnits: null, launchTiming: null,
         managementReadiness: null, primaryGoal: "MAIN_BUSINESS",
+        hasFreeTime: false, availableTimeDetails: "Только час вечером",
+        buyingIntent: "CONSIDERING",
+        questions: ["Сколько стоит запуск?"], objections: ["Мало времени"],
         phoneNumber: null, phoneConfirmed: false,
       } as Lead,
       pendingInformationNeed: "AVAILABLE_CAPITAL",
@@ -311,13 +314,29 @@ describe("message extraction schema", () => {
     const envelope = JSON.parse(llm.requests[0]!.userMessage) as {
       CURRENT_MESSAGE: string;
       PENDING_INFORMATION_NEED: string;
-      CURRENT_LEAD_FACTS: { city: string; startingUnits: number };
+      CURRENT_LEAD_FACTS: {
+        city: string;
+        startingUnits: number;
+        hasFreeTime: boolean;
+        availableTimeDetails: string;
+        buyingIntent: string;
+        questions: string[];
+        objections: string[];
+      };
       RECENT_MESSAGES: Array<{ content: string }>;
     };
     expect(envelope).toMatchObject({
       CURRENT_MESSAGE: "Да, такой бюджет подходит",
       PENDING_INFORMATION_NEED: "AVAILABLE_CAPITAL",
-      CURRENT_LEAD_FACTS: { city: "Химки", startingUnits: 1 },
+      CURRENT_LEAD_FACTS: {
+        city: "Химки",
+        startingUnits: 1,
+        hasFreeTime: false,
+        availableTimeDetails: "Только час вечером",
+        buyingIntent: "CONSIDERING",
+        questions: ["Сколько стоит запуск?"],
+        objections: ["Мало времени"],
+      },
     });
     expect(envelope.RECENT_MESSAGES).toHaveLength(12);
     expect(envelope.RECENT_MESSAGES[0]?.content).toBe("message-3");

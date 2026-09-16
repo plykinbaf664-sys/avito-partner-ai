@@ -82,6 +82,8 @@ describe("local CRM handoff workflow", () => {
         additionalExpensesReadiness: "READY",
         businessModelReadiness: "ACCEPTS",
         startingUnits: 1,
+        scalingPotentialUnits: 3,
+        hasFreeTime: true,
         launchTiming: "WITHIN_MONTH",
         managementReadiness: "READY",
         primaryGoal: "ADDITIONAL_INCOME",
@@ -147,9 +149,10 @@ describe("local CRM handoff workflow", () => {
     });
     const manager = new TelegramManagerNotificationProvider({ botToken: "unused" }, persistence,
       fetch, () => timestamp, undefined, { sendMessage });
-    const replies = [extraction({ city: "Химки", availableCapital: 150_000, availableCapitalConfirmed: true,
-      entryBudget: 50_000, additionalLaunchCapital: 100_000, capitalScope: "ADDITIONAL_AVAILABLE",
+    const replies = [extraction({ city: "Химки", availableCapital: 180_000, availableCapitalConfirmed: true,
+      entryBudget: 50_000, additionalLaunchCapital: 130_000, capitalScope: "ADDITIONAL_AVAILABLE",
       additionalExpensesReadiness: "READY", businessModelReadiness: "ACCEPTS", startingUnits: 1,
+      scalingPotentialUnits: 3, hasFreeTime: true,
       launchTiming: "WITHIN_MONTH", managementReadiness: "READY", primaryGoal: "ADDITIONAL_INCOME" }),
       extraction({ phoneNumber: "89991234567", phoneConfirmed: true }), extraction({})];
     const extractMessage = vi.fn(async () => replies.shift()!);

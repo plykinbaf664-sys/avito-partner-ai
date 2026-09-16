@@ -47,7 +47,24 @@ export const launchTimingLabels: Record<string, string> = {
 export const buyingIntentLabels: Record<string, string> = {
   DECLINED: "Отказался",
   GENERAL_INTEREST: "Интересуется запуском",
+  EXPLORING: "Изучает",
+  CONSIDERING: "Рассматривает",
+  CONDITIONS_ACCEPTED: "Условия подходят",
+  READY_TO_START: "Готов начинать",
+  WANTS_NEXT_STEP: "Хочет следующий шаг",
   WANTS_HUMAN: "Просит связаться",
+  UNKNOWN: "Не выяснено",
+};
+
+export const goalLabels: Record<string, string> = {
+  ADDITIONAL_INCOME: "Дополнительный доход",
+  MAIN_BUSINESS: "Основной бизнес",
+  LEAVE_EMPLOYMENT: "Уйти из найма",
+  INVESTMENT: "Инвестиционный сценарий",
+  SCALE_EXISTING_BUSINESS: "Масштабировать бизнес",
+  USE_OWN_PROPERTY: "Использовать свою недвижимость",
+  RECOVER_PREVIOUS_FAILURE: "Перезапустить после неудачного опыта",
+  UNKNOWN: "Не выяснена",
 };
 
 export const informationNeedLabels: Record<string, string> = {

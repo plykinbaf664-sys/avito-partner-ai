@@ -622,7 +622,7 @@ describe("incoming partner event workflow", () => {
       extractionReply({
         facts: {
           city: "Казань",
-          budget: 500_000,
+          budget: 700_000,
           budgetConfirmed: true,
           startingUnits: 5,
           scalingPotentialUnits: 5,

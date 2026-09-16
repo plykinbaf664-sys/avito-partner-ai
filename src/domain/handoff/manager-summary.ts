@@ -92,7 +92,12 @@ export function createManagerSummary(
     shortTermRentalExperience: lead.shortTermRentalExperience,
     ownsProperty: lead.ownsProperty,
     managementReadiness: lead.managementReadiness,
-    availableTime: lead.availableTimeDetails,
+    availableTime: lead.availableTimeDetails ??
+      (lead.hasFreeTime === true
+        ? "может уделять несколько часов в день"
+        : lead.hasFreeTime === false
+          ? "времени мало; учитывать как риск"
+          : null),
     desiredIncome: lead.desiredIncome,
     economicsEstimateUnits: economicsEstimate?.units ?? null,
     estimatedMonthlyPartnerIncome:

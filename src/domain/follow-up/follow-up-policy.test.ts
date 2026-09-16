@@ -161,7 +161,7 @@ describe("qualification follow-up policy", () => {
   it("asks whether the disclosed launch budget fits instead of repeating a generic budget question", () => {
     const text = buildQualificationFollowUp(
       conversation(),
-      "Для квалификации нужен бюджет от 150 000 ₽ на запуск.",
+      "Ориентир старта одного объекта — 150 000–180 000 ₽.",
     );
     expect(text).toContain("такой бюджет на запуск вам подходит?");
     expect(text).not.toContain("Какую сумму");

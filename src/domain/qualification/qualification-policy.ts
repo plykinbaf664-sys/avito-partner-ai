@@ -5,11 +5,13 @@ import { assessFinancialReadiness } from "./financial-readiness";
 import { normalizePhoneNumber } from "../lead/phone-number";
 
 export const PARTNER_QUALIFICATION_POLICY = Object.freeze({
-  minimumConfirmedLaunchCapital: 150_000,
   smallBusinessEntryCapitalReference:
     SEGMENTATION_REFERENCE.smallBusinessEntryCapital,
+  smallBusinessTargetMinUnits:
+    SEGMENTATION_REFERENCE.smallBusinessTargetMinUnits,
+  smallBusinessTargetMaxUnits:
+    SEGMENTATION_REFERENCE.smallBusinessTargetMaxUnits,
   investorCapitalReference: SEGMENTATION_REFERENCE.investorCapital,
-  investorScaleReference: SEGMENTATION_REFERENCE.investorScaleUnits,
 });
 
 export const hardBlockingReasonCodes = [
@@ -150,10 +152,6 @@ export function evaluateQualification(
     (facts.availableCapital === null &&
       facts.budget === 0 &&
       facts.budgetConfirmed);
-  const confirmedTotalCapital = facts.availableCapitalConfirmed &&
-    facts.capitalScope !== "ENTRY_ONLY"
-    ? facts.availableCapital
-    : null;
   if (facts.buyingIntent === "DECLINED") {
     blockingReasons.push("DECLINED_BY_LEAD");
   }
@@ -183,9 +181,7 @@ export function evaluateQualification(
   }
   if (
     !confirmedNoLaunchCapital &&
-    financialAssessment.financialBarrier !== "UNWILLING_TO_FUND_REQUIRED_EXPENSES" &&
-    confirmedTotalCapital !== null &&
-    confirmedTotalCapital < PARTNER_QUALIFICATION_POLICY.minimumConfirmedLaunchCapital
+    financialAssessment.financialBarrier === "CAPITAL_BELOW_LAUNCH_RANGE"
   ) {
     blockingReasons.push("INSUFFICIENT_LAUNCH_CAPITAL");
   }
@@ -233,10 +229,7 @@ export function evaluateQualification(
   ) {
     weakSignals.push("ENTRY_CAPITAL_BELOW_REFERENCE");
   }
-  if (
-    facts.segment === "SMALL_BUSINESS" &&
-    financialAssessment.financialReadiness === "BORDERLINE"
-  ) {
+  if (financialAssessment.financialReadiness === "BORDERLINE") {
     weakSignals.push("ADDITIONAL_CAPITAL_UNCLEAR");
   }
   if (facts.launchTiming === "LATER") {
@@ -295,7 +288,6 @@ export function evaluateQualification(
     informationGaps.push("BUSINESS_MODEL_READINESS_UNKNOWN");
   }
   if (
-    facts.segment === "SMALL_BUSINESS" &&
     financialAssessment.financialReadiness !== "HIGH" &&
     financialAssessment.financialReadiness !== "READY"
   ) {
@@ -335,9 +327,7 @@ export function evaluateQualification(
     const strongInvestorProfile =
       (availableCapital ?? 0) >=
         PARTNER_QUALIFICATION_POLICY.investorCapitalReference &&
-      ((facts.startingUnits ?? 0) >= 7 ||
-        (facts.scalingPotentialUnits ?? 0) >=
-          PARTNER_QUALIFICATION_POLICY.investorScaleReference);
+      facts.primaryGoal === "INVESTMENT";
     return {
       status: strongInvestorProfile ? "PRIORITY" : "HOT",
       reason: !hasConfirmedPhone(facts) ? "PHONE_UNKNOWN" : strongInvestorProfile
@@ -355,8 +345,18 @@ export function evaluateQualification(
     };
   }
 
+  const prioritySmallBusiness =
+    (facts.scalingPotentialUnits ?? 0) >=
+      PARTNER_QUALIFICATION_POLICY.smallBusinessTargetMinUnits &&
+    (facts.scalingPotentialUnits ?? 0) <=
+      PARTNER_QUALIFICATION_POLICY.smallBusinessTargetMaxUnits &&
+    financialAssessment.financialReadiness === "HIGH";
   return {
-    status: weakSignals.length > 0 ? "WARM" : "HOT",
+    status: prioritySmallBusiness
+      ? "PRIORITY"
+      : weakSignals.length > 0
+        ? "WARM"
+        : "HOT",
     reason: !hasConfirmedPhone(facts) ? "PHONE_UNKNOWN" : weakSignals[0] ?? "SMALL_BUSINESS_READY",
     reasonCodes: unique(["SMALL_BUSINESS_READY", ...weakSignals, ...(!hasConfirmedPhone(facts) ? ["PHONE_UNKNOWN" as const] : [])]),
     blockingReasons: [],
