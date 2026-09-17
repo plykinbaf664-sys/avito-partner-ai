@@ -35,6 +35,18 @@ const extraction: ExtractMessageResult = {
   },
   llm: { model: "test", inputTokens: 1, outputTokens: 1 },
 };
+function extractionWithFacts(
+  facts: Partial<ExtractMessageResult["extraction"]["facts"]>,
+): ExtractMessageResult {
+  return {
+    ...extraction,
+    extraction: {
+      ...extraction.extraction,
+      facts: { ...extraction.extraction.facts, ...facts },
+    },
+  };
+}
+
 const start = new Date("2026-09-13T10:00:00Z");
 const key = "avito-messages:owner";
 const message = (id = "m1", overrides: Partial<AvitoMessage> = {}): AvitoMessage => ({
@@ -52,7 +64,12 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
   });
   afterEach(() => persistence.close());
 
-  function harness(database = persistence, chatId?: string) {
+  function harness(
+    database = persistence,
+    chatId?: string,
+    coalescingDelayMs = 0,
+    waitForCoalescing: (milliseconds: number) => Promise<void> = async () => {},
+  ) {
     const client = {
       getAuthenticatedAccount: vi.fn().mockResolvedValue({ id: "owner" }),
       listChats: vi.fn().mockResolvedValue([{ id: "chat", updatedAtUnix: null }]),
@@ -65,8 +82,17 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
       extractMessage, now: () => current, logger,
       outboundProvider: new AvitoOutboundMessageProvider(client as unknown as AvitoApiClient),
     });
-    const poll = createAvitoMessagePoller({ client, persistence: database, chatId,
-      stateRepository: database.pollingStates, processIncomingEvent, clock: () => current, logger });
+    const poll = createAvitoMessagePoller({
+      client,
+      persistence: database,
+      chatId,
+      stateRepository: database.pollingStates,
+      processIncomingEvent,
+      clock: () => current,
+      logger,
+      coalescingDelayMs,
+      waitForCoalescing,
+    });
     return { client, extractMessage, processIncomingEvent, poll, logger };
   }
 
@@ -124,6 +150,96 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     expect(await h.poll(current)).toMatchObject({ status: "PASS", accepted: 0, ignored: 4 });
     expect(h.extractMessage).not.toHaveBeenCalled();
     expect(h.client.sendTextMessage).not.toHaveBeenCalled();
+  });
+
+  it("coalesces a greeting and a city discovered during the debounce window", async () => {
+    const h = harness(persistence, undefined, 2_500);
+    const hello = message("hello", {
+      text: "Здравствуйте! Еще актуально?",
+      createdAtUnix: start.getTime() / 1_000 + 1,
+    });
+    const city = message("city", {
+      text: "екатеринбург",
+      createdAtUnix: start.getTime() / 1_000 + 2,
+    });
+    h.client.listMessages
+      .mockResolvedValueOnce([hello])
+      .mockResolvedValueOnce([city, hello])
+      .mockResolvedValueOnce([city, hello]);
+    h.extractMessage.mockImplementation(async ({ text }) =>
+      text === "екатеринбург"
+        ? extractionWithFacts({ city: "Екатеринбург" })
+        : extraction,
+    );
+
+    expect(await h.poll(current)).toMatchObject({
+      status: "PASS",
+      accepted: 2,
+      processed: 2,
+    });
+
+    const lead = await persistence.leads.findByExternalIdentity("AVITO", "chat");
+    const conversation = await persistence.conversations.findOpenByLeadId(lead!.id);
+    const messages = await persistence.messages.listByConversationId(
+      conversation!.id,
+    );
+    expect(lead?.city).toBe("Екатеринбург");
+    expect(messages.filter(({ direction }) => direction === "INBOUND")).toHaveLength(2);
+    expect(messages.filter(({ direction }) => direction === "OUTBOUND")).toHaveLength(1);
+    expect(h.client.sendTextMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it("coalesces three rapid facts and never asks for known capital", async () => {
+    const h = harness();
+    h.client.listMessages.mockResolvedValue([
+      message("capital", {
+        text: "Готов вложить 200 тысяч",
+        createdAtUnix: start.getTime() / 1_000 + 3,
+      }),
+      message("city", {
+        text: "Екатеринбург",
+        createdAtUnix: start.getTime() / 1_000 + 2,
+      }),
+      message("hello", {
+        text: "Здравствуйте",
+        createdAtUnix: start.getTime() / 1_000 + 1,
+      }),
+    ]);
+    h.extractMessage.mockImplementation(async ({ text }) => {
+      if (text === "Екатеринбург") {
+        return extractionWithFacts({ city: "Екатеринбург" });
+      }
+      if (text === "Готов вложить 200 тысяч") {
+        return extractionWithFacts({
+          availableCapital: 200_000,
+          availableCapitalConfirmed: true,
+          capitalScope: "TOTAL_LIMIT",
+        });
+      }
+      return extraction;
+    });
+
+    expect(await h.poll(current)).toMatchObject({
+      status: "PASS",
+      accepted: 3,
+      processed: 3,
+    });
+
+    const lead = await persistence.leads.findByExternalIdentity("AVITO", "chat");
+    const conversation = await persistence.conversations.findOpenByLeadId(lead!.id);
+    const messages = await persistence.messages.listByConversationId(
+      conversation!.id,
+    );
+    const outbound = messages.filter(({ direction }) => direction === "OUTBOUND");
+    expect(lead).toMatchObject({
+      city: "Екатеринбург",
+      availableCapital: 200_000,
+      availableCapitalConfirmed: true,
+    });
+    expect(messages.filter(({ direction }) => direction === "INBOUND")).toHaveLength(3);
+    expect(outbound).toHaveLength(1);
+    expect(outbound[0].content).not.toMatch(/какую сумму|ваш бюджет|капитал/i);
+    expect(h.client.sendTextMessage).toHaveBeenCalledTimes(1);
   });
 
   it("deduplicates repeated API IDs, repeated polls, and existing webhook events", async () => {

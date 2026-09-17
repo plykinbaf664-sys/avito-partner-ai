@@ -564,6 +564,62 @@ describe("incoming partner event workflow", () => {
     ).toHaveLength(1);
   });
 
+  it("suppresses an older response when a newer event is already claimed", async () => {
+    let releaseOlder!: (result: ExtractMessageResult) => void;
+    let releaseNewer!: (result: ExtractMessageResult) => void;
+    let olderStarted!: () => void;
+    let newerStarted!: () => void;
+    const olderReady = new Promise<void>((resolve) => {
+      olderStarted = resolve;
+    });
+    const newerReady = new Promise<void>((resolve) => {
+      newerStarted = resolve;
+    });
+    const olderResult = new Promise<ExtractMessageResult>((resolve) => {
+      releaseOlder = resolve;
+    });
+    const newerResult = new Promise<ExtractMessageResult>((resolve) => {
+      releaseNewer = resolve;
+    });
+    const outboundProvider = new FakeOutboundProvider();
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: async ({ text }) => {
+        if (text === "older") {
+          olderStarted();
+          return olderResult;
+        }
+        newerStarted();
+        return newerResult;
+      },
+      outboundProvider,
+      generateId: () => `generated-${++nextId}`,
+      now: () => new Date("2026-09-03T12:00:00.000Z"),
+    });
+
+    const older = processEvent(input("event-turn-older", "older"));
+    await olderReady;
+    const newer = processEvent(input("event-turn-newer", "newer"));
+    await newerReady;
+    releaseOlder(extractionResult({}));
+    const olderCompleted = await older;
+    expect(olderCompleted.outboundMessage).toBeNull();
+    expect(outboundProvider.requests).toHaveLength(0);
+
+    releaseNewer(extractionResult({ city: "Екатеринбург" }));
+    const newerCompleted = await newer;
+    const messages = await persistence.messages.listByConversationId(
+      newerCompleted.conversationId!,
+    );
+
+    expect(outboundProvider.requests).toHaveLength(1);
+    expect(messages.filter(({ direction }) => direction === "INBOUND")).toHaveLength(2);
+    expect(messages.filter(({ direction }) => direction === "OUTBOUND")).toHaveLength(1);
+    expect((await persistence.leads.findById(newerCompleted.leadId!))?.city).toBe(
+      "Екатеринбург",
+    );
+  });
+
   it("handles a small concurrent multi-conversation batch with the fake extractor", async () => {
     const processEvent = createIncomingEventProcessor({
       persistence,

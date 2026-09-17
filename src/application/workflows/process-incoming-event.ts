@@ -119,6 +119,10 @@ export interface ProcessIncomingEventDependencies {
   processingTimeoutMs?: number;
 }
 
+export interface ProcessIncomingEventOptions {
+  suppressOutbound?: boolean;
+}
+
 interface PreparedEvent {
   claimed: boolean;
   recoveredStale: boolean;
@@ -452,6 +456,7 @@ export function createIncomingEventProcessor({
 }: ProcessIncomingEventDependencies) {
   return async function processIncomingEvent(
     untrustedInput: IncomingPartnerEvent,
+    options: ProcessIncomingEventOptions = {},
   ): Promise<ProcessIncomingEventResult> {
     const processingStartedAt = timer();
     const input = incomingPartnerEventSchema.parse(untrustedInput);
@@ -706,7 +711,11 @@ export function createIncomingEventProcessor({
       });
       let responseLlm: Awaited<ReturnType<NaturalResponseGenerator>> | null =
         null;
-      if (responsePlan.useNaturalAdaptation && generateNaturalResponse) {
+      if (
+        !options.suppressOutbound &&
+        responsePlan.useNaturalAdaptation &&
+        generateNaturalResponse
+      ) {
         try {
           responseLlm = await generateNaturalResponse({
             lead: evaluatedLead,
@@ -797,9 +806,14 @@ export function createIncomingEventProcessor({
         const transactionOutboundText =
           responseLlm?.text ?? transactionResponsePlan.text;
 
-        const qualificationCompleted =
-          transactionDecision.nextAction === "REJECT_POLITELY" ||
-          transactionDecision.shouldHandoffToManager;
+        const responseSuppressed =
+          options.suppressOutbound === true ||
+          (prepared.inboundSequence !== null &&
+            prepared.inboundSequence < storedConversation.nextInboundSequence);
+        const qualificationCompleted = responseSuppressed
+          ? storedConversation.qualificationCompleted
+          : transactionDecision.nextAction === "REJECT_POLITELY" ||
+            transactionDecision.shouldHandoffToManager;
         const targetState =
           transactionDecision.status === "NO_FIT"
             ? "CLOSED"
@@ -809,31 +823,48 @@ export function createIncomingEventProcessor({
                 ? "QUALIFIED"
                 : stateForInformationNeed(transactionNextInformationNeed);
         // Legacy premature handoffs without a phone must resume qualification.
-        const resumeIncompleteHandoff = storedConversation.state === "HANDOFF" && !hasConfirmedPhone(storedLead);
-        const nextState =
-          (storedConversation.state === "HANDOFF" && !resumeIncompleteHandoff) ||
-          storedConversation.state === "CLOSED"
+        const resumeIncompleteHandoff =
+          storedConversation.state === "HANDOFF" &&
+          !hasConfirmedPhone(storedLead);
+        const nextState = responseSuppressed
+          ? storedConversation.state
+          : (storedConversation.state === "HANDOFF" &&
+                !resumeIncompleteHandoff) ||
+              storedConversation.state === "CLOSED"
             ? storedConversation.state
-            : transitionConversation(resumeIncompleteHandoff ? "QUALIFYING" : storedConversation.state, targetState);
-        const explainedKnowledge = [
-          ...new Set([
-            ...parseStoredKnowledgeIds(storedConversation.summary),
-            ...knowledge.entryIds,
-          ]),
-        ];
-        const managerSummary = transactionDecision.shouldHandoffToManager
-          ? createManagerSummary(
-              transactionLead,
-              transactionDecision,
-              explainedKnowledge,
-            )
-          : null;
+            : transitionConversation(
+                resumeIncompleteHandoff
+                  ? "QUALIFYING"
+                  : storedConversation.state,
+                targetState,
+              );
+        const previouslyExplainedKnowledge = parseStoredKnowledgeIds(
+          storedConversation.summary,
+        );
+        const explainedKnowledge = responseSuppressed
+          ? previouslyExplainedKnowledge
+          : [
+              ...new Set([
+                ...previouslyExplainedKnowledge,
+                ...knowledge.entryIds,
+              ]),
+            ];
+        const managerSummary =
+          !responseSuppressed &&
+          transactionDecision.shouldHandoffToManager
+            ? createManagerSummary(
+                transactionLead,
+                transactionDecision,
+                explainedKnowledge,
+              )
+            : null;
         const updatedLead: Lead = {
           ...transactionLead,
           conversationSummary: managerSummary
             ? JSON.stringify(managerSummary)
             : transactionLead.conversationSummary,
           handoffAt:
+            !responseSuppressed &&
             transactionDecision.shouldHandoffToManager &&
             !transactionLead.handoffAt
               ? now
@@ -842,32 +873,43 @@ export function createIncomingEventProcessor({
         };
         await repositories.leads.update(updatedLead);
 
-        const outboundDeduplicationKey = `event-response:${registration.event.id}`;
-        const outboundMessage: Message = {
-          id: idGenerator(),
-          conversationId: storedConversation.id,
-          leadId: storedLead.id,
-          incomingEventId: null,
-          externalMessageId: null,
-          deduplicationKey: outboundDeduplicationKey,
-          sequence: null,
-          direction: "OUTBOUND",
-          content: transactionOutboundText,
-          deliveryStatus: "PENDING",
-          deliveryAttempts: 0,
-          deliveryRetryable: null,
-          lastDeliveryErrorCode: null,
-          sentAt: null,
-          createdAt: now,
-        };
-        await repositories.messages.insertIfAbsent(outboundMessage);
-        const storedOutboundMessage =
-          await repositories.messages.findByDeduplicationKey(
-            outboundDeduplicationKey,
-          );
+        let outboundMessageId: string | null = null;
+        if (!responseSuppressed) {
+          const turnId =
+            prepared.inboundSequence === null
+              ? registration.event.id
+              : String(prepared.inboundSequence);
+          const outboundDeduplicationKey =
+            `turn-response:${storedConversation.id}:${turnId}`;
+          const outboundMessage: Message = {
+            id: idGenerator(),
+            conversationId: storedConversation.id,
+            leadId: storedLead.id,
+            incomingEventId: null,
+            externalMessageId: null,
+            deduplicationKey: outboundDeduplicationKey,
+            sequence: null,
+            direction: "OUTBOUND",
+            content: transactionOutboundText,
+            deliveryStatus: "PENDING",
+            deliveryAttempts: 0,
+            deliveryRetryable: null,
+            lastDeliveryErrorCode: null,
+            sentAt: null,
+            createdAt: now,
+          };
+          await repositories.messages.insertIfAbsent(outboundMessage);
+          outboundMessageId =
+            (
+              await repositories.messages.findByDeduplicationKey(
+                outboundDeduplicationKey,
+              )
+            )?.id ?? null;
+        }
 
         let managerNotificationId: string | null = null;
         if (
+          !responseSuppressed &&
           transactionDecision.shouldHandoffToManager &&
           storedLead.handoffAt === null &&
           managerSummary
@@ -896,13 +938,28 @@ export function createIncomingEventProcessor({
                 idempotencyKey,
               )
             )?.id ?? null;
-        } else if (transactionDecision.shouldHandoffToManager && managerSummary) {
+        } else if (
+          !responseSuppressed &&
+          transactionDecision.shouldHandoffToManager &&
+          managerSummary
+        ) {
           // Refresh only an untouched legacy queue entry after collecting its missing phone.
           // Never create another handoff or reset an attempted/sent notification.
-          const existing = await repositories.managerNotifications.findByIdempotencyKey(`manager-handoff:${storedLead.id}`);
-          if (existing?.deliveryStatus === "PENDING" && existing.deliveryAttempts === 0 && !existing.summary.phoneNumber) {
-            await repositories.managerNotifications.update({ ...existing, summary: managerSummary,
-              qualificationStatus: transactionDecision.status, updatedAt: now });
+          const existing =
+            await repositories.managerNotifications.findByIdempotencyKey(
+              `manager-handoff:${storedLead.id}`,
+            );
+          if (
+            existing?.deliveryStatus === "PENDING" &&
+            existing.deliveryAttempts === 0 &&
+            !existing.summary.phoneNumber
+          ) {
+            await repositories.managerNotifications.update({
+              ...existing,
+              summary: managerSummary,
+              qualificationStatus: transactionDecision.status,
+              updatedAt: now,
+            });
             managerNotificationId = existing.id;
           }
         }
@@ -911,19 +968,26 @@ export function createIncomingEventProcessor({
           ...storedConversation,
           state: nextState,
           summary: JSON.stringify(explainedKnowledge),
-          pendingInformationNeed: qualificationCompleted
-            ? null
-            : transactionNextInformationNeed,
-          awaitingUserReply: false,
+          pendingInformationNeed: responseSuppressed
+            ? storedConversation.pendingInformationNeed
+            : qualificationCompleted
+              ? null
+              : transactionNextInformationNeed,
+          awaitingUserReply: responseSuppressed
+            ? storedConversation.awaitingUserReply
+            : false,
           qualificationCompleted,
-          followUpEligibleAt: null,
+          followUpEligibleAt: responseSuppressed
+            ? storedConversation.followUpEligibleAt
+            : null,
           lastAppliedInboundSequence: Math.max(
             storedConversation.lastAppliedInboundSequence,
             prepared.inboundSequence ?? 0,
           ),
           updatedAt: now,
-          closedAt:
-            transactionDecision.status === "NO_FIT"
+          closedAt: responseSuppressed
+            ? storedConversation.closedAt
+            : transactionDecision.status === "NO_FIT"
               ? now
               : storedConversation.closedAt,
         };
@@ -941,16 +1005,19 @@ export function createIncomingEventProcessor({
 
         return {
           outOfOrderIgnored: false as const,
+          responseSuppressed,
           lead: updatedLead,
           conversation: updatedConversation,
           decision: transactionDecision,
           managerSummary,
-          outboundMessageId: storedOutboundMessage?.id ?? null,
+          outboundMessageId,
           managerNotificationId,
-          asksUserQuestion: transactionResponsePlan.asksUserQuestion,
-          outboundText: transactionOutboundText,
+          asksUserQuestion:
+            !responseSuppressed && transactionResponsePlan.asksUserQuestion,
+          outboundText: responseSuppressed ? null : transactionOutboundText,
           totalProcessingLatencyMs,
         };
+
       });
 
       if (completed.outOfOrderIgnored) {
@@ -982,6 +1049,17 @@ export function createIncomingEventProcessor({
           extraction: extracted.extraction,
           totalProcessingLatencyMs: completed.totalProcessingLatencyMs,
           decision: completed.decision,
+        });
+      }
+
+      if (completed.responseSuppressed) {
+        logger.info("event.response_superseded", {
+          eventId: registration.event.id,
+          leadId: completed.lead.id,
+          conversationId: completed.conversation.id,
+          source: input.source,
+          inboundSequence: prepared.inboundSequence,
+          latestInboundSequence: completed.conversation.nextInboundSequence,
         });
       }
 

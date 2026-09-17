@@ -5,7 +5,12 @@ import type { Persistence } from "../ports/repositories";
 import { silentLogger, type StructuredLogger } from "../observability/structured-logger";
 import { MAX_INCOMING_PROCESSING_ATTEMPTS } from "../security/technical-limits";
 import { createIncomingEventAcceptor } from "./accept-incoming-event";
-import { incomingPartnerEventSchema, type IncomingPartnerEvent, type ProcessIncomingEventResult } from "./process-incoming-event";
+import {
+  incomingPartnerEventSchema,
+  type IncomingPartnerEvent,
+  type ProcessIncomingEventOptions,
+  type ProcessIncomingEventResult,
+} from "./process-incoming-event";
 import { AvitoApiError, type AvitoApiClient, type AvitoMessage } from "@/integrations/avito/avito-api-client";
 import { AvitoInboundChannel } from "@/integrations/avito/avito-inbound-channel";
 import { generateId } from "@/shared/id";
@@ -16,6 +21,8 @@ const MAX_OFFSET = 1_000;
 const OVERLAP_MS = 5 * 60_000;
 const LEASE_MS = 10 * 60_000;
 const STALE_EVENT_MS = 5 * 60_000;
+export const AVITO_INBOUND_COALESCE_MS = 2_500;
+const MAX_COALESCING_ROUNDS = 2;
 const storedInputSchema = z.object({ normalizedInput: z.object({
   source: z.literal("AVITO"), externalEventId: z.string(), externalLeadId: z.string(),
   messageId: z.string(), text: z.string(), receivedAt: z.iso.datetime(),
@@ -42,15 +49,24 @@ export interface AvitoPollResult {
 export function createAvitoMessagePoller({
   client, persistence, stateRepository, processIncomingEvent,
   chatId: requestedChatId,
-  logger = silentLogger, clock = () => new Date(),
+  logger = silentLogger,
+  clock = () => new Date(),
+  coalescingDelayMs = AVITO_INBOUND_COALESCE_MS,
+  waitForCoalescing = (milliseconds: number) =>
+    new Promise<void>((resolve) => setTimeout(resolve, milliseconds)),
 }: {
   client: Pick<AvitoApiClient, "getAuthenticatedAccount" | "listChats" | "listMessages">;
   persistence: Persistence;
   stateRepository: PollingStateRepository;
-  processIncomingEvent: (input: IncomingPartnerEvent) => Promise<ProcessIncomingEventResult>;
+  processIncomingEvent: (
+    input: IncomingPartnerEvent,
+    options?: ProcessIncomingEventOptions,
+  ) => Promise<ProcessIncomingEventResult>;
   chatId?: string;
   logger?: StructuredLogger;
   clock?: () => Date;
+  coalescingDelayMs?: number;
+  waitForCoalescing?: (milliseconds: number) => Promise<void>;
 }) {
   const chatId = requestedChatId === undefined ? undefined : z.string().trim().min(1).max(255).parse(requestedChatId);
   const accept = createIncomingEventAcceptor({ persistence, logger, now: clock });
@@ -73,12 +89,20 @@ export function createAvitoMessagePoller({
       }
     };
     const attempted = new Set<string>();
-    const processOne = async (input: IncomingPartnerEvent) => {
+    const queued = new Map<string, IncomingPartnerEvent>();
+    const chatsToCoalesce = new Set<string>();
+    const queue = (input: IncomingPartnerEvent) => {
+      queued.set(input.externalEventId, input);
+    };
+    const processOne = async (
+      input: IncomingPartnerEvent,
+      options: ProcessIncomingEventOptions = {},
+    ) => {
       if (attempted.has(input.externalEventId)) return;
       attempted.add(input.externalEventId);
       await assertLease();
       try {
-        const processed = await processIncomingEvent(input);
+        const processed = await processIncomingEvent(input, options);
         if (processed.duplicate) result.duplicates += 1;
         else result.processed += 1;
         logger.info("avito.poll.message", {
@@ -123,8 +147,10 @@ export function createAvitoMessagePoller({
       for (const event of pending) {
         const stored = storedInputSchema.safeParse(event.payload);
         if (stored.success && (!chatId || stored.data.normalizedInput.externalLeadId === chatId)) {
-          await processOne({ ...stored.data.normalizedInput,
-            receivedAt: new Date(stored.data.normalizedInput.receivedAt) });
+          queue({
+            ...stored.data.normalizedInput,
+            receivedAt: new Date(stored.data.normalizedInput.receivedAt),
+          });
         }
       }
 
@@ -227,13 +253,124 @@ export function createAvitoMessagePoller({
               continue;
             }
             inputs.push(input);
+            if (
+              accepted.created &&
+              messagesComplete &&
+              coalescingDelayMs > 0
+            ) {
+              chatsToCoalesce.add(chat.id);
+            }
           }
-          // Persist the fetched batch before any LLM call or outbound operation.
-          for (const input of inputs) await processOne(input);
+          // Persist every fetched event before any LLM call or outbound operation.
+          for (const input of inputs) queue(input);
         }
         if (chats.length < PAGE_SIZE) { chatsComplete = true; break; }
       }
       if (!chatsComplete) throw new Error("AVITO_POLL_CHAT_PAGE_LIMIT");
+
+      // A customer can send several short messages while the first one is being
+      // discovered. Re-read only affected chats after a short quiet period,
+      // then process the durable events as one logical user turn.
+      const deferredChats = new Set<string>();
+      let roundChats = new Set(chatsToCoalesce);
+      for (
+        let round = 0;
+        round < MAX_COALESCING_ROUNDS && roundChats.size > 0;
+        round += 1
+      ) {
+        await waitForCoalescing(coalescingDelayMs);
+        const nextRoundChats = new Set<string>();
+        for (const pendingChatId of roundChats) {
+          await assertLease();
+          try {
+            result.apiRequests += 1;
+            const page = await client.listMessages(pendingChatId, {
+              limit: PAGE_SIZE,
+              offset: 0,
+            });
+            result.fetched += page.length;
+            let discoveredNew = false;
+            for (const message of [...page].sort(
+              (left, right) => left.createdAtUnix - right.createdAtUnix,
+            )) {
+              if (
+                message.createdAtUnix * 1_000 < since ||
+                message.direction !== "in" ||
+                message.authorId === account.id ||
+                message.authorId === "0" ||
+                message.type === "system" ||
+                message.type !== "text" ||
+                !message.text?.trim()
+              ) {
+                continue;
+              }
+              const input = incomingPartnerEventSchema.parse(
+                channel.fromVerifiedMessage(pendingChatId, message),
+              );
+              const accepted = await accept(input);
+              if (accepted.created) {
+                result.accepted += 1;
+                discoveredNew = true;
+                logger.info("avito.poll.coalesced_message", {
+                  source: "AVITO",
+                  chatId: pendingChatId,
+                  externalEventId: input.externalEventId,
+                  eventId: accepted.event.id,
+                });
+              }
+              if (
+                accepted.event.status === "PROCESSED" ||
+                (accepted.event.status === "FAILED" &&
+                  (accepted.event.processingRetryable === false ||
+                    accepted.event.processingAttempts >=
+                      MAX_INCOMING_PROCESSING_ATTEMPTS))
+              ) {
+                continue;
+              }
+              queue(input);
+            }
+            if (discoveredNew) nextRoundChats.add(pendingChatId);
+          } catch (error) {
+            deferredChats.add(pendingChatId);
+            logger.error("avito.poll.coalescing_recheck_failed", {
+              source: "AVITO",
+              chatId: pendingChatId,
+              errorCode:
+                error instanceof AvitoApiError
+                  ? error.code
+                  : "AVITO_COALESCING_RECHECK_FAILED",
+            });
+          }
+        }
+        roundChats = nextRoundChats;
+      }
+      // A still-active burst is safer to defer durably to the next poll than to
+      // answer an incomplete turn.
+      for (const pendingChatId of roundChats) {
+        deferredChats.add(pendingChatId);
+      }
+
+      const turns = new Map<string, IncomingPartnerEvent[]>();
+      for (const input of queued.values()) {
+        if (deferredChats.has(input.externalLeadId)) continue;
+        const turn = turns.get(input.externalLeadId) ?? [];
+        turn.push(input);
+        turns.set(input.externalLeadId, turn);
+      }
+      for (const turn of turns.values()) {
+        turn.sort((left, right) => {
+          const byTime =
+            (left.receivedAt?.getTime() ?? 0) -
+            (right.receivedAt?.getTime() ?? 0);
+          return byTime || left.externalEventId.localeCompare(right.externalEventId);
+        });
+        for (let index = 0; index < turn.length; index += 1) {
+          await processOne(turn[index], {
+            suppressOutbound: index < turn.length - 1,
+          });
+        }
+      }
+
       if (result.failed === 0) {
         await assertLease();
         if (!await stateRepository.complete(key, owner, clock(),
