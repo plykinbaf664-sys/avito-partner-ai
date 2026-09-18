@@ -56,6 +56,7 @@ export interface ConversationRepository {
 export interface MessageRepository {
   findById(id: string): Promise<Message | null>;
   findByDeduplicationKey(key: string): Promise<Message | null>;
+  findByExternalMessageId(externalMessageId: string): Promise<Message | null>;
   insert(message: Message): Promise<void>;
   insertIfAbsent(message: Message): Promise<boolean>;
   update(message: Message): Promise<void>;

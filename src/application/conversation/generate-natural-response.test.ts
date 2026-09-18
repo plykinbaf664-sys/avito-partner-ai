@@ -224,6 +224,30 @@ describe("natural response generation", () => {
     })).resolves.toMatchObject({ text });
   });
 
+  it("allows an explicit no-reply decision after a manager-led step", async () => {
+    const generate = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([
+        JSON.stringify({ replyAction: "NO_REPLY", text: "", nextInformationNeed: null }),
+      ]),
+    });
+
+    await expect(generate({
+      lead: {} as Lead,
+      plan: {
+        text: "Спасибо, Дмитрий свяжется с вами.",
+        nextInformationNeed: "PHONE_NUMBER",
+        asksUserQuestion: true,
+        knowledgeEntryIds: [],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+      },
+      recentMessages: [
+        { direction: "OUTBOUND", actor: "MANAGER", content: "Оставьте номер, я вам позвоню." },
+        { direction: "INBOUND", actor: "USER", content: "89049163020" },
+      ],
+    })).resolves.toMatchObject({ replyAction: "NO_REPLY", text: "", nextInformationNeed: null });
+  });
+
   it("rejects an ungrounded business condition in a contextual answer", async () => {
     const plan: ConversationResponsePlan = {
       text: "Первый этап — около 50 000 ₽. Это ориентир, итог зависит от объекта.",

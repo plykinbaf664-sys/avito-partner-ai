@@ -5,6 +5,7 @@ import type { Persistence } from "../ports/repositories";
 import { silentLogger, type StructuredLogger } from "../observability/structured-logger";
 import { MAX_INCOMING_PROCESSING_ATTEMPTS } from "../security/technical-limits";
 import { createIncomingEventAcceptor } from "./accept-incoming-event";
+import { createExternalConversationMessageRecorder } from "./record-external-message";
 import {
   incomingPartnerEventSchema,
   type IncomingPartnerEvent,
@@ -70,6 +71,7 @@ export function createAvitoMessagePoller({
 }) {
   const chatId = requestedChatId === undefined ? undefined : z.string().trim().min(1).max(255).parse(requestedChatId);
   const accept = createIncomingEventAcceptor({ persistence, logger, now: clock });
+  const recordHumanMessage = createExternalConversationMessageRecorder({ persistence, logger });
   const channel = new AvitoInboundChannel();
 
   return async function pollAvitoMessages(now: Date): Promise<AvitoPollResult> {
@@ -173,9 +175,20 @@ export function createAvitoMessagePoller({
           }
           result.checkedChats += 1;
           const messages = new Map<string, AvitoMessage>();
-          const considerMessage = (message: AvitoMessage) => {
-            if (message.createdAtUnix * 1_000 < since || message.direction !== "in" ||
-                message.authorId === account.id || message.authorId === "0" || message.type === "system") {
+          const considerMessage = async (message: AvitoMessage) => {
+            if (
+              message.createdAtUnix * 1_000 < since ||
+              message.authorId === "0" ||
+              message.type === "system"
+            ) {
+              result.ignored += 1;
+              return;
+            }
+            if (message.direction === "out" && message.authorId !== account.id) {
+              result.ignored += 1;
+              return;
+            }
+            if (message.direction === "in" && message.authorId === account.id) {
               result.ignored += 1;
               return;
             }
@@ -186,6 +199,13 @@ export function createAvitoMessagePoller({
               });
               return;
             }
+            if (
+              message.direction === "out" &&
+              await persistence.messages.findByExternalMessageId(message.id)
+            ) {
+              result.ignored += 1;
+              return;
+            }
             if (messages.has(message.id)) result.duplicates += 1;
             messages.set(message.id, message);
           };
@@ -193,7 +213,7 @@ export function createAvitoMessagePoller({
           // Keep it even when the separate history endpoint is unavailable.
           if (chat.lastMessage) {
             result.fetched += 1;
-            considerMessage(chat.lastMessage);
+            await considerMessage(chat.lastMessage);
           }
           let messagesComplete = false;
           try {
@@ -202,7 +222,7 @@ export function createAvitoMessagePoller({
               result.apiRequests += 1;
               const page = await client.listMessages(chat.id, { limit: PAGE_SIZE, offset: messageOffset });
               result.fetched += page.length;
-              for (const message of page) considerMessage(message);
+              for (const message of page) await considerMessage(message);
               // Messenger returns messages newest first. Read the entire boundary page,
               // including every message with an equal timestamp.
               if (page.length < PAGE_SIZE || page.every((message) => message.createdAtUnix * 1_000 < since)) {
@@ -225,6 +245,18 @@ export function createAvitoMessagePoller({
           const inputs: IncomingPartnerEvent[] = [];
           for (const message of [...messages.values()].sort((a, b) => a.createdAtUnix - b.createdAtUnix)) {
             await assertLease();
+            if (message.direction === "out") {
+              const recorded = await recordHumanMessage({
+                source: "AVITO",
+                externalLeadId: chat.id,
+                externalMessageId: message.id,
+                text: message.text!.trim(),
+                createdAt: new Date(message.createdAtUnix * 1_000),
+              });
+              if (recorded.duplicate) result.duplicates += 1;
+              else result.processed += 1;
+              continue;
+            }
             const input = incomingPartnerEventSchema.parse(channel.fromVerifiedMessage(chat.id, message));
             const accepted = await accept(input);
             logger.info(accepted.created ? "avito.poll.new_message" : "avito.poll.duplicate", {
@@ -295,8 +327,6 @@ export function createAvitoMessagePoller({
             )) {
               if (
                 message.createdAtUnix * 1_000 < since ||
-                message.direction !== "in" ||
-                message.authorId === account.id ||
                 message.authorId === "0" ||
                 message.type === "system" ||
                 message.type !== "text" ||
@@ -304,6 +334,20 @@ export function createAvitoMessagePoller({
               ) {
                 continue;
               }
+              if (message.direction === "out" && message.authorId !== account.id) continue;
+              if (message.direction === "out") {
+                if (!await persistence.messages.findByExternalMessageId(message.id)) {
+                  await recordHumanMessage({
+                    source: "AVITO",
+                    externalLeadId: pendingChatId,
+                    externalMessageId: message.id,
+                    text: message.text.trim(),
+                    createdAt: new Date(message.createdAtUnix * 1_000),
+                  });
+                }
+                continue;
+              }
+              if (message.authorId === account.id) continue;
               const input = incomingPartnerEventSchema.parse(
                 channel.fromVerifiedMessage(pendingChatId, message),
               );

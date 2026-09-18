@@ -194,8 +194,9 @@ export function createDueFollowUpsProcessor({
                     now.getTime() - prepared.conversation.lastOutboundAt.getTime(),
                   )
                 : undefined,
-              recentMessages: prepared.history.map(({ direction, content }) => ({
+              recentMessages: prepared.history.map(({ direction, actor, content }) => ({
                 direction,
+                actor,
                 content,
               })),
             });
@@ -251,6 +252,7 @@ export function createDueFollowUpsProcessor({
             deduplicationKey: prepared.deduplicationKey,
             sequence: null,
             direction: "OUTBOUND",
+            actor: "AI",
             content,
             deliveryStatus: "PENDING",
             deliveryAttempts: 0,

@@ -109,7 +109,7 @@ export default async function CrmLeadPage({
             {record.messages.map((message) => (
               <article key={message.id} className={`max-w-3xl rounded-xl p-4 ${message.direction === "INBOUND" ? "bg-slate-800" : "ml-auto bg-blue-950"}`}>
                 <div className="mb-2 flex justify-between gap-4 text-xs text-slate-400">
-                  <span>{message.direction === "INBOUND" ? "Лид" : "Система"}</span>
+                  <span>{message.actor === "MANAGER" ? "\u0414\u043c\u0438\u0442\u0440\u0438\u0439" : message.actor === "AI" ? "AI" : "\u041b\u0438\u0434"}</span>
                   <span>{dateTime(message.createdAt)}</span>
                 </div>
                 <p className="whitespace-pre-wrap text-sm">{message.content}</p>

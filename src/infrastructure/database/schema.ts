@@ -24,7 +24,7 @@ import {
 import { qualificationStatuses } from "@/domain/lead/qualification-status";
 import { leadSegments } from "@/domain/lead/lead-segment";
 import { serviceabilityStatuses } from "@/domain/lead/serviceability";
-import { messageDirections } from "@/domain/message/message";
+import { messageActors, messageDirections } from "@/domain/message/message";
 import type { ManagerSummary } from "@/domain/handoff/manager-summary";
 
 export const pollingStates = sqliteTable("polling_states", {
@@ -230,6 +230,7 @@ export const messages = sqliteTable(
     deduplicationKey: text("deduplication_key"),
     sequence: integer("sequence"),
     direction: text("direction", { enum: messageDirections }).notNull(),
+    actor: text("actor", { enum: messageActors }).notNull().default("USER"),
     content: text("content").notNull(),
     deliveryStatus: text("delivery_status", { enum: deliveryStatuses }),
     deliveryAttempts: integer("delivery_attempts").notNull().default(0),

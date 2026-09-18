@@ -131,6 +131,26 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     expect(h.client.sendTextMessage).toHaveBeenCalledExactlyOnceWith("chat", expect.any(String));
   });
 
+  it("persists Dmitry messages and uses them before processing the user reply", async () => {
+    const h = harness();
+    h.client.listMessages.mockResolvedValue([
+      message("dmitry-1", { direction: "out", authorId: "owner", text: "Оставьте номер, я вам сегодня наберу" }),
+      message("phone-1", { text: "89049163020" }),
+    ]);
+    h.extractMessage.mockImplementation(async ({ recentMessages }) => {
+      expect(recentMessages?.some((item: { actor?: string }) => item.actor === "MANAGER")).toBe(true);
+      return extractionWithFacts({ phoneNumber: "+79049163020", phoneConfirmed: true });
+    });
+
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", accepted: 1, processed: 2 });
+    const lead = await persistence.leads.findByExternalIdentity("AVITO", "chat");
+    const conversation = await persistence.conversations.findOpenByLeadId(lead!.id);
+    const messages = await persistence.messages.listByConversationId(conversation!.id);
+    expect(lead?.phoneNumber).toBe("+79049163020");
+    expect(messages.map((item) => item.actor)).toEqual(["MANAGER", "USER"]);
+    expect(h.client.sendTextMessage).not.toHaveBeenCalled();
+  });
+
   it("ignores old messages and includes every message on the time boundary", async () => {
     const h = harness();
     h.client.listMessages.mockResolvedValue([
@@ -315,13 +335,14 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     expect(h.client.sendTextMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("does not process an outbound chat preview when history is unavailable", async () => {
+  it("persists an outbound chat preview when history is unavailable", async () => {
     const h = harness();
     h.client.listChats.mockResolvedValue([{ id: "chat", updatedAtUnix: null,
       lastMessage: message("own", { authorId: "owner", direction: "out" }) }]);
     h.client.listMessages.mockRejectedValue(new AvitoApiError("AVITO_MESSENGER_ACCESS_PAYMENT_REQUIRED", 402, false));
-    expect(await h.poll(current)).toMatchObject({ accepted: 0, processed: 0 });
+    expect(await h.poll(current)).toMatchObject({ accepted: 0, processed: 1 });
     expect(h.extractMessage).not.toHaveBeenCalled();
+    expect(await persistence.leads.findByExternalIdentity("AVITO", "chat")).not.toBeNull();
   });
 
   it("recovers durably accepted input and an expired processing claim after a crash", async () => {

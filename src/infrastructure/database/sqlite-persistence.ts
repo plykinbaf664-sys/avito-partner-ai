@@ -180,6 +180,15 @@ class DrizzleMessageRepository implements MessageRepository {
     return rows[0] ?? null;
   }
 
+  async findByExternalMessageId(externalMessageId: string): Promise<Message | null> {
+    const rows = await this.database
+      .select()
+      .from(schema.messages)
+      .where(eq(schema.messages.externalMessageId, externalMessageId))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
   async insert(message: Message): Promise<void> {
     await this.database.insert(schema.messages).values(message);
   }

@@ -155,6 +155,7 @@ describe("local CRM read model", () => {
       deduplicationKey: null,
       sequence: 1,
       direction: "INBOUND",
+      actor: "USER",
       content: "Мой номер +7 999 123-45-67",
       deliveryStatus: null,
       deliveryAttempts: 0,

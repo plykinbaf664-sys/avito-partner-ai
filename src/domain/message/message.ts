@@ -2,6 +2,8 @@ import type { DeliveryStatus } from "../delivery/delivery-state";
 
 export const messageDirections = ["INBOUND", "OUTBOUND"] as const;
 export type MessageDirection = (typeof messageDirections)[number];
+export const messageActors = ["USER", "AI", "MANAGER"] as const;
+export type MessageActor = (typeof messageActors)[number];
 
 export interface Message {
   id: string;
@@ -12,6 +14,7 @@ export interface Message {
   deduplicationKey: string | null;
   sequence: number | null;
   direction: MessageDirection;
+  actor: MessageActor;
   content: string;
   deliveryStatus: DeliveryStatus | null;
   deliveryAttempts: number;

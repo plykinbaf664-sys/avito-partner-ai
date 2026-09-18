@@ -16,6 +16,7 @@ import {
 import { LAUNCH_COST_REFERENCE } from "../../domain/economics/economics-calculator";
 import { normalizePhoneNumber } from "../../domain/lead/phone-number";
 import type { Lead } from "../../domain/lead/lead";
+import type { MessageActor } from "../../domain/message/message";
 import type { InformationNeed } from "../../domain/conversation/information-needs";
 import {
   MAX_EXTRACTED_MONEY,
@@ -156,6 +157,7 @@ export interface MessageExtractionInput {
   pendingInformationNeed?: InformationNeed | null;
   recentMessages?: Array<{
     direction: "INBOUND" | "OUTBOUND";
+    actor?: MessageActor;
     content: string;
   }>;
 }
@@ -173,6 +175,7 @@ PHONE EXTRACTION: phoneNumber is only a phone number explicitly provided by the 
 - Никогда не выставляй HOT, WARM, PRIORITY, NO_FIT или handoff status.
 - Не додумывай отсутствующие данные. Используй null, пустой массив и UNKNOWN только по смыслу schema.
 - CURRENT_MESSAGE — единственный новый пользовательский ввод. RECENT_MESSAGES, CURRENT_LEAD_FACTS и PENDING_INFORMATION_NEED нужны только для разрешения однозначных ссылок вроде «да, такой бюджет подходит», «а если два?» или «это входит в сумму?». Не записывай слова ассистента как факты пользователя без явного подтверждения в CURRENT_MESSAGE.
+- В RECENT_MESSAGES actor=MANAGER означает Дмитрия: учитывай его сообщения как часть общей истории команды и текущий договорённый следующий шаг. Это не факт пользователя само по себе, но ответ пользователя может быть прямым продолжением просьбы Дмитрия.
 - Короткий ответ интерпретируй в контексте непосредственно заданного вопроса. Если PENDING_INFORMATION_NEED=AVAILABLE_CAPITAL и ассистент спросил общий доступный капитал, названная пользователем сумма без прямого ограничения «только на услугу/первый этап» является availableCapital. Если сумма названа уверенно, без «возможно», «постараюсь найти», «наверное» и аналогичной оговорки, установи availableCapitalConfirmed=true. Формулировка «для начала» означает сумму, которую человек готов выделить на первоначальный запуск и сама по себе не является неопределённостью или оплатой только услуги команды.
 - capitalScope=ENTRY_ONLY и entryBudget используй только когда пользователь явно связал сумму с услугой команды, оплатой компании или первым этапом. Не превращай достаточно определённый ответ о капитале в дополнительный финансовый вопрос из-за одной лишь краткости формулировки.
 - «Понял», «ясно», «хорошо» сами по себе не подтверждают бюджет, финансовую готовность, модель бизнеса или иной qualification fact.
@@ -276,6 +279,15 @@ function isPureManagementAcceptance(text: string): boolean {
   );
 }
 
+export function extractPhoneNumberFromText(text: string): string | null {
+  const candidates = text.match(/(?<!\d)(?:\+?7|8)(?:[\s().-]*\d){10}(?!\d)/gu) ?? [];
+  for (const candidate of candidates) {
+    const normalized = normalizePhoneNumber(candidate);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
 export function createMessageExtractor({
   llmProvider,
   maxTokens = 1_200,
@@ -324,8 +336,9 @@ export function createMessageExtractor({
         },
         RECENT_MESSAGES: typeof input === "string" ? [] : (input.recentMessages ?? [])
           .slice(-MAX_RECENT_LLM_MESSAGES)
-          .map(({ direction, content }) => ({
+          .map(({ direction, actor, content }) => ({
             direction,
+            actor: actor ?? (direction === "INBOUND" ? "USER" : "AI"),
             content: content.slice(0, MAX_RECENT_LLM_MESSAGE_LENGTH),
           })),
       }),
@@ -355,6 +368,8 @@ export function createMessageExtractor({
     const acceptsManagementInteraction =
       explicitlyAcceptsManagementInteraction(validatedText);
     const hasNoLaunchCapital = explicitlyHasNoLaunchCapital(validatedText);
+    const deterministicPhone = extractPhoneNumberFromText(validatedText);
+    const llmPhone = normalizePhoneNumber(parsed.data.facts.phoneNumber);
     const extraction: ExtractedMessage = {
       ...parsed.data,
       facts: {
@@ -363,10 +378,9 @@ export function createMessageExtractor({
         budgetConfirmed: hasNoLaunchCapital
           ? true
           : parsed.data.facts.budgetConfirmed,
-        phoneNumber: normalizePhoneNumber(parsed.data.facts.phoneNumber),
+        phoneNumber: deterministicPhone ?? llmPhone,
         phoneConfirmed:
-          normalizePhoneNumber(parsed.data.facts.phoneNumber) !== null &&
-          parsed.data.facts.phoneConfirmed,
+          deterministicPhone !== null || (llmPhone !== null && parsed.data.facts.phoneConfirmed),
         availableCapital: hasNoLaunchCapital
           ? 0
           : ambiguousServiceFeeOnly || parsed.data.facts.availableCapital < 0

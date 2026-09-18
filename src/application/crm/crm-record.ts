@@ -4,6 +4,7 @@ import type { ManagerSummary } from "@/domain/handoff/manager-summary";
 import type { Lead } from "@/domain/lead/lead";
 import type { FinancialReadiness } from "@/domain/qualification/financial-readiness";
 import type { InformationNeed } from "@/domain/conversation/information-needs";
+import type { MessageActor } from "@/domain/message/message";
 
 export const crmLeadFilters = [
   "all",
@@ -62,6 +63,7 @@ export interface CrmLeadDetails extends CrmLeadRecord {
   messages: Array<{
     id: string;
     direction: "INBOUND" | "OUTBOUND";
+    actor: MessageActor;
     content: string;
     createdAt: Date;
     deliveryStatus: DeliveryStatus | null;

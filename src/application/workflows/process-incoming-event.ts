@@ -133,7 +133,7 @@ interface PreparedEvent {
 
 export const DEFAULT_PROCESSING_TIMEOUT_MS = 5 * 60 * 1_000;
 
-function createLead(
+export function createInitialLead(
   id: string,
   source: string,
   externalLeadId: string,
@@ -225,7 +225,7 @@ async function prepareClaimedEvent(
     input.externalLeadId,
   );
   if (!lead) {
-    lead = createLead(idGenerator(), input.source, input.externalLeadId, now);
+    lead = createInitialLead(idGenerator(), input.source, input.externalLeadId, now);
     await repositories.leads.insert(lead);
   }
 
@@ -274,6 +274,7 @@ async function prepareClaimedEvent(
       deduplicationKey: null,
       sequence: inboundSequence,
       direction: "INBOUND",
+      actor: "USER",
       content: input.text,
       deliveryStatus: null,
       deliveryAttempts: 0,
@@ -586,7 +587,7 @@ export function createIncomingEventProcessor({
         text: input.text,
         currentLead: prepared.lead!,
         pendingInformationNeed: prepared.conversation!.pendingInformationNeed,
-        recentMessages: extractionHistory.map(({ direction, content }) => ({ direction, content })),
+        recentMessages: extractionHistory.map(({ direction, actor, content }) => ({ direction, actor, content })),
       });
     } catch (error) {
       const llmLatencyMs = elapsedMilliseconds(llmStartedAt, timer);
@@ -698,9 +699,16 @@ export function createIncomingEventProcessor({
       const history = await persistence.messages.listByConversationId(
         currentConversation.id,
       );
+      const latestOutbound = history.findLast(
+        (message) => message.direction === "OUTBOUND",
+      );
+      const phoneReceived =
+        extracted.extraction.facts.phoneNumber !== null &&
+        extracted.extraction.facts.phoneConfirmed;
+      const phoneFulfillsRecentStep = phoneReceived && latestOutbound !== undefined;
       const knowledge = answerFromKnowledgeBase(extracted.extraction, {
         previousEntryIds: parseStoredKnowledgeIds(currentConversation.summary),
-        recentMessages: history.map(({ direction, content }) => ({ direction, content })),
+        recentMessages: history.map(({ direction, actor, content }) => ({ direction, actor, content })),
       });
       const decision = evaluateQualification(evaluatedLead, qualificationContextForLead(evaluatedLead, {
         wantsHuman: extracted.extraction.signals.wantsHuman,
@@ -724,19 +732,29 @@ export function createIncomingEventProcessor({
         knowledge,
         informationNeeds: needs,
       });
+      const responseGenerationPlan = phoneFulfillsRecentStep
+        ? {
+            ...responsePlan,
+            asksUserQuestion: false,
+            nextInformationNeed: null,
+            allowedNextInformationNeeds: [],
+            allowedNextQuestions: [],
+          }
+        : responsePlan;
       let responseLlm: Awaited<ReturnType<NaturalResponseGenerator>> | null =
         null;
       if (
         !options.suppressOutbound &&
-        responsePlan.useNaturalAdaptation &&
+        responseGenerationPlan.useNaturalAdaptation &&
         generateNaturalResponse
       ) {
         try {
           responseLlm = await generateNaturalResponse({
             lead: evaluatedLead,
-            plan: responsePlan,
-            recentMessages: history.map(({ direction, content }) => ({
+            plan: responseGenerationPlan,
+            recentMessages: history.map(({ direction, actor, content }) => ({
               direction,
+              actor,
               content,
             })),
           });
@@ -809,14 +827,16 @@ export function createIncomingEventProcessor({
         const transactionNeeds = assessInformationNeeds(transactionLead);
         const adaptiveNextInformationNeed = responseLlm?.nextInformationNeed;
         const transactionNextInformationNeed =
-          transactionDecision.nextAction === "CONTINUE_QUALIFICATION"
-            ? adaptiveNextInformationNeed &&
-                transactionNeeds.allowedNextInformationNeeds.includes(
-                  adaptiveNextInformationNeed,
-                )
-              ? adaptiveNextInformationNeed
-              : transactionNeeds.suggestedNextInformationNeed
-            : null;
+          phoneFulfillsRecentStep || responseLlm?.replyAction === "NO_REPLY"
+            ? null
+            : transactionDecision.nextAction === "CONTINUE_QUALIFICATION"
+              ? adaptiveNextInformationNeed &&
+                  transactionNeeds.allowedNextInformationNeeds.includes(
+                    adaptiveNextInformationNeed,
+                  )
+                ? adaptiveNextInformationNeed
+                : transactionNeeds.suggestedNextInformationNeed
+              : null;
         const transactionResponsePlan = buildConversationResponse({
           lead: transactionLead,
           extraction: extracted.extraction,
@@ -827,6 +847,7 @@ export function createIncomingEventProcessor({
         });
         const canUseAdaptiveResponse =
           responseLlm !== null &&
+          responseLlm.replyAction !== "NO_REPLY" &&
           responseLlm.nextInformationNeed === transactionNextInformationNeed;
         const transactionOutboundText = canUseAdaptiveResponse
           ? responseLlm!.text
@@ -836,6 +857,17 @@ export function createIncomingEventProcessor({
           options.suppressOutbound === true ||
           (prepared.inboundSequence !== null &&
             prepared.inboundSequence < storedConversation.nextInboundSequence);
+        const noAiReply =
+          responseLlm?.replyAction === "NO_REPLY" ||
+          (phoneFulfillsRecentStep && responseLlm === null);
+        const shouldSendOutbound = !responseSuppressed && !noAiReply;
+        const responseGenerationSource = responseSuppressed
+          ? "SUPPRESSED"
+          : noAiReply
+            ? "NO_REPLY"
+            : responseLlm
+              ? "LLM"
+              : "FALLBACK_DRAFT";
         const qualificationCompleted = responseSuppressed
           ? storedConversation.qualificationCompleted
           : transactionDecision.nextAction === "REJECT_POLITELY" ||
@@ -900,7 +932,7 @@ export function createIncomingEventProcessor({
         await repositories.leads.update(updatedLead);
 
         let outboundMessageId: string | null = null;
-        if (!responseSuppressed) {
+        if (shouldSendOutbound) {
           const turnId =
             prepared.inboundSequence === null
               ? registration.event.id
@@ -916,6 +948,7 @@ export function createIncomingEventProcessor({
             deduplicationKey: outboundDeduplicationKey,
             sequence: null,
             direction: "OUTBOUND",
+            actor: "AI",
             content: transactionOutboundText,
             deliveryStatus: "PENDING",
             deliveryAttempts: 0,
@@ -1001,7 +1034,7 @@ export function createIncomingEventProcessor({
               : transactionNextInformationNeed,
           awaitingUserReply: responseSuppressed
             ? storedConversation.awaitingUserReply
-            : false,
+            : shouldSendOutbound && transactionResponsePlan.asksUserQuestion,
           qualificationCompleted,
           followUpEligibleAt: responseSuppressed
             ? storedConversation.followUpEligibleAt
@@ -1038,9 +1071,10 @@ export function createIncomingEventProcessor({
           managerSummary,
           outboundMessageId,
           managerNotificationId,
+          responseGenerationSource,
           asksUserQuestion:
-            !responseSuppressed && transactionResponsePlan.asksUserQuestion,
-          outboundText: responseSuppressed ? null : transactionOutboundText,
+            shouldSendOutbound && transactionResponsePlan.asksUserQuestion,
+          outboundText: shouldSendOutbound ? transactionOutboundText : null,
           totalProcessingLatencyMs,
         };
 
@@ -1157,6 +1191,41 @@ export function createIncomingEventProcessor({
         nextAction: completed.decision.nextAction,
         serviceability: completed.lead.serviceability,
         totalProcessingLatencyMs: completed.totalProcessingLatencyMs,
+      });
+      logger.info("conversation.turn", {
+        conversationId: completed.conversation.id,
+        latestInboundId: input.messageId,
+        triggerType: "USER_INBOUND",
+        detectedIntent: extracted.extraction.intent,
+        answeredUserQuestion:
+          extracted.extraction.signals.questions.length > 0 &&
+          completed.outboundText !== null,
+        qualificationStatus: completed.lead.qualificationStatus,
+        selectedQualificationNeed: completed.conversation.pendingInformationNeed,
+        qualificationSatisfied: ["QUALIFIED", "PRIORITY", "HOT", "WARM"].includes(
+          completed.lead.qualificationStatus,
+        ),
+        phoneKnown: hasConfirmedPhone(completed.lead),
+        nextBusinessGoal: completed.decision.shouldHandoffToManager
+          ? "HANDOFF"
+          : ["QUALIFIED", "PRIORITY", "HOT", "WARM"].includes(
+                completed.lead.qualificationStatus,
+              ) && !hasConfirmedPhone(completed.lead)
+            ? "REQUEST_PHONE_FOR_HANDOFF"
+            : "CONTINUE_CONVERSATION",
+        handoffDecision: completed.decision.shouldHandoffToManager
+          ? "HANDOFF"
+          : "NONE",
+        followUpDecision: completed.conversation.followUpEligibleAt
+          ? "SCHEDULED"
+          : "NONE",
+        knownFactsUsed: assessInformationNeeds(completed.lead).knownFacts,
+        fallbackUsed: completed.responseGenerationSource === "FALLBACK_DRAFT",
+        fallbackReason:
+          completed.responseGenerationSource === "FALLBACK_DRAFT"
+            ? "LLM_UNAVAILABLE_OR_INVALID_OUTPUT"
+            : null,
+        responseGenerationSource: completed.responseGenerationSource,
       });
       if (completed.decision.status === "NO_FIT") {
         logger.info("qualification.no_fit", {

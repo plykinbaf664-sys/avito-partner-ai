@@ -5,6 +5,7 @@ import type { Lead } from "../../domain/lead/lead";
 
 import {
   createMessageExtractor,
+  extractPhoneNumberFromText,
   extractedMessageSchema,
 } from "./extract-message";
 
@@ -27,6 +28,14 @@ function countUnionParameters(value: unknown): number {
     )
   );
 }
+
+it("normalizes obvious Russian phone formats deterministically", () => {
+  expect(extractPhoneNumberFromText("89049163020")).toBe("+79049163020");
+  expect(extractPhoneNumberFromText("+79049163020")).toBe("+79049163020");
+  expect(extractPhoneNumberFromText("8 904 916 30 20")).toBe("+79049163020");
+  expect(extractPhoneNumberFromText("+7 (904) 916-30-20")).toBe("+79049163020");
+  expect(extractPhoneNumberFromText("50 000 рублей")).toBeNull();
+});
 
 describe("message extraction schema", () => {
   it("stays within Anthropic's structured-output union limit", async () => {

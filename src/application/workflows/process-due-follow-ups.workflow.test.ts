@@ -10,6 +10,7 @@ import { createMessageExtractor } from "../extraction/extract-message";
 import type { NaturalResponseGenerator } from "../conversation/generate-natural-response";
 import { createDueFollowUpsProcessor } from "./process-due-follow-ups";
 import { createIncomingEventProcessor } from "./process-incoming-event";
+import { createExternalConversationMessageRecorder } from "./record-external-message";
 
 function extractionReply(facts: Record<string, unknown> = {}) {
   return JSON.stringify({
@@ -127,6 +128,34 @@ describe("due qualification follow-ups workflow", () => {
       lastFollowUpAt: currentTime,
       followUpEligibleAt: null,
     });
+  });
+
+  it("cancels a due follow-up when Dmitry continues the conversation", async () => {
+    const { processEvent, processDue, outboundProvider } = harness([
+      extractionReply(),
+    ]);
+    await processEvent(input("event-manager-follow-up", "Здравствуйте"));
+    currentTime = new Date("2026-09-01T11:30:00.000Z");
+
+    const recordManagerMessage = createExternalConversationMessageRecorder({
+      persistence,
+      generateId: () => `manager-message-${++nextId}`,
+    });
+    await recordManagerMessage({
+      source: "follow-up-test",
+      externalLeadId: "lead-1",
+      externalMessageId: "manager-1",
+      text: "Оставьте номер, я вам позвоню.",
+      createdAt: currentTime,
+    });
+
+    currentTime = new Date("2026-09-01T12:00:00.000Z");
+    expect((await processDue(currentTime)).created).toHaveLength(0);
+    expect(outboundProvider.requests).toHaveLength(0);
+    const conversation = await persistence.conversations.findOpenByLeadId(
+      (await persistence.leads.findByExternalIdentity("follow-up-test", "lead-1"))!.id,
+    );
+    expect(conversation?.followUpEligibleAt).toBeNull();
   });
 
   it("deduplicates parallel scheduler invocations", async () => {

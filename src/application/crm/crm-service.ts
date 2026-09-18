@@ -130,6 +130,7 @@ export function createCrmService(persistence: Persistence) {
         messages: messages.map((message) => ({
           id: message.id,
           direction: message.direction,
+          actor: message.actor,
           content: message.content,
           createdAt: message.createdAt,
           deliveryStatus: message.deliveryStatus,

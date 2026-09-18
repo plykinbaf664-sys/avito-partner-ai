@@ -71,6 +71,20 @@
       "when": 1789295451816,
       "tag": "0009_long_nico_minoru",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1789747870318,
+      "tag": "0010_flashy_zarda",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1789748956706,
+      "tag": "0011_backfill_message_actor",
+      "breakpoints": true
     }
   ]
 }

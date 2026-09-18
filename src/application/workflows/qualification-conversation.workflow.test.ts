@@ -359,7 +359,7 @@ describe("multi-turn qualification conversation", () => {
     });
     expect(await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${afterPhone.leadId}`))
       .toMatchObject({ deliveryStatus: "PENDING", summary: { phoneNumber: "+79991234567" } });
-    expect(afterPhone.outboundMessage).not.toContain("Оставьте");
+    expect(afterPhone.outboundMessage ?? "").not.toContain("Оставьте");
     expect((await persistence.leads.findById(afterPhone.leadId!))?.phoneNumber).toBe("+79991234567");
     const handed = (await crm.getLead(afterPhone.leadId!))!;
     expect([qualificationLabel(handed), handoffLabel(handed), notificationLabel(handed)])
