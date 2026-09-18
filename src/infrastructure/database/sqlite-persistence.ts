@@ -46,6 +46,7 @@ import type { TelegramManagerRecipient } from "@/domain/notification/telegram-ma
 
 import * as schema from "./schema";
 import type { PollingStateRepository } from "@/application/ports/polling-state";
+import { crmQualifiedStatuses } from "@/application/crm/crm-record";
 import { DrizzlePollingStateRepository } from "./polling-state-repository";
 
 type Database = LibSQLDatabase<typeof schema>;
@@ -243,7 +244,9 @@ class DrizzleMessageRepository implements MessageRepository {
 function crmLeadWhere(
   query: Pick<CrmLeadListQuery, "filter" | "search">,
 ): SQL | undefined {
-  const conditions: SQL[] = [];
+  const conditions: SQL[] = [
+    inArray(schema.leads.qualificationStatus, crmQualifiedStatuses),
+  ];
   if (query.search) {
     const search = `%${query.search}%`;
     const searchCondition = or(
@@ -264,26 +267,6 @@ function crmLeadWhere(
       break;
     case "handoff":
       conditions.push(isNotNull(schema.leads.handoffAt));
-      break;
-    case "active":
-      conditions.push(
-        inArray(schema.leads.qualificationStatus, [
-          "NEW",
-          "QUALIFYING",
-          "NEEDS_MORE_INFO",
-          "BORDERLINE",
-          "WARM",
-          "NURTURE",
-        ]),
-      );
-      break;
-    case "no_fit":
-      conditions.push(
-        or(
-          inArray(schema.leads.qualificationStatus, ["NO_FIT", "CLOSED"]),
-          eq(schema.leads.buyingIntent, "DECLINED"),
-        )!,
-      );
       break;
     case "all":
       break;

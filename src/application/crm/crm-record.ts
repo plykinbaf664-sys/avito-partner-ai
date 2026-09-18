@@ -11,9 +11,20 @@ export const crmLeadFilters = [
   "hot",
   "qualified",
   "handoff",
-  "active",
-  "no_fit",
 ] as const;
+
+export const crmQualifiedStatuses = [
+  "QUALIFIED",
+  "PRIORITY",
+  "HOT",
+  "WARM",
+] as const;
+
+export function isCrmQualifiedStatus(status: Lead["qualificationStatus"]): boolean {
+  return crmQualifiedStatuses.includes(
+    status as (typeof crmQualifiedStatuses)[number],
+  );
+}
 
 export type CrmLeadFilter = (typeof crmLeadFilters)[number];
 

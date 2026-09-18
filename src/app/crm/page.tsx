@@ -20,12 +20,10 @@ import { requireCrmPageAccess } from "./require-crm-page-access";
 export const dynamic = "force-dynamic";
 
 const filterLabels: Record<CrmLeadFilter, string> = {
-  all: "Все",
+  all: "Все квалифицированные",
   hot: "Горячие",
   qualified: "Квалифицированные",
   handoff: "Переданные",
-  active: "Требуют ответа",
-  no_fit: "Не подходят",
 };
 
 function filterValue(value: string | undefined): CrmLeadFilter {
@@ -58,7 +56,7 @@ export default async function CrmPage({
       <div className="mx-auto max-w-[1800px] space-y-5">
         <header className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-semibold">Лиды партнёрской программы</h1>
+            <h1 className="text-2xl font-semibold">Квалифицированные лиды партнёрской программы</h1>
             <p className="mt-1 text-sm text-slate-400">Всего: {result.total}</p>
           </div>
           <a

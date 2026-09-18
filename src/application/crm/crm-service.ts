@@ -12,6 +12,7 @@ import type {
   CrmLeadFilter,
   CrmLeadRecord,
 } from "./crm-record";
+import { isCrmQualifiedStatus } from "./crm-record";
 
 export const CRM_PAGE_SIZE = 50;
 export const CRM_MAX_SEARCH_LENGTH = 100;
@@ -118,6 +119,8 @@ export function createCrmService(persistence: Persistence) {
     async getLead(leadId: string): Promise<CrmLeadDetails | null> {
       const snapshot = await persistence.crm.findLeadSnapshot(leadId);
       if (!snapshot) return null;
+      const record = toRecord(snapshot);
+      if (!isCrmQualifiedStatus(record.qualificationStatus)) return null;
       const messages = snapshot.conversation
         ? await persistence.messages.listRecentByConversationId(
             snapshot.conversation.id,
@@ -125,7 +128,7 @@ export function createCrmService(persistence: Persistence) {
           )
         : [];
       return {
-        ...toRecord(snapshot),
+        ...record,
         lead: snapshot.lead,
         messages: messages.map((message) => ({
           id: message.id,

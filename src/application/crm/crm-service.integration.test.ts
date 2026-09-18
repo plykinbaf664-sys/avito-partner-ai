@@ -53,8 +53,8 @@ function lead(index: number, overrides: Partial<Lead> = {}): Lead {
     questions: [],
     objections: [],
     buyingIntent: index === 1 ? "READY_TO_START" : null,
-    qualificationStatus: index === 1 ? "HOT" : "QUALIFYING",
-    qualificationReason: index === 1 ? "SMALL_BUSINESS_READY" : null,
+    qualificationStatus: index === 1 ? "HOT" : "QUALIFIED",
+    qualificationReason: index === 1 ? "SMALL_BUSINESS_READY" : "READY_FOR_MANAGER",
     conversationSummary: null,
     createdAt: new Date(now.getTime() + index),
     updatedAt: new Date(now.getTime() + index),
@@ -171,20 +171,21 @@ describe("local CRM read model", () => {
     expect(details?.phoneNumber).toBe("+79991234567");
   });
 
-  it("presents a legacy transfer separately from business qualification without rewriting history", async () => {
+  it("does not expose a legacy transfer before business qualification", async () => {
     await persistence.leads.insert(lead(2, { source: "AVITO", city: "Химки", serviceability: "SUPPORTED", availableCapital: 150_000,
       availableCapitalConfirmed: true, qualificationStatus: "HANDOFF", qualificationReason: "USER_REQUESTED_HUMAN",
       handoffAt: now, questions: ["Как проходит организация бизнеса?"] }));
-    const record = (await createCrmService(persistence).getLead("lead-2"))!;
-    expect(record).toMatchObject({ segment: "SMALL_BUSINESS", qualificationStatus: "BORDERLINE",
-      shouldHandoffToManager: false, phoneNumber: null, handoffAt: now });
-    expect(qualificationLabel(record)).toBe("Пограничный");
-    expect(handoffLabel(record)).toBe("Передан ранее до завершения квалификации");
-    expect(record.missingCriticalFacts).toContain("STARTING_UNITS");
-    expect(await persistence.leads.findById("lead-2")).toMatchObject({ qualificationStatus: "HANDOFF", handoffAt: now });
-    const csv = createCrmCsv([record]);
-    expect(csv).not.toContain('"HANDOFF"');
-    expect(csv.split("\r\n")[1]!.split(",")[5]).toBe('""');
+    const record = await createCrmService(persistence).getLead("lead-2");
+    expect(record).toBeNull();
+  });
+
+  it("shows only qualified leads in the CRM read model", async () => {
+    await persistence.leads.insert(lead(1));
+    await persistence.leads.insert(lead(2, { qualificationStatus: "QUALIFYING" }));
+    const service = createCrmService(persistence);
+    expect((await service.listLeads()).total).toBe(1);
+    expect((await service.exportLeads()).map((record) => record.leadId)).toEqual(["lead-1"]);
+    expect(await service.getLead("lead-2")).toBeNull();
   });
 
   it("exports UTF-8 CSV with correct escaping and no internal data", async () => {
