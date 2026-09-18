@@ -112,7 +112,10 @@ export function mergeExtractedFacts(
     extraction.facts.buyingIntent !== "UNKNOWN"
   ) {
     patch.buyingIntent = extraction.facts.buyingIntent;
-  } else if (extraction.intent === "GENERAL_INTEREST" && lead.buyingIntent === null) {
+  } else if (
+    ["GENERAL_INTEREST", "GREETING"].includes(extraction.intent) &&
+    lead.buyingIntent === null
+  ) {
     patch.buyingIntent = "EXPLORING";
   }
 

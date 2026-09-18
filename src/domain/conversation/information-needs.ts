@@ -37,6 +37,26 @@ export interface InformationNeedsAssessment {
   suggestedNextInformationNeed: InformationNeed | null;
 }
 
+/**
+ * A new lead needs a conversational discovery move before the qualification
+ * gaps become useful prompts.  This is deliberately based on the persisted
+ * state, rather than on the wording of one message.
+ */
+export function isFreshDiscoveryLead(lead: Lead): boolean {
+  return (
+    lead.segment === "UNDETERMINED" &&
+    lead.city === null &&
+    lead.businessExperience === null &&
+    lead.shortTermRentalExperience === null &&
+    lead.primaryGoal === null &&
+    lead.availableCapital === null &&
+    lead.entryBudget === null &&
+    lead.startingUnits === null &&
+    lead.launchTiming === null &&
+    lead.buyingIntent === "EXPLORING"
+  );
+}
+
 function isKnown(lead: Lead, need: InformationNeed): boolean {
   switch (need) {
     case "AVAILABLE_CAPITAL":
@@ -146,6 +166,7 @@ export function assessInformationNeeds(
     (need) => !knownFacts.includes(need) && !missingCriticalFacts.includes(need),
   );
   const allowedNextInformationNeeds = selectAllowedInformationNeeds(
+    lead,
     missingCriticalFacts,
     missingOptionalFacts,
   );
@@ -166,9 +187,24 @@ export function assessInformationNeeds(
 }
 
 function selectAllowedInformationNeeds(
+  lead: Lead,
   missingCriticalFacts: InformationNeed[],
   missingOptionalFacts: InformationNeed[],
 ): InformationNeed[] {
+  if (isFreshDiscoveryLead(lead)) {
+    // Keep the business requirements deterministic, but give the conversation
+    // brain a human discovery choice.  Capital remains a valid gap; it is no
+    // longer forced to be the opening question.
+    return [
+      ...new Set([
+        ...(lead.city === null ? ["CITY" as const] : []),
+        ...(missingOptionalFacts.includes("EXPERIENCE")
+          ? ["EXPERIENCE" as const]
+          : []),
+        ...missingCriticalFacts,
+      ]),
+    ];
+  }
   if (missingCriticalFacts.length === 0) return [...missingOptionalFacts];
   if (
     missingCriticalFacts.length === 1 &&
@@ -214,6 +250,13 @@ function selectNextInformationNeed(
     EXPERIENCE: 30,
     BARRIER: 25,
   };
+
+  if (isFreshDiscoveryLead(lead)) {
+    scores.CITY = 140;
+    scores.EXPERIENCE = 130;
+    scores.AVAILABLE_CAPITAL = 70;
+    scores.STARTING_UNITS = 65;
+  }
 
   if (
     !hasConfirmedPhone(lead) &&

@@ -1,6 +1,7 @@
-import type {
-  InformationNeed,
-  InformationNeedsAssessment,
+import {
+  isFreshDiscoveryLead,
+  type InformationNeed,
+  type InformationNeedsAssessment,
 } from "./information-needs";
 import type { ExtractedMessage } from "../extraction/extracted-message";
 import type { Lead } from "../lead/lead";
@@ -8,7 +9,11 @@ import type {
   QualificationDecision,
   QualificationReasonCode,
 } from "../qualification/qualification-policy";
-import type { KnowledgeAnswer } from "../knowledge/knowledge-base";
+import type {
+  ApprovedKnowledgeFact,
+  KnowledgeAnswer,
+} from "../knowledge/knowledge-base";
+import type { ApprovedEconomicsContext } from "../economics/economics-calculator";
 
 const qualificationQuestions: Record<InformationNeed, string> = {
   PHONE_NUMBER:
@@ -67,6 +72,10 @@ export interface ConversationResponsePlan {
   missingCriticalFacts?: InformationNeed[];
   missingOptionalFacts?: InformationNeed[];
   qualificationReasonCodes?: QualificationReasonCode[];
+  preferDiscoveryContext?: boolean;
+  postHandoffContinuation?: boolean;
+  economicsContext?: ApprovedEconomicsContext;
+  approvedFacts?: ApprovedKnowledgeFact[];
 }
 
 export function buildConversationResponse(params: {
@@ -81,6 +90,8 @@ export function buildConversationResponse(params: {
   const allowedNextInformationNeeds =
     params.informationNeeds?.allowedNextInformationNeeds ??
     (nextInformationNeed === null ? [] : [nextInformationNeed]);
+  const preferDiscoveryContext = isFreshDiscoveryLead(params.lead);
+  const postHandoffContinuation = params.lead.handoffAt !== null;
   const adaptiveContext = {
     allowedNextInformationNeeds,
     allowedNextQuestions: allowedNextInformationNeeds.map((need) => ({
@@ -91,6 +102,8 @@ export function buildConversationResponse(params: {
     missingCriticalFacts: params.informationNeeds?.missingCriticalFacts ?? [],
     missingOptionalFacts: params.informationNeeds?.missingOptionalFacts ?? [],
     qualificationReasonCodes: decision.reasonCodes,
+    preferDiscoveryContext,
+    postHandoffContinuation,
   };
 
   if (decision.nextAction === "REJECT_POLITELY") {
@@ -108,6 +121,8 @@ export function buildConversationResponse(params: {
       useNaturalAdaptation: knowledge.answerFragments.length > 0,
       contextualReference: knowledge.contextualReferenceResolved,
       ...adaptiveContext,
+      economicsContext: knowledge.economicsContext,
+      approvedFacts: knowledge.approvedFacts,
     };
   }
 
@@ -120,7 +135,7 @@ export function buildConversationResponse(params: {
     parts.push(`По вопросу «${topics}» у меня нет подтверждённых деталей — эту часть лучше уточнить у менеджера.`);
   }
 
-  if (decision.shouldHandoffToManager) {
+  if (decision.shouldHandoffToManager && !postHandoffContinuation) {
     parts.push(
       extraction.facts.phoneNumber && extraction.facts.phoneConfirmed
         ? "Спасибо, передал номер менеджеру. Он свяжется с вами."
@@ -136,7 +151,7 @@ export function buildConversationResponse(params: {
   }
 
   if (parts.length === 0) {
-    parts.push("Спасибо, понял.");
+    parts.push(postHandoffContinuation ? "Понял, учту." : "Спасибо, понял.");
   }
 
   const prefix = extraction.intent === "GREETING" ? "Здравствуйте! " : "";
@@ -149,12 +164,17 @@ export function buildConversationResponse(params: {
     unresolvedQuestions: knowledge.unresolvedQuestions,
     useNaturalAdaptation:
       allowedNextInformationNeeds.length > 1 ||
+      preferDiscoveryContext ||
+      postHandoffContinuation ||
       nextInformationNeed === "PHONE_NUMBER" ||
       knowledge.answerFragments.length > 0 ||
       parts.length >= 3 ||
-      extraction.signals.questions.length + extraction.signals.objections.length > 1,
+      extraction.signals.questions.length > 0 ||
+      extraction.signals.objections.length > 0,
     contextualReference: knowledge.contextualReferenceResolved,
     ...adaptiveContext,
+    economicsContext: knowledge.economicsContext,
+    approvedFacts: knowledge.approvedFacts,
   };
 }
 

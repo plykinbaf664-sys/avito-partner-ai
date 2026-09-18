@@ -77,4 +77,90 @@ describe("contextual partner knowledge", () => {
     expect(answer.answerFragments.join(" ")).toContain("40 000 ₽");
     expect(answer.answerFragments.join(" ")).toContain("не гарантия");
   });
+
+  it("uses the approved reverse economics calculation for a confirmed capital", () => {
+    const answer = answerFromKnowledgeBase(
+      question("Сколько объектов можно начать при таком бюджете?", {
+        availableCapital: 500_000,
+        availableCapitalConfirmed: true,
+      }),
+      {
+        rentReference: {
+          city: "Регион",
+          region: "Тестовый регион",
+          rentMin: 35_000,
+          rentMax: 35_000,
+          updatedAt: "2026-09-01",
+          source: "Подтверждённый тестовый ориентир",
+        },
+      },
+    );
+
+    expect(answer.answerFragments.join(" ")).toContain("4 объектов");
+    expect(answer.answerFragments.join(" ")).toContain("услуга запуска 50 000 ₽ оплачивается один раз");
+  });
+
+  it("answers a 250k object-count question with both approved scenarios when city is unknown", () => {
+    const answer = answerFromKnowledgeBase(question(
+      "У меня 250 тысяч. Со скольких объектов посоветуете начать?",
+      { availableCapital: 250_000, availableCapitalConfirmed: true },
+    ));
+
+    expect(answer.unresolvedQuestions).toEqual([]);
+    expect(answer.answerFragments.join(" ")).toContain("Региональный ориентир: около 2 объектов, запуск 250 000 ₽");
+    expect(answer.answerFragments.join(" ")).toContain("Москва: около 1 объект, запуск 180 000 ₽");
+    expect(answer.economicsContext?.scenarios).toHaveLength(2);
+  });
+
+  it("uses the approved Moscow scenario without asking a manager", () => {
+    const answer = answerFromKnowledgeBase(question(
+      "Сколько объектов получится?",
+      { city: "Москва", availableCapital: 250_000, availableCapitalConfirmed: true },
+    ));
+
+    expect(answer.unresolvedQuestions).toEqual([]);
+    expect(answer.answerFragments.join(" ")).toContain("Москва: около 1 объект, запуск 180 000 ₽");
+    expect(answer.economicsContext?.scenarios[0]?.rentReference.rentMin).toBe(50_000);
+  });
+
+  it("answers income for two objects from the approved reference", () => {
+    const answer = answerFromKnowledgeBase(question("А сколько примерно можно получать с двух объектов?"));
+
+    expect(answer.unresolvedQuestions).toEqual([]);
+    expect(answer.answerFragments.join(" ")).toContain("около 40 000 ₽ в месяц");
+    expect(answer.answerFragments.join(" ")).toContain("не гарантия");
+  });
+
+  it("keeps a concrete live-market apartment question for a manager", () => {
+    const answer = answerFromKnowledgeBase(question(
+      "Сколько сейчас реально стоит аренда конкретной двухкомнатной квартиры на улице Ленина",
+    ));
+
+    expect(answer.unresolvedQuestions).toContain(
+      "Сколько сейчас реально стоит аренда конкретной двухкомнатной квартиры на улице Ленина",
+    );
+  });
+
+  it.each([
+    "Мне самому нужно отвечать гостям?",
+    "А объявления кто размещает?",
+    "Мне самому искать квартиру?",
+    "Бухгалтерию самому вести?",
+    "Можно потом увеличить количество квартир?",
+  ])("does not treat a paraphrase without a literal KB match as unresolved: %s", (text) => {
+    const answer = answerFromKnowledgeBase(question(text));
+
+    expect(answer.unresolvedQuestions).toEqual([]);
+    expect(answer.approvedFacts.length).toBeGreaterThan(0);
+  });
+
+  it("keeps only the genuinely unknown part of a mixed question", () => {
+    const answer = answerFromKnowledgeBase(question(
+      "Сколько будет стоить запуск трёх квартир в Москве и какие конкретные квартиры вы найдёте?",
+      { city: "Москва", calculationUnits: 3 },
+    ));
+
+    expect(answer.unresolvedQuestions).toEqual(["какие конкретные квартиры вы найдёте"]);
+    expect(answer.economicsContext?.scenarios[0]?.requestedUnitsLaunch?.totalMin).toBe(440_000);
+  });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   testChatLabScenarios,
   type TestChatLabAction,
@@ -23,17 +23,26 @@ function actorLabel(actor: string): string {
 }
 
 export function TestChatLabClient() {
-  const [sessionId, setSessionId] = useState(freshSession);
-  const [virtualNow, setVirtualNow] = useState(nowIso);
+  const [sessionId, setSessionId] = useState("");
+  const [virtualNow, setVirtualNow] = useState("");
   const [clientText, setClientText] = useState("");
   const [managerText, setManagerText] = useState("");
   const [state, setState] = useState<TestChatLabSnapshot | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setSessionId(freshSession());
+      setVirtualNow(nowIso());
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
   const history = useMemo(() => state?.messages ?? [], [state]);
 
   async function run(action: Omit<TestChatLabAction, "sessionId" | "virtualNow"> & { virtualNow?: string }) {
+    if (!sessionId || !virtualNow) return;
     setBusy(true);
     setError(null);
     try {

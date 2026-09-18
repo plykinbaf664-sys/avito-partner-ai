@@ -1,5 +1,13 @@
 import type { ExtractedMessage } from "../extraction/extracted-message";
-import { calculateEconomicsEstimate } from "../economics/economics-calculator";
+import {
+  buildApprovedEconomicsContext,
+  calculateAffordableObjectCount,
+  calculateEconomicsEstimate,
+  findApprovedRentReference,
+  GENERAL_RENT_RANGE_REFERENCE,
+  type ApprovedEconomicsContext,
+  type RentRangeReference,
+} from "../economics/economics-calculator";
 import { SERVICEABILITY_POLICY } from "../lead/serviceability";
 
 export const knowledgeCategories = [
@@ -24,14 +32,22 @@ export interface KnowledgeEntry {
   matches: (normalizedText: string) => boolean;
 }
 
+export interface ApprovedKnowledgeFact {
+  id: string;
+  category: KnowledgeCategory;
+  answer: string;
+}
+
 const containsAny = (text: string, terms: readonly string[]) =>
   terms.some((term) => text.includes(term));
 
 const economicsTerms = [
   "заработ",
   "зарабат",
+  "получ",
   "принос",
   "доход",
+  "выруч",
   "прибыл",
   "окуп",
 ] as const;
@@ -44,7 +60,7 @@ const normalizeQuestion = (text: string) =>
 
 // One extracted question can contain both an answerable part and an unknown one.
 const questionParts = (text: string) => text
-  .split(/[?;\n]+|[,\s]+(?:и|а)\s+(?=(?:как(?:ая|ие|ой|ую)?|кто|что|сколько|можно|есть ли)\s)/iu)
+  .split(/[?;\n]+|[,\s]+(?:и|а)\s+(?=(?:как|какие|какой|какая|какую|кто|что|сколько|можно|есть ли)\s)/iu)
   .map((part) => part.trim()).filter(Boolean);
 
 const asksAboutInvestorTerms = (text: string) =>
@@ -53,8 +69,13 @@ const asksAboutInvestorTerms = (text: string) =>
 const needsIndividualAnswer = (text: string) =>
   asksAboutInvestorTerms(text) ||
   /(?:договор(?:а|у|ом|е|ы|ов)?(?:$|[^а-я])|юридич|налог|страхов|рассроч|скидк|хочу оплат|готов оплат|как оплатить|куда оплатить|api|интеграц|экспорт|франшиз|без залога|изменить условия)/u.test(text) ||
-  (/(?:конкретн|выбранн|этой|этому|моей|моему).{0,40}(?:квартир|объект)|(?:квартир|объект).{0,40}(?:по адресу|за \d)/u.test(text) &&
-    containsAny(text, [...economicsTerms, "расчет", "смет", "аренд", "залог", "комплектац", "цен", "стоимост", "услови"])) ||
+  (
+    /(?:конкретн|выбранн).{0,40}(?:квартир|объект)/u.test(text) ||
+    (/(?:квартир|объект).{0,40}(?:по адресу|за \d)/u.test(text) &&
+      containsAny(text, [...economicsTerms, "расчет", "смет", "аренд", "залог", "комплектац", "цен", "стоимост", "услови"])) ||
+    /(?:этой|этому|моей|моему).{0,40}(?:квартир|объект)/u.test(text) &&
+      containsAny(text, [...economicsTerms, "расчет", "смет", "аренд", "залог", "комплектац", "цен", "стоимост", "услови"])
+  ) ||
   /(?:точн|индивидуальн).{0,25}(?:расчет|услови|доход|прибыл|смет)|(?:рассчита|посчита).{0,35}(?:аренд|залог|комплектац|смет)/u.test(text);
 
 function formatUnitCount(units: number): string {
@@ -240,16 +261,45 @@ export interface KnowledgeAnswer {
   entryIds: string[];
   unresolvedQuestions: string[];
   contextualReferenceResolved: boolean;
+  economicsContext?: ApprovedEconomicsContext;
+  approvedFacts: ApprovedKnowledgeFact[];
 }
 
 export interface KnowledgeConversationContext {
   previousEntryIds?: readonly string[];
   recentMessages?: readonly { direction: "INBOUND" | "OUTBOUND"; content: string }[];
+  rentReference?: RentRangeReference;
+  leadFacts?: {
+    city?: string | null;
+    availableCapital?: number | null;
+    entryBudget?: number | null;
+    startingUnits?: number | null;
+    scalingPotentialUnits?: number | null;
+  };
 }
 
 const refersToPreviousContext = (text: string) =>
   /(?:^|\s)(?:а\s+)?(?:это|эта|эти|такой|такая|также|так же|в эту|входит|получается|итого|всего|если (?:один|два|три|\d+)|на (?:один|два|три|\d+))(?:\s|\?|$)/u.test(text) ||
   /(?:^|[^\d])\d[\d\s]*(?:тыс(?:яч[аиу]?)?|₽|руб)/u.test(text);
+
+const inferUnitCount = (text: string): number | null => {
+  const numeric = text.match(/(?:^|\D)(\d{1,2})\s*(?:объект|квартир|помещен)/iu)?.[1];
+  if (numeric) return Number(numeric);
+  const words: Readonly<Record<string, number>> = {
+    один: 1, одного: 1, одной: 1,
+    два: 2, двух: 2,
+    три: 3, трех: 3, трёх: 3,
+    четыре: 4, четырёх: 4, четырех: 4,
+    пять: 5, пяти: 5,
+  };
+  const match = Object.entries(words).find(([word]) =>
+    new RegExp(`(?:^|\\s)${word}(?:\\s|$).{0,20}(?:объект|квартир|помещен)`, "iu").test(text),
+  );
+  return match?.[1] ? match[1] : null;
+};
+
+const formatMoney = (amount: number) =>
+  `${amount.toLocaleString("ru-RU").replaceAll("\u00a0", " ")} ₽`;
 
 export function answerFromKnowledgeBase(
   extraction: ExtractedMessage,
@@ -285,12 +335,6 @@ export function answerFromKnowledgeBase(
     : [];
   const candidates = [...new Map([...directCandidates, ...previousCandidates]
     .map((entry) => [entry.id, entry])).values()];
-  const unresolvedQuestions = extraction.signals.questions.flatMap(questionParts).filter((question) => {
-    const normalized = normalizeQuestion(question);
-    const contextualGroundingExists = contextualReference && previousCandidates.length > 0;
-    return needsIndividualAnswer(normalized) ||
-      (!directCandidates.some((entry) => entry.matches(normalized)) && !contextualGroundingExists);
-  });
   // Overviews already contain these facts; avoid repeating entire KB paragraphs.
   const hasOffer = candidates.some((entry) => entry.id === "offer-overview");
   const hasProcess = candidates.some((entry) => entry.id === "launch-process");
@@ -317,13 +361,53 @@ export function answerFromKnowledgeBase(
       );
     },
   );
-  const explicitUnits =
-    extraction.facts.calculationUnits ??
+  const asksAboutAffordableObjects = userStatements.some((statement) => {
+    const normalized = statement.trim().toLocaleLowerCase("ru-RU");
+    const mentionsObjects = /объект|квартир|помещен/iu.test(normalized);
+    const asksCount = /сколько|какое количество|потяну|влезет|начать/iu.test(normalized);
+    const mentionsBudget = /капитал|бюджет|деньг|влож|сумм|тысяч|руб/iu.test(normalized);
+    return mentionsObjects && asksCount && (
+      mentionsBudget ||
+      extraction.facts.availableCapital !== null ||
+      context.leadFacts?.availableCapital != null
+    );
+  });
+  const availableCapital = extraction.facts.availableCapital ??
+    extraction.facts.entryBudget ??
+    context.leadFacts?.availableCapital ??
+    context.leadFacts?.entryBudget ??
+    null;
+  const requestedUnits = extraction.facts.calculationUnits ??
     extraction.facts.startingUnits ??
-    extraction.facts.scalingPotentialUnits;
+    extraction.facts.scalingPotentialUnits ??
+    userStatements.map(inferUnitCount).find((units): units is number => units !== null) ??
+    context.leadFacts?.startingUnits ??
+    context.leadFacts?.scalingPotentialUnits ??
+    null;
+  const explicitUnits = requestedUnits;
   const estimate = asksAboutEconomics
     ? calculateEconomicsEstimate(explicitUnits)
     : null;
+  const city = extraction.facts.city ?? context.leadFacts?.city ?? null;
+  const effectiveRentReference = context.rentReference ?? findApprovedRentReference(city);
+  const economicsContext = buildApprovedEconomicsContext({
+    availableCapital,
+    requestedUnits,
+    city,
+    rentReference: effectiveRentReference ?? undefined,
+  });
+  const affordableObjects = asksAboutAffordableObjects && availableCapital !== null
+    ? calculateAffordableObjectCount({
+      availableCapital,
+      rentReference: effectiveRentReference ?? GENERAL_RENT_RANGE_REFERENCE,
+    })
+    : null;
+  const unresolvedQuestions = extraction.signals.questions.flatMap(questionParts).filter((question) => {
+    // Missing literal wording is not an information gap. Claude receives the
+    // complete approved fact set and decides semantic coverage. This list is
+    // reserved for policy-level gaps such as concrete object/legal details.
+    return needsIndividualAnswer(normalizeQuestion(question));
+  });
   const answerFragments = matched.map((entry) => {
     if (
       entry.id === "small-business-entry" &&
@@ -341,13 +425,30 @@ export function answerFromKnowledgeBase(
       return `Для ${formatUnitCount(estimate.units)} ориентир по доходу составляет около ${monthlyIncome} ₽ в месяц. ${estimate.disclaimer}`;
     }
     if (
-      extraction.facts.availableCapital !== null ||
-      extraction.facts.entryBudget !== null
+      affordableObjects === null &&
+      (availableCapital !== null || extraction.facts.entryBudget !== null)
     ) {
       return `${entry.answer} По одному размеру капитала нельзя корректно определить количество объектов: универсальная стоимость запуска объекта пока не подтверждена. Могу посчитать общий ориентир по доходу, когда определим предполагаемое число объектов.`;
     }
     return entry.answer;
   });
+
+  if (affordableObjects && availableCapital !== null) {
+    const scenarios = economicsContext.scenarios.filter((scenario) => scenario.affordableObjectCount !== null);
+    const scenarioText = scenarios.map((scenario) => {
+      const count = scenario.affordableObjectCount!;
+      const units = count.maxUnitsAtMinCost === count.maxUnitsAtMaxCost
+        ? `около ${formatUnitCount(count.maxUnitsAtMinCost)}`
+        : `ориентировочно от ${count.maxUnitsAtMaxCost} до ${count.maxUnitsAtMinCost} объектов`;
+      const startup = count.totalStartupCostAtMinCost === count.totalStartupCostAtMaxCost
+        ? `запуск ${formatMoney(count.totalStartupCostAtMinCost)}`
+        : `запуск примерно от ${formatMoney(count.totalStartupCostAtMaxCost)} до ${formatMoney(count.totalStartupCostAtMinCost)}`;
+      return `${scenario.label}: ${units}, ${startup}`;
+    }).join("; ");
+    answerFragments.push(
+      `При капитале около ${formatMoney(availableCapital)} ориентир по утверждённым сценариям такой: ${scenarioText}. В расчёте услуга запуска 50 000 ₽ оплачивается один раз, а на каждый объект закладываются аренда, залог и около 30 000 ₽ подготовки; это расчётный ориентир, а не фиксированная смета.`,
+    );
+  }
 
   return {
     answerFragments: [...new Set(answerFragments)],
@@ -355,5 +456,11 @@ export function answerFromKnowledgeBase(
     unresolvedQuestions,
     contextualReferenceResolved:
       contextualReference && previousCandidates.length > 0 && unresolvedQuestions.length === 0,
+    economicsContext,
+    approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({
+      id,
+      category,
+      answer,
+    })),
   };
 }

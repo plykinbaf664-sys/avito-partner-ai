@@ -6,6 +6,7 @@ import { FakeLLMProvider } from "@/integrations/fake/fake-llm-provider";
 import { createNaturalResponseGenerator } from "./generate-natural-response";
 import type { ConversationResponsePlan } from "@/domain/conversation/conversation-response";
 import { PARTNER_KNOWLEDGE_BASE } from "@/domain/knowledge/knowledge-base";
+import { buildApprovedEconomicsContext } from "@/domain/economics/economics-calculator";
 
 describe("natural response generation", () => {
   const offerPlan: ConversationResponsePlan = {
@@ -144,6 +145,117 @@ describe("natural response generation", () => {
       recentMessages: [],
     }))
       .resolves.toMatchObject({ text, nextInformationNeed: "LAUNCH_TIMING" });
+  });
+
+  it("passes deterministic economics capability and rejects invented values", async () => {
+    const economicsContext = buildApprovedEconomicsContext({
+      availableCapital: 250_000,
+      requestedUnits: 2,
+    });
+    const plan: ConversationResponsePlan = {
+      text: "По утверждённому региональному ориентиру 250 000 ₽ хватает примерно на 2 объекта; ориентир дохода для двух объектов — 40 000 ₽ в месяц, без гарантии.",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      economicsContext,
+    };
+    const accepted = "При региональном ориентире 250 000 ₽ — это около 2 объектов. Ориентир дохода для двух объектов — около 40 000 ₽ в месяц, но это не гарантия.";
+    const llm = new FakeLLMProvider([JSON.stringify({ text: accepted })]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] })).resolves.toMatchObject({ text: accepted });
+    expect(llm.requests[0]?.userMessage).toContain("economicsContext");
+
+    const invented = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([JSON.stringify({
+        text: "При этих условиях получится 3 объекта с доходом 60 000 ₽ в месяц.",
+      })]),
+    });
+    await expect(invented({ lead: {} as Lead, plan, recentMessages: [] }))
+      .rejects.toThrow("RESPONSE_POLICY_VIOLATION");
+  });
+
+  it("lets the conversation brain answer semantically from approved facts", async () => {
+    const text = "Бухгалтерское сопровождение входит в поддержку компании, поэтому вести бухгалтерию самостоятельно не требуется. Ваша сторона занимается объектом и необходимыми договорами.";
+    const llm = new FakeLLMProvider([JSON.stringify({
+      text,
+      answerCoverage: "FULL",
+    })]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const plan: ConversationResponsePlan = {
+      text: "",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      approvedFacts: [
+        {
+          id: "pricing",
+          category: "PRICING",
+          answer: "Есть бухгалтерское и юридическое сопровождение.",
+        },
+        {
+          id: "launch-process",
+          category: "OPERATIONS",
+          answer: "Партнёр ездит на объекты и заключает необходимые договоры.",
+        },
+      ],
+    };
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({ text, answerCoverage: "FULL" });
+    const sentContext = JSON.parse(llm.requests[0]!.userMessage) as {
+      approvedFacts: { id: string }[];
+    };
+    expect(sentContext.approvedFacts.map((fact) => fact.id)).toEqual(["pricing", "launch-process"]);
+  });
+
+  it("preserves partial answerability instead of turning the whole turn into fallback", async () => {
+    const text = "Ориентир запуска трёх квартир в Москве — около 440 000 ₽ по утверждённой модели. Конкретные квартиры заранее назвать нельзя: они зависят от подбора объекта.";
+    const generate = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([JSON.stringify({
+        text,
+        answerCoverage: "PARTIAL",
+        unresolvedTopics: ["конкретные квартиры"],
+      })]),
+    });
+    const plan: ConversationResponsePlan = {
+      text: "Ориентир запуска трёх квартир в Москве — около 440 000 ₽.",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+    };
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({ answerCoverage: "PARTIAL", unresolvedTopics: ["конкретные квартиры"] });
+  });
+
+  it("rejects a full-coverage claim that still reports an unresolved topic", async () => {
+    const generate = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([JSON.stringify({
+        text: "Не знаю.",
+        answerCoverage: "FULL",
+        unresolvedTopics: ["актуальная аренда"],
+      })]),
+    });
+
+    await expect(generate({
+      lead: {} as Lead,
+      plan: {
+        text: "",
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: [],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+      },
+      recentMessages: [],
+    })).rejects.toThrow("RESPONSE_POLICY_VIOLATION");
   });
 
   it("rejects a next step outside deterministic allowed needs", async () => {

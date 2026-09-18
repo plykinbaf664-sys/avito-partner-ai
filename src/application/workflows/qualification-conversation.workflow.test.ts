@@ -99,6 +99,47 @@ describe("multi-turn qualification conversation", () => {
     text,
   });
 
+  it("starts a general-interest conversation with discovery instead of capital", async () => {
+    const { processEvent } = harness([
+      reply({ intent: "GENERAL_INTEREST" }),
+    ]);
+
+    const result = await processEvent(input(0, "Здравствуйте, мне интересно"));
+
+    expect(result.suggestedNextInformationNeed).toBe("CITY");
+    expect(result.outboundMessage).toMatch(/город|городе/iu);
+    expect(result.outboundMessage).not.toMatch(/какую сумму|капитал|бюджет/iu);
+  });
+
+  it("lets Claude answer a paraphrased approved business question without a literal KB match", async () => {
+    const extractMessage = createMessageExtractor({
+      llmProvider: new FakeLLMProvider([reply({
+        intent: "QUESTION",
+        signals: { questions: ["Бухгалтерию самому вести?"] },
+      })]),
+    });
+    const generateNaturalResponse = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([JSON.stringify({
+        text: "Нет, компания предоставляет бухгалтерское сопровождение. Со стороны партнёра остаётся участие в запуске и необходимые договоры. Какую сумму вы готовы выделить на запуск — это общий доступный капитал или только первый этап?",
+        answerCoverage: "FULL",
+        nextInformationNeed: "AVAILABLE_CAPITAL",
+      })]),
+    });
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage,
+      generateNaturalResponse,
+      generateId: () => `semantic-${++nextId}`,
+      now: () => new Date(`2026-09-01T10:${String(nextId).padStart(2, "0")}:00Z`),
+    });
+
+    const result = await processEvent(input(0, "Бухгалтерию самому вести?"));
+
+    expect(result.outboundMessage).toContain("бухгалтерское сопровождение");
+    expect(result.outboundMessage).not.toContain("уточнить у менеджера");
+    expect(result.qualificationReason).not.toBe("UNKNOWN_BUSINESS_QUESTION");
+  });
+
   it.each([
     ["Какие условия предлагаете?", ["субаренде", "50 000 ₽", "80 000 ₽", "доход не гарантируется"]],
     ["Как вообще проходит организация бизнеса?", ["подобрать объект", "комплектации", "площадках", "администратор", "горничную", "персональный менеджер", "CRM"]],
@@ -367,6 +408,108 @@ describe("multi-turn qualification conversation", () => {
     expect((await crm.listLeads({ search: "8 (999) 123-45-67" })).records.map((record) => record.leadId)).toEqual([afterPhone.leadId]);
     expect(createCrmCsv(await crm.exportLeads())).toContain('"+79991234567"');
     expect((await processEvent(input(2, "Позвоните 89991234567"))).duplicate).toBe(true);
+  });
+
+  it("answers an economics scenario from approved calculations without a manager fallback", async () => {
+    const { processEvent } = harness([reply({
+      intent: "QUESTION",
+      facts: { availableCapital: 250_000, availableCapitalConfirmed: true },
+      signals: { questions: ["У меня 250 тысяч. Со скольких объектов посоветуете начать?"] },
+    })]);
+    const result = await processEvent(input(1, "У меня 250 тысяч. Со скольких объектов посоветуете начать?"));
+
+    expect(result.outboundMessage).toContain("Региональный ориентир");
+    expect(result.outboundMessage).toContain("около 2 объектов");
+    expect(result.outboundMessage).toContain("Москва");
+    expect(result.outboundMessage).not.toContain("уточнить у менеджера");
+    expect(result.shouldHandoffToManager).toBe(false);
+  });
+
+  it("answers approved income arithmetic for two objects without escalation", async () => {
+    const { processEvent } = harness([reply({
+      intent: "QUESTION",
+      facts: { calculationUnits: 2 },
+      signals: { questions: ["А сколько примерно можно получать с двух объектов?"] },
+    })]);
+    const result = await processEvent(input(1, "А сколько примерно можно получать с двух объектов?"));
+
+    expect(result.outboundMessage).toContain("40 000 ₽");
+    expect(result.outboundMessage).toContain("не гарантия");
+    expect(result.outboundMessage).not.toContain("уточнить у менеджера");
+    expect(result.shouldHandoffToManager).toBe(false);
+  });
+
+  it("keeps the conversation available after handoff for new facts and questions", async () => {
+    const { processEvent } = harness([
+      reply({
+        facts: {
+          city: "Химки",
+          availableCapital: 200_000,
+          availableCapitalConfirmed: true,
+          additionalExpensesReadiness: "READY",
+          businessModelReadiness: "ACCEPTS",
+          startingUnits: 1,
+          scalingPotentialUnits: 3,
+          hasFreeTime: true,
+          launchTiming: "READY_NOW",
+          primaryGoal: "ADDITIONAL_INCOME",
+          managementReadiness: "READY",
+        },
+      }),
+      reply({ facts: { phoneNumber: "+79991234567", phoneConfirmed: true } }),
+      reply({ facts: { city: "Москва" } }),
+    ]);
+
+    const beforePhone = await processEvent(input(10, "Готов начать в Химках, есть 200 тысяч"));
+    const afterPhone = await processEvent(input(11, "+79991234567"));
+    expect(afterPhone.shouldHandoffToManager).toBe(true);
+    const handoffNotification = await persistence.managerNotifications.findByIdempotencyKey(
+      `manager-handoff:${beforePhone.leadId}`,
+    );
+
+    const afterHandoff = await processEvent(input(12, "Я вообще-то из Москвы"));
+    const lead = await persistence.leads.findById(afterHandoff.leadId!);
+    expect(lead?.city).toBe("Москва");
+    expect(afterHandoff.outboundMessage).toContain("Понял");
+    expect(afterHandoff.outboundMessage).not.toContain("Оставьте");
+    const afterHandoffNotification = await persistence.managerNotifications.findByIdempotencyKey(
+      `manager-handoff:${beforePhone.leadId}`,
+    );
+    expect(afterHandoffNotification?.id).toBe(handoffNotification?.id);
+  });
+
+  it("answers an economics question after handoff without creating another handoff", async () => {
+    const { processEvent } = harness([
+      reply({
+        facts: {
+          city: "Химки",
+          availableCapital: 200_000,
+          availableCapitalConfirmed: true,
+          additionalExpensesReadiness: "READY",
+          businessModelReadiness: "ACCEPTS",
+          startingUnits: 1,
+          scalingPotentialUnits: 3,
+          launchTiming: "READY_NOW",
+          primaryGoal: "ADDITIONAL_INCOME",
+          managementReadiness: "READY",
+        },
+      }),
+      reply({ facts: { phoneNumber: "+79991234567", phoneConfirmed: true } }),
+      reply({
+        intent: "QUESTION",
+        facts: { calculationUnits: 3 },
+        signals: { questions: ["А сколько примерно можно зарабатывать с трёх квартир?"] },
+      }),
+    ]);
+
+    const first = await processEvent(input(20, "Готов начать в Химках, есть 200 тысяч"));
+    await processEvent(input(21, "+79991234567"));
+    const answer = await processEvent(input(22, "А сколько примерно можно зарабатывать с трёх квартир?"));
+
+    expect(answer.outboundMessage).toContain("60 000 ₽");
+    expect(answer.outboundMessage).not.toContain("Передам менеджеру");
+    expect((await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${first.leadId}`))?.id)
+      .toBeDefined();
   });
 
   it("keeps a phone refusal as a barrier and answers KB questions while waiting", async () => {
@@ -1026,7 +1169,7 @@ describe("multi-turn qualification conversation", () => {
     ];
 
     expect(turns.map((turn) => turn.suggestedNextInformationNeed)).toEqual([
-      "AVAILABLE_CAPITAL",
+      "CITY",
       "ADDITIONAL_EXPENSES",
       "STARTING_UNITS",
       "LAUNCH_TIMING",
@@ -1047,7 +1190,7 @@ describe("multi-turn qualification conversation", () => {
     });
     expect(llm.callCount).toBe(6);
     const allOutbound = turns.map((turn) => turn.outboundMessage).join(" ");
-    expect(allOutbound.match(/Какую сумму вы реально готовы выделить/g)).toHaveLength(1);
+    expect(allOutbound.match(/Какую сумму вы реально готовы выделить/g) ?? []).toHaveLength(0);
   });
 
   it("switches a promising multi-turn lead to NO_FIT when a hard blocker appears", async () => {

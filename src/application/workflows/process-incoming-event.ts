@@ -709,6 +709,13 @@ export function createIncomingEventProcessor({
       const knowledge = answerFromKnowledgeBase(extracted.extraction, {
         previousEntryIds: parseStoredKnowledgeIds(currentConversation.summary),
         recentMessages: history.map(({ direction, actor, content }) => ({ direction, actor, content })),
+        leadFacts: {
+          city: evaluatedLead.city,
+          availableCapital: evaluatedLead.availableCapital,
+          entryBudget: evaluatedLead.entryBudget,
+          startingUnits: evaluatedLead.startingUnits,
+          scalingPotentialUnits: evaluatedLead.scalingPotentialUnits,
+        },
       });
       const decision = evaluateQualification(evaluatedLead, qualificationContextForLead(evaluatedLead, {
         wantsHuman: extracted.extraction.signals.wantsHuman,
@@ -817,7 +824,9 @@ export function createIncomingEventProcessor({
         );
         const transactionDecision = evaluateQualification(transactionLead, qualificationContextForLead(transactionLead, {
           wantsHuman: extracted.extraction.signals.wantsHuman,
-          unknownBusinessQuestion: knowledge.unresolvedQuestions.length > 0,
+          unknownBusinessQuestion:
+            knowledge.unresolvedQuestions.length > 0 ||
+            responseLlm?.answerCoverage === "UNKNOWN",
         }));
         transactionLead = {
           ...transactionLead,
@@ -857,9 +866,14 @@ export function createIncomingEventProcessor({
           options.suppressOutbound === true ||
           (prepared.inboundSequence !== null &&
             prepared.inboundSequence < storedConversation.nextInboundSequence);
+        const postHandoffSubstantiveInbound =
+          storedLead.handoffAt !== null &&
+          (extractedFactNames(extracted.extraction).length > 0 ||
+            extracted.extraction.signals.questions.length > 0 ||
+            extracted.extraction.signals.objections.length > 0);
         const noAiReply =
-          responseLlm?.replyAction === "NO_REPLY" ||
-          (phoneFulfillsRecentStep && responseLlm === null);
+          (responseLlm?.replyAction === "NO_REPLY" && !postHandoffSubstantiveInbound) ||
+          (phoneFulfillsRecentStep && responseLlm === null && !postHandoffSubstantiveInbound);
         const shouldSendOutbound = !responseSuppressed && !noAiReply;
         const responseGenerationSource = responseSuppressed
           ? "SUPPRESSED"
