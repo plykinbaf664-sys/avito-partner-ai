@@ -161,6 +161,72 @@ describe("message extraction schema", () => {
     });
   });
 
+  it("uses the pending capital question to interpret a concise amount as available capital", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        intent: "QUALIFICATION_INFORMATION",
+        facts: {
+          phoneNumber: "",
+          phoneConfirmed: false,
+          city: null,
+          budget: 300_000,
+          budgetConfirmed: true,
+          availableCapital: 300_000,
+          availableCapitalConfirmed: true,
+          entryBudget: -1,
+          additionalLaunchCapital: -1,
+          capitalScope: "UNKNOWN",
+          additionalExpensesReadiness: "UNKNOWN",
+          businessModelReadiness: "UNKNOWN",
+          calculationUnits: -1,
+          startingUnits: null,
+          scalingPotentialUnits: null,
+          hasFreeTime: null,
+          availableTimeDetails: null,
+          businessExperience: null,
+          shortTermRentalExperience: null,
+          ownsProperty: null,
+          desiredIncome: null,
+          primaryGoal: "UNKNOWN",
+          buyingIntent: "CONSIDERING",
+          launchTiming: null,
+          managementReadiness: null,
+          requiresGuaranteedIncome: null,
+          rejectsBusinessModel: null,
+        },
+        signals: {
+          questions: [],
+          objections: [],
+          possiblePrimaryFear: null,
+          possibleSecondaryFear: null,
+          wantsHuman: false,
+        },
+        confidence: 0.95,
+        uncertainty: [],
+      }),
+    ]);
+    const extract = createMessageExtractor({ llmProvider: llm });
+    const result = await extract({
+      text: "300 для начала",
+      pendingInformationNeed: "AVAILABLE_CAPITAL",
+      currentLead: { availableCapital: null, availableCapitalConfirmed: false } as Lead,
+      recentMessages: [{
+        direction: "OUTBOUND",
+        content: "Какую сумму вы реально готовы выделить на проект: это бюджет только на первый этап или общий доступный капитал?",
+      }],
+    });
+
+    expect(result.extraction.facts).toMatchObject({
+      availableCapital: 300_000,
+      availableCapitalConfirmed: true,
+      entryBudget: null,
+    });
+    expect(JSON.parse(llm.requests[0]!.userMessage)).toMatchObject({
+      PENDING_INFORMATION_NEED: "AVAILABLE_CAPITAL",
+    });
+    expect(llm.requests[0]?.systemPrompt).toContain("сама по себе не является неопределённостью");
+  });
+
   it("recognizes an explicit willingness to work with the management company", async () => {
     const statement = "Готов работать с управляющей компанией";
     const llm = new FakeLLMProvider([

@@ -33,6 +33,7 @@ export interface InformationNeedsAssessment {
   missingCriticalFacts: InformationNeed[];
   missingOptionalFacts: InformationNeed[];
   missingImportantFacts: InformationNeed[];
+  allowedNextInformationNeeds: InformationNeed[];
   suggestedNextInformationNeed: InformationNeed | null;
 }
 
@@ -144,8 +145,13 @@ export function assessInformationNeeds(
   const missingOptionalFacts = optionalInformationNeeds.filter(
     (need) => !knownFacts.includes(need) && !missingCriticalFacts.includes(need),
   );
+  const allowedNextInformationNeeds = selectAllowedInformationNeeds(
+    missingCriticalFacts,
+    missingOptionalFacts,
+  );
   const suggestedNextInformationNeed = selectNextInformationNeed(
     lead,
+    allowedNextInformationNeeds,
     missingCriticalFacts,
     missingOptionalFacts,
   );
@@ -154,22 +160,40 @@ export function assessInformationNeeds(
     missingCriticalFacts,
     missingOptionalFacts,
     missingImportantFacts: [...missingCriticalFacts, ...missingOptionalFacts],
+    allowedNextInformationNeeds,
     suggestedNextInformationNeed,
   };
 }
 
+function selectAllowedInformationNeeds(
+  missingCriticalFacts: InformationNeed[],
+  missingOptionalFacts: InformationNeed[],
+): InformationNeed[] {
+  if (missingCriticalFacts.length === 0) return [...missingOptionalFacts];
+  if (
+    missingCriticalFacts.length === 1 &&
+    missingCriticalFacts[0] === "PHONE_NUMBER"
+  ) {
+    return [
+      "PHONE_NUMBER",
+      ...missingOptionalFacts.filter((need) =>
+        ["SCALING_POTENTIAL_UNITS", "FREE_TIME"].includes(need),
+      ),
+    ];
+  }
+  return [...missingCriticalFacts];
+}
+
 function selectNextInformationNeed(
   lead: Lead,
+  candidates: InformationNeed[],
   missingCriticalFacts: InformationNeed[],
   missingOptionalFacts: InformationNeed[],
 ): InformationNeed | null {
-  const candidates =
-    missingCriticalFacts.length > 0 ? missingCriticalFacts : missingOptionalFacts;
   if (candidates.length === 0) return null;
 
-  // Before asking for the final phone, use the remaining natural turn to
-  // capture useful non-blocking context. If the phone is already known these
-  // optional facts never delay handoff.
+  // Keep a deterministic fallback when response generation is unavailable.
+  // The LLM may choose another item only from this validated candidate set.
   if (
     missingCriticalFacts.length === 1 &&
     missingCriticalFacts[0] === "PHONE_NUMBER"

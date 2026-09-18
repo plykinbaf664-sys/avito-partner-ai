@@ -331,6 +331,7 @@ function emptyNeeds(): InformationNeedsAssessment {
     missingCriticalFacts: [],
     missingOptionalFacts: [],
     missingImportantFacts: [],
+    allowedNextInformationNeeds: [],
     suggestedNextInformationNeed: null,
   };
 }
@@ -708,6 +709,7 @@ export function createIncomingEventProcessor({
         decision,
         nextInformationNeed,
         knowledge,
+        informationNeeds: needs,
       });
       let responseLlm: Awaited<ReturnType<NaturalResponseGenerator>> | null =
         null;
@@ -792,9 +794,15 @@ export function createIncomingEventProcessor({
           qualificationReason: transactionDecision.reason,
         };
         const transactionNeeds = assessInformationNeeds(transactionLead);
+        const adaptiveNextInformationNeed = responseLlm?.nextInformationNeed;
         const transactionNextInformationNeed =
           transactionDecision.nextAction === "CONTINUE_QUALIFICATION"
-            ? transactionNeeds.suggestedNextInformationNeed
+            ? adaptiveNextInformationNeed &&
+                transactionNeeds.allowedNextInformationNeeds.includes(
+                  adaptiveNextInformationNeed,
+                )
+              ? adaptiveNextInformationNeed
+              : transactionNeeds.suggestedNextInformationNeed
             : null;
         const transactionResponsePlan = buildConversationResponse({
           lead: transactionLead,
@@ -802,9 +810,14 @@ export function createIncomingEventProcessor({
           decision: transactionDecision,
           nextInformationNeed: transactionNextInformationNeed,
           knowledge,
+          informationNeeds: transactionNeeds,
         });
-        const transactionOutboundText =
-          responseLlm?.text ?? transactionResponsePlan.text;
+        const canUseAdaptiveResponse =
+          responseLlm !== null &&
+          responseLlm.nextInformationNeed === transactionNextInformationNeed;
+        const transactionOutboundText = canUseAdaptiveResponse
+          ? responseLlm!.text
+          : transactionResponsePlan.text;
 
         const responseSuppressed =
           options.suppressOutbound === true ||

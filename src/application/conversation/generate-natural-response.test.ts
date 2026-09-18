@@ -108,6 +108,64 @@ describe("natural response generation", () => {
     expect(llm.requests[0]?.userMessage).toContain("Первое");
   });
 
+  it("lets the model choose one validated missing fact instead of following the fallback order", async () => {
+    const text = "Понял, на старте готовы выделить 300 000 ₽. Когда примерно хотите запустить первый объект?";
+    const generate = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([
+        JSON.stringify({ text, nextInformationNeed: "LAUNCH_TIMING" }),
+      ]),
+    });
+    const plan: ConversationResponsePlan = {
+      text: "Какую сумму вы готовы выделить на запуск?",
+      nextInformationNeed: "AVAILABLE_CAPITAL",
+      asksUserQuestion: true,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      allowedNextInformationNeeds: ["AVAILABLE_CAPITAL", "LAUNCH_TIMING", "GOAL"],
+      allowedNextQuestions: [
+        { need: "AVAILABLE_CAPITAL", question: "Какую сумму вы готовы выделить на запуск?" },
+        { need: "LAUNCH_TIMING", question: "Когда примерно рассматриваете запуск?" },
+        { need: "GOAL", question: "Какую цель хотите решить этим бизнесом?" },
+      ],
+      knownFacts: ["CITY"],
+      missingCriticalFacts: ["AVAILABLE_CAPITAL", "LAUNCH_TIMING", "GOAL"],
+      missingOptionalFacts: [],
+      qualificationReasonCodes: ["CAPITAL_UNKNOWN"],
+    };
+
+    await expect(generate({
+      lead: {
+        city: "Екатеринбург",
+        availableCapital: 300_000,
+        availableCapitalConfirmed: true,
+      } as Lead,
+      plan,
+      recentMessages: [],
+    }))
+      .resolves.toMatchObject({ text, nextInformationNeed: "LAUNCH_TIMING" });
+  });
+
+  it("rejects a next step outside deterministic allowed needs", async () => {
+    const generate = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([
+        JSON.stringify({ text: "Оставьте номер телефона?", nextInformationNeed: "PHONE_NUMBER" }),
+      ]),
+    });
+    const plan: ConversationResponsePlan = {
+      text: "Когда примерно рассматриваете запуск?",
+      nextInformationNeed: "LAUNCH_TIMING",
+      asksUserQuestion: true,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      allowedNextInformationNeeds: ["LAUNCH_TIMING", "GOAL"],
+    };
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .rejects.toThrow("RESPONSE_POLICY_VIOLATION");
+  });
+
   it.each([
     [
       "Получается всего 150 тысяч?",

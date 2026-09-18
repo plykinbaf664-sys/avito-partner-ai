@@ -1,4 +1,7 @@
-import type { InformationNeed } from "./information-needs";
+import type {
+  InformationNeed,
+  InformationNeedsAssessment,
+} from "./information-needs";
 import type { ExtractedMessage } from "../extraction/extracted-message";
 import type { Lead } from "../lead/lead";
 import type {
@@ -55,6 +58,15 @@ export interface ConversationResponsePlan {
   unresolvedQuestions: string[];
   useNaturalAdaptation: boolean;
   contextualReference?: boolean;
+  allowedNextInformationNeeds?: InformationNeed[];
+  allowedNextQuestions?: Array<{
+    need: InformationNeed;
+    question: string;
+  }>;
+  knownFacts?: InformationNeed[];
+  missingCriticalFacts?: InformationNeed[];
+  missingOptionalFacts?: InformationNeed[];
+  qualificationReasonCodes?: QualificationReasonCode[];
 }
 
 export function buildConversationResponse(params: {
@@ -63,8 +75,23 @@ export function buildConversationResponse(params: {
   decision: QualificationDecision;
   nextInformationNeed: InformationNeed | null;
   knowledge: KnowledgeAnswer;
+  informationNeeds?: InformationNeedsAssessment;
 }): ConversationResponsePlan {
   const { extraction, decision, nextInformationNeed, knowledge } = params;
+  const allowedNextInformationNeeds =
+    params.informationNeeds?.allowedNextInformationNeeds ??
+    (nextInformationNeed === null ? [] : [nextInformationNeed]);
+  const adaptiveContext = {
+    allowedNextInformationNeeds,
+    allowedNextQuestions: allowedNextInformationNeeds.map((need) => ({
+      need,
+      question: questionForInformationNeed(need, params.lead),
+    })),
+    knownFacts: params.informationNeeds?.knownFacts ?? [],
+    missingCriticalFacts: params.informationNeeds?.missingCriticalFacts ?? [],
+    missingOptionalFacts: params.informationNeeds?.missingOptionalFacts ?? [],
+    qualificationReasonCodes: decision.reasonCodes,
+  };
 
   if (decision.nextAction === "REJECT_POLITELY") {
     const answeredThenRejected = [
@@ -80,6 +107,7 @@ export function buildConversationResponse(params: {
       unresolvedQuestions: [],
       useNaturalAdaptation: knowledge.answerFragments.length > 0,
       contextualReference: knowledge.contextualReferenceResolved,
+      ...adaptiveContext,
     };
   }
 
@@ -120,11 +148,13 @@ export function buildConversationResponse(params: {
     knowledgeEntryIds: knowledge.entryIds,
     unresolvedQuestions: knowledge.unresolvedQuestions,
     useNaturalAdaptation:
+      allowedNextInformationNeeds.length > 1 ||
       nextInformationNeed === "PHONE_NUMBER" ||
       knowledge.answerFragments.length > 0 ||
       parts.length >= 3 ||
       extraction.signals.questions.length + extraction.signals.objections.length > 1,
     contextualReference: knowledge.contextualReferenceResolved,
+    ...adaptiveContext,
   };
 }
 

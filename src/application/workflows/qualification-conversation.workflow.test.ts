@@ -220,6 +220,32 @@ describe("multi-turn qualification conversation", () => {
     expect(messages.find((message) => message.direction === "OUTBOUND")?.content).toBe(adapted);
   });
 
+  it("persists the LLM-selected step only when it is an allowed missing fact", async () => {
+    const extractMessage = createMessageExtractor({ llmProvider: new FakeLLMProvider([
+      reply({ facts: { availableCapital: 300_000, availableCapitalConfirmed: true } }),
+    ]) });
+    const generateNaturalResponse = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([
+        JSON.stringify({
+          text: "Понял. Когда примерно хотите запустить первый объект?",
+          nextInformationNeed: "LAUNCH_TIMING",
+        }),
+      ]),
+    });
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage,
+      generateNaturalResponse,
+    });
+
+    const result = await processEvent(input(1, "300 для начала"));
+    const conversation = await persistence.conversations.findById(result.conversationId!);
+
+    expect(result.outboundMessage).toBe("Понял. Когда примерно хотите запустить первый объект?");
+    expect(conversation?.pendingInformationNeed).toBe("LAUNCH_TIMING");
+    expect(result.outboundMessage).not.toMatch(/общий доступный капитал|отдельный бюджет/iu);
+  });
+
   it.each(["unavailable", "unsafe"])("keeps the KB answer and next question when adaptation is %s", async (failure) => {
     const extractMessage = createMessageExtractor({ llmProvider: new FakeLLMProvider([
       reply({ intent: "QUESTION", signals: { questions: ["Какие условия предлагаете?"] } }),
@@ -641,6 +667,63 @@ describe("multi-turn qualification conversation", () => {
     expect(result.knownFacts).toContain("ADDITIONAL_EXPENSES");
     expect(result.suggestedNextInformationNeed).not.toBe("ADDITIONAL_EXPENSES");
     expect(result.outboundMessage).not.toContain("отдельный бюджет");
+  });
+
+  it("treats a clear 300,000 answer as available capital and leaves the financial topic", async () => {
+    const { processEvent } = harness([
+      reply({
+        facts: {
+          budget: 300_000,
+          budgetConfirmed: true,
+          availableCapital: 300_000,
+          availableCapitalConfirmed: true,
+          capitalScope: "UNKNOWN",
+        },
+      }),
+    ]);
+
+    const result = await processEvent(input(1, "300 для начала"));
+    const lead = await persistence.leads.findById(result.leadId!);
+
+    expect(lead).toMatchObject({
+      availableCapital: 300_000,
+      availableCapitalConfirmed: true,
+    });
+    expect(result.knownFacts).toEqual(expect.arrayContaining([
+      "AVAILABLE_CAPITAL",
+      "ADDITIONAL_EXPENSES",
+    ]));
+    expect(result.suggestedNextInformationNeed).not.toBe("AVAILABLE_CAPITAL");
+    expect(result.suggestedNextInformationNeed).not.toBe("ADDITIONAL_EXPENSES");
+    expect(result.outboundMessage).not.toContain("отдельный бюджет");
+    expect(result.outboundMessage).not.toContain("общий доступный капитал");
+  });
+
+  it("extracts capital, timing and starting units together and asks none of them again", async () => {
+    const { processEvent } = harness([
+      reply({
+        facts: {
+          availableCapital: 300_000,
+          availableCapitalConfirmed: true,
+          launchTiming: "WITHIN_MONTH",
+          startingUnits: 2,
+        },
+      }),
+    ]);
+
+    const result = await processEvent(
+      input(1, "Есть 300 тысяч, хочу начать через месяц с двух квартир"),
+    );
+
+    expect(result.knownFacts).toEqual(expect.arrayContaining([
+      "AVAILABLE_CAPITAL",
+      "LAUNCH_TIMING",
+      "STARTING_UNITS",
+    ]));
+    expect(result.suggestedNextInformationNeed).not.toBe("AVAILABLE_CAPITAL");
+    expect(result.suggestedNextInformationNeed).not.toBe("LAUNCH_TIMING");
+    expect(result.suggestedNextInformationNeed).not.toBe("STARTING_UNITS");
+    expect(result.outboundMessage).not.toMatch(/Какую сумму|Когда примерно|Со скольких/iu);
   });
 
   it("treats 200,000 as strong financial readiness without another financial question", async () => {
