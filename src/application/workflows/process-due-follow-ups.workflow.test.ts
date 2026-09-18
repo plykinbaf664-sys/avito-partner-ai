@@ -7,6 +7,7 @@ import { FakeLLMProvider } from "@/integrations/fake/fake-llm-provider";
 import { FakeOutboundProvider } from "@/integrations/fake/fake-outbound-provider";
 
 import { createMessageExtractor } from "../extraction/extract-message";
+import type { NaturalResponseGenerator } from "../conversation/generate-natural-response";
 import { createDueFollowUpsProcessor } from "./process-due-follow-ups";
 import { createIncomingEventProcessor } from "./process-incoming-event";
 
@@ -100,16 +101,16 @@ describe("due qualification follow-ups workflow", () => {
     text,
   });
 
-  it("sends once at 24 hours and remains idempotent", async () => {
+  it("sends once at 2 hours and remains idempotent", async () => {
     const { processEvent, processDue, outboundProvider } = harness([
       extractionReply(),
     ]);
     const first = await processEvent(input("event-1", "Здравствуйте"));
 
-    currentTime = new Date("2026-09-02T09:59:00.000Z");
+    currentTime = new Date("2026-09-01T11:59:00.000Z");
     expect((await processDue(currentTime)).created).toHaveLength(0);
 
-    currentTime = new Date("2026-09-02T10:00:00.000Z");
+    currentTime = new Date("2026-09-01T12:00:00.000Z");
     const due = await processDue(currentTime);
     const repeated = await processDue(currentTime);
     const messages = await persistence.messages.listByConversationId(
@@ -135,7 +136,7 @@ describe("due qualification follow-ups workflow", () => {
     const first = await processEvent(
       input("event-parallel-scheduler", "Р—РґСЂР°РІСЃС‚РІСѓР№С‚Рµ"),
     );
-    currentTime = new Date("2026-09-02T10:00:00.000Z");
+    currentTime = new Date("2026-09-01T12:00:00.000Z");
 
     await Promise.all([processDue(currentTime), processDue(currentTime)]);
     const messages = await persistence.messages.listByConversationId(
@@ -150,7 +151,7 @@ describe("due qualification follow-ups workflow", () => {
     ).toHaveLength(1);
   });
 
-  it("does not send the old follow-up after an inbound reply before 24 hours", async () => {
+  it("does not send the old follow-up after an inbound reply before 2 hours", async () => {
     const { processEvent, processDue } = harness([
       extractionReply(),
       extractionReply({ budget: 200_000, budgetConfirmed: true }),
@@ -169,10 +170,10 @@ describe("due qualification follow-ups workflow", () => {
       extractionReply({ launchTiming: "WITHIN_MONTH" }),
     ]);
     const first = await processEvent(input("event-1", "Есть 200 тысяч"));
-    currentTime = new Date("2026-09-02T10:00:00.000Z");
+    currentTime = new Date("2026-09-01T12:00:00.000Z");
     await processDue(currentTime);
 
-    currentTime = new Date("2026-09-02T11:00:00.000Z");
+    currentTime = new Date("2026-09-01T13:00:00.000Z");
     const resumed = await processEvent(input("event-2", "Хочу начать через месяц"));
     const messages = await persistence.messages.listByConversationId(
       first.conversationId!,
@@ -211,7 +212,7 @@ describe("due qualification follow-ups workflow", () => {
       generateId,
     });
     const first = await processEvent(input("event-failed-follow-up", "Здравствуйте"));
-    currentTime = new Date("2026-09-02T10:00:00.000Z");
+    currentTime = new Date("2026-09-01T12:00:00.000Z");
 
     const failed = await processDue(currentTime);
     const conversation = await persistence.conversations.findById(
@@ -238,10 +239,42 @@ describe("due qualification follow-ups workflow", () => {
     });
   });
 
+  it("uses the shared conversation brain for a contextual follow-up", async () => {
+    const { processEvent, outboundProvider } = harness([extractionReply()]);
+    await processEvent(input("event-natural-follow-up", "Hello"));
+
+    const calls: Parameters<NaturalResponseGenerator>[0][] = [];
+    const generateNaturalResponse: NaturalResponseGenerator = async (input) => {
+      calls.push(input);
+      return {
+        text: "Returning to our conversation - is this topic still relevant?",
+        model: "fake",
+        inputTokens: 1,
+        outputTokens: 1,
+        nextInformationNeed: input.plan.nextInformationNeed,
+      };
+    };
+    const processDue = createDueFollowUpsProcessor({
+      persistence,
+      outboundProvider,
+      generateNaturalResponse,
+      generateId: () => "natural-follow-up-" + (++nextId),
+    });
+
+    currentTime = new Date("2026-09-01T12:00:00.000Z");
+    const due = await processDue(currentTime);
+
+    expect(due.sent).toHaveLength(1);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ triggerType: "FOLLOW_UP_DUE" });
+    expect(calls[0]?.recentMessages.some((message) => message.direction === "OUTBOUND"))
+      .toBe(true);
+    expect(outboundProvider.requests[0]?.text).toContain("Returning");
+  });
   it("rechecks state after selection and skips when an inbound arrived", async () => {
     const { processEvent } = harness([extractionReply()]);
     const first = await processEvent(input("event-race", "Здравствуйте"));
-    currentTime = new Date("2026-09-02T10:00:00.000Z");
+    currentTime = new Date("2026-09-01T12:00:00.000Z");
     const originalList =
       persistence.conversations.listDueFollowUps.bind(
         persistence.conversations,

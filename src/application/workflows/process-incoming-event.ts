@@ -285,10 +285,17 @@ async function prepareClaimedEvent(
     await repositories.messages.insert(message);
   }
 
-  const pendingFollowUp = await repositories.messages.findByDeduplicationKey(
-    `qualification-follow-up:${conversation.id}:1`,
+  const conversationMessages = await repositories.messages.listByConversationId(
+    conversation.id,
   );
-  if (pendingFollowUp?.deliveryStatus === "PENDING") {
+  for (const pendingFollowUp of conversationMessages.filter(
+    (message) =>
+      message.direction === "OUTBOUND" &&
+      message.deliveryStatus === "PENDING" &&
+      message.deduplicationKey?.startsWith(
+        `qualification-follow-up:${conversation!.id}:`,
+      ),
+  )) {
     await repositories.messages.update({
       ...pendingFollowUp,
       deliveryStatus: "FAILED",
@@ -303,6 +310,12 @@ async function prepareClaimedEvent(
       conversation.nextInboundSequence,
       inboundSequence ?? conversation.nextInboundSequence,
     ),
+    followUpCount:
+      conversation.lastFollowUpAt !== null &&
+      (conversation.lastInboundAt === null ||
+        conversation.lastFollowUpAt.getTime() > conversation.lastInboundAt.getTime())
+        ? 0
+        : conversation.followUpCount,
     lastInboundAt: now,
     awaitingUserReply: false,
     followUpEligibleAt: null,
@@ -1134,6 +1147,13 @@ export function createIncomingEventProcessor({
         blockingReasons: completed.decision.blockingReasons,
         weakSignals: completed.decision.weakSignals,
         shouldHandoffToManager: completed.decision.shouldHandoffToManager,
+        qualificationSatisfied: ["QUALIFIED", "PRIORITY", "HOT", "WARM"].includes(completed.lead.qualificationStatus),
+        phoneKnown: hasConfirmedPhone(completed.lead),
+        nextBusinessGoal: completed.decision.shouldHandoffToManager
+          ? "HANDOFF"
+          : ["QUALIFIED", "PRIORITY", "HOT", "WARM"].includes(completed.lead.qualificationStatus) && !hasConfirmedPhone(completed.lead)
+            ? "REQUEST_PHONE_FOR_HANDOFF"
+            : "CONTINUE_CONVERSATION",
         nextAction: completed.decision.nextAction,
         serviceability: completed.lead.serviceability,
         totalProcessingLatencyMs: completed.totalProcessingLatencyMs,

@@ -3,7 +3,7 @@ import { questionForInformationNeed } from "../conversation/conversation-respons
 import type { Lead } from "../lead/lead";
 
 export const FOLLOW_UP_POLICY = Object.freeze({
-  delayMs: 24 * 60 * 60 * 1_000,
+  delayMs: 2 * 60 * 60 * 1_000,
   maximumQualificationFollowUps: 1,
 });
 

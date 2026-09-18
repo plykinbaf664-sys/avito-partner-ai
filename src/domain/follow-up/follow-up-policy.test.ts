@@ -84,22 +84,22 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
 }
 
 describe("qualification follow-up policy", () => {
-  it("does not become eligible at 23 hours 59 minutes", () => {
+  it("does not become eligible at 1 hour 59 minutes", () => {
     expect(
       evaluateFollowUpEligibility(
         conversation(),
         lead(),
-        new Date("2026-09-02T09:59:00.000Z"),
+        new Date("2026-09-01T11:59:00.000Z"),
       ),
     ).toEqual({ eligible: false, reason: "NOT_DUE" });
   });
 
-  it("becomes eligible exactly after 24 hours", () => {
+  it("becomes eligible exactly after 2 hours", () => {
     expect(
       evaluateFollowUpEligibility(
         conversation(),
         lead(),
-        new Date("2026-09-02T10:00:00.000Z"),
+        new Date("2026-09-01T12:00:00.000Z"),
       ),
     ).toEqual({ eligible: true, reason: "ELIGIBLE" });
   });
@@ -127,7 +127,7 @@ describe("qualification follow-up policy", () => {
       evaluateFollowUpEligibility(
         conversation(),
         lead({ qualificationStatus, buyingIntent }),
-        new Date("2026-09-02T10:00:00.000Z"),
+        new Date("2026-09-02T12:00:00.000Z"),
       ).eligible,
     ).toBe(false);
   });
@@ -137,7 +137,7 @@ describe("qualification follow-up policy", () => {
       evaluateFollowUpEligibility(
         conversation({ state: "QUALIFIED", qualificationCompleted: true }),
         lead({ qualificationStatus: "PRIORITY" }),
-        new Date("2026-09-02T10:00:00.000Z"),
+        new Date("2026-09-02T12:00:00.000Z"),
       ).eligible,
     ).toBe(false);
   });
@@ -147,7 +147,7 @@ describe("qualification follow-up policy", () => {
       evaluateFollowUpEligibility(
         conversation({ followUpCount: 1 }),
         lead(),
-        new Date("2026-09-02T10:00:00.000Z"),
+        new Date("2026-09-02T12:00:00.000Z"),
       ),
     ).toEqual({ eligible: false, reason: "ALREADY_FOLLOWED_UP" });
   });

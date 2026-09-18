@@ -1,6 +1,7 @@
 import { createNaturalResponseGenerator } from "@/application/conversation/generate-natural-response";
 import { createMessageExtractor } from "@/application/extraction/extract-message";
 import { ConsoleStructuredLogger } from "@/application/observability/structured-logger";
+import { createDueFollowUpsProcessor } from "@/application/workflows/process-due-follow-ups";
 import { createIncomingEventProcessor } from "@/application/workflows/process-incoming-event";
 import { createAvitoMessagePoller } from "@/application/workflows/poll-avito-messages";
 import { readAvitoChannelEnvironment, readInboundEnvironment, readTelegramEnvironment } from "@/config/environment";
@@ -21,20 +22,40 @@ export async function createRuntimeAvitoPolling(options: { chatId?: string } = {
   const llmProvider = new AnthropicLLMProvider(readAnthropicConfig(process.env));
   const persistence = await SqlitePersistence.createMigrated(inbound.DATABASE_URL);
   const logger = new ConsoleStructuredLogger();
-  const client = new AvitoApiClient({ clientId: avito.clientId, clientSecret: avito.clientSecret });
+  const client = new AvitoApiClient({
+    clientId: avito.clientId,
+    clientSecret: avito.clientSecret,
+  });
+  const naturalResponseGenerator = createNaturalResponseGenerator({ llmProvider });
+  const outboundProvider = new AvitoOutboundMessageProvider(client, logger);
   const processIncomingEvent = createIncomingEventProcessor({
     persistence,
     extractMessage: createMessageExtractor({ llmProvider }),
-    generateNaturalResponse: createNaturalResponseGenerator({ llmProvider }),
-    outboundProvider: new AvitoOutboundMessageProvider(client, logger),
+    generateNaturalResponse: naturalResponseGenerator,
+    outboundProvider,
     managerNotificationProvider: telegram.enabled
-      ? new TelegramManagerNotificationProvider({ botToken: telegram.botToken!, logger }, persistence)
+      ? new TelegramManagerNotificationProvider(
+          { botToken: telegram.botToken!, logger },
+          persistence,
+        )
       : undefined,
     logger,
   });
   return {
-    pollAvitoMessages: createAvitoMessagePoller({ client, persistence, chatId: options.chatId,
-      stateRepository: persistence.pollingStates, processIncomingEvent, logger }),
+    pollAvitoMessages: createAvitoMessagePoller({
+      client,
+      persistence,
+      chatId: options.chatId,
+      stateRepository: persistence.pollingStates,
+      processIncomingEvent,
+      logger,
+    }),
+    processDueFollowUps: createDueFollowUpsProcessor({
+      persistence,
+      outboundProvider,
+      generateNaturalResponse: naturalResponseGenerator,
+      logger,
+    }),
     close: () => persistence.close(),
   };
 }

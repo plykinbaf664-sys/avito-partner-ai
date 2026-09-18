@@ -174,12 +174,7 @@ function selectAllowedInformationNeeds(
     missingCriticalFacts.length === 1 &&
     missingCriticalFacts[0] === "PHONE_NUMBER"
   ) {
-    return [
-      "PHONE_NUMBER",
-      ...missingOptionalFacts.filter((need) =>
-        ["SCALING_POTENTIAL_UNITS", "FREE_TIME"].includes(need),
-      ),
-    ];
+    return ["PHONE_NUMBER"];
   }
   return [...missingCriticalFacts];
 }
