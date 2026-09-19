@@ -47,10 +47,8 @@ describe("conversation information needs", () => {
 
     const needs = assessInformationNeeds(lead);
 
-    expect(needs.allowedNextInformationNeeds).toEqual(
-      expect.arrayContaining(["PHONE_NUMBER", "FREE_TIME"]),
-    );
-    expect(needs.suggestedNextInformationNeed).toBe("FREE_TIME");
+    expect(needs.allowedNextInformationNeeds).toEqual(["PHONE_NUMBER"]);
+    expect(needs.suggestedNextInformationNeed).toBe("PHONE_NUMBER");
   });
 
   it("keeps discovery choices available after a user question without forcing the top checklist gap", () => {

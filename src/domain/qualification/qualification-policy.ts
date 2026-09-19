@@ -272,12 +272,10 @@ export function evaluateQualification(
     facts.scalingPotentialUnits === null
   ) {
     informationGaps.push("INVESTOR_SCALE_UNKNOWN");
-  } else if (
-    facts.segment !== "INVESTOR" &&
-    facts.startingUnits === null
-  ) {
-    informationGaps.push("STARTING_UNITS_UNKNOWN");
   }
+  // For a small-business lead the starting volume can be recommended from
+  // the approved economics. An unknown number of units is therefore a
+  // conversational topic, not a qualification blocker.
   if (facts.primaryGoal === null || facts.primaryGoal === "UNKNOWN") {
     informationGaps.push("GOAL_UNKNOWN");
   }

@@ -196,6 +196,14 @@ function selectAllowedInformationNeeds(
   const phoneMayBeRequested =
     lead.qualificationReason === "PHONE_UNKNOWN" ||
     ["HOT", "PRIORITY"].includes(lead.qualificationStatus);
+  if (
+    phoneMayBeRequested &&
+    ["PHONE_UNKNOWN", "UNKNOWN_BUSINESS_QUESTION", "USER_REQUESTED_HUMAN"].includes(
+      lead.qualificationReason ?? "",
+    )
+  ) {
+    return ["PHONE_NUMBER"];
+  }
   const conversationalCriticalFacts = missingCriticalFacts.filter(
     (need) => need !== "PHONE_NUMBER" || phoneMayBeRequested,
   );
@@ -251,6 +259,9 @@ function selectNextInformationNeed(
     missingCriticalFacts.length === 1 &&
     missingCriticalFacts[0] === "PHONE_NUMBER"
   ) {
+    if (candidates.length === 1 && candidates[0] === "PHONE_NUMBER") {
+      return "PHONE_NUMBER";
+    }
     if (missingOptionalFacts.includes("SCALING_POTENTIAL_UNITS")) {
       return "SCALING_POTENTIAL_UNITS";
     }

@@ -128,6 +128,18 @@ describe("segment-aware partner qualification", () => {
     });
   });
 
+  it("does not block a ready small-business lead when the starting volume is unknown", () => {
+    const decision = evaluateQualification(
+      readySmallBusiness({ startingUnits: null, phoneNumber: null, phoneConfirmed: false }),
+    );
+    expect(decision).toMatchObject({
+      status: "HOT",
+      reason: "PHONE_UNKNOWN",
+      shouldHandoffToManager: false,
+      blockingReasons: [],
+    });
+  });
+
   it("accepts an explicit confirmation that the disclosed full launch budget fits", () => {
     const decision = evaluateQualification(readySmallBusiness({
       availableCapital: null,
