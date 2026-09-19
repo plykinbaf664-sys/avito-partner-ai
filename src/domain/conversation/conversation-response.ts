@@ -24,14 +24,14 @@ const qualificationQuestions: Record<InformationNeed, string> = {
   ADDITIONAL_EXPENSES:
     "Готовы ли вы отдельно учитывать расходы по самому объекту — например залог, оснащение и обслуживание? Точную сумму сейчас называть не нужно.",
   BUSINESS_MODEL:
-    "Рассматриваете именно запуск бизнеса через субаренду с помощью управляющей компании?",
+    "Подходит ли вам формат собственного бизнеса на посуточной аренде с поддержкой нашей команды?",
   LAUNCH_TIMING: "Когда примерно вы рассматриваете запуск?",
   CITY: "В каком городе вы планируете запускать объекты?",
   STARTING_UNITS: "Со скольких объектов хотите начать?",
   SCALING_POTENTIAL_UNITS: "До какого количества объектов в перспективе готовы масштабироваться?",
   GOAL: "Какую главную цель хотите решить этим бизнесом?",
   MANAGEMENT_READINESS:
-    "Готовы взаимодействовать с управляющей компанией и участвовать в ключевых решениях по запуску?",
+    "Готовы участвовать в запуске: ездить на просмотры, заключать договоры аренды и принимать ключевые решения?",
   FREE_TIME: "Сможете уделять проекту примерно 3–4 часа в день?",
   EXPERIENCE: "Есть ли у вас опыт в бизнесе или посуточной аренде?",
   BARRIER: "Что сейчас больше всего останавливает или вызывает сомнения?",
@@ -41,11 +41,11 @@ const qualificationObjectives: Record<InformationNeed, string> = {
   PHONE_NUMBER: "получить номер для связи только после достаточной квалификации",
   AVAILABLE_CAPITAL: "понять общий бюджет, который человек готов вложить в запуск бизнеса",
   ADDITIONAL_EXPENSES: "понять готовность нести расходы самого объекта сверх услуги запуска",
-  BUSINESS_MODEL: "понять готовность запускать бизнес в модели субаренды с управляющей компанией",
+  BUSINESS_MODEL: "понять готовность запускать собственный бизнес по посуточной аренде с поддержкой команды",
   CITY: "узнать город предполагаемого запуска",
   LAUNCH_TIMING: "понять реальный горизонт запуска",
   FREE_TIME: "понять возможность уделять проекту ориентировочно 3–4 часа в день",
-  MANAGEMENT_READINESS: "понять готовность взаимодействовать с управляющей компанией по запуску",
+  MANAGEMENT_READINESS: "понять готовность лично участвовать в необходимых действиях по запуску",
   STARTING_UNITS: "понять желаемое число объектов на старте",
   SCALING_POTENTIAL_UNITS: "понять желаемый масштаб в перспективе",
   GOAL: "понять цель и мотивацию человека",
@@ -61,7 +61,7 @@ const rejectionMessages: Partial<Record<QualificationReasonCode, string>> = {
   NO_LAUNCH_INTENT:
     "Понял. Раз запуск вы сейчас не рассматриваете, не буду продолжать квалификацию. Если планы изменятся, можно вернуться к разговору.",
   NO_MANAGEMENT_INTERACTION:
-    "Понял. В этой модели всё же нужно взаимодействовать с управляющей компанией по ключевым вопросам, поэтому сейчас формат вам не подойдёт.",
+    "Понял. Для запуска партнёру всё же нужно участвовать в просмотрах, заключении договоров и ключевых решениях, поэтому сейчас формат вам не подойдёт.",
   DECLINED_BY_LEAD:
     "Понял, спасибо за прямой ответ. Не буду больше отвлекать. Если интерес вернётся, можно продолжить разговор.",
   REQUIRES_INCOME_GUARANTEE:
@@ -159,22 +159,19 @@ const qualificationProgressIntents = new Set<MessageIntent>([
   "QUESTION",
   "CONFIRMATION",
   "CORRECTION",
+  "COMPLAINT",
 ]);
 
 function expectsQualificationProgress(params: {
   intent: MessageIntent;
   decision: QualificationDecision;
   allowedNextInformationNeeds: InformationNeed[];
-  conversationRepairRequired: boolean;
   postHandoffContinuation: boolean;
-  unresolvedQuestions: string[];
 }): boolean {
   return (
     params.decision.nextAction === "CONTINUE_QUALIFICATION" &&
     params.allowedNextInformationNeeds.length > 0 &&
-    !params.conversationRepairRequired &&
     !params.postHandoffContinuation &&
-    params.unresolvedQuestions.length === 0 &&
     qualificationProgressIntents.has(params.intent)
   );
 }
@@ -196,18 +193,14 @@ export function buildConversationResponse(params: {
   const candidateNextInformationNeeds =
     params.informationNeeds?.allowedNextInformationNeeds ??
     (nextInformationNeed === null ? [] : [nextInformationNeed]);
-  const allowedNextInformationNeeds = conversationRepairRequired
-    ? []
-    : candidateNextInformationNeeds;
+  const allowedNextInformationNeeds = candidateNextInformationNeeds;
   const preferDiscoveryContext = isFreshDiscoveryLead(params.lead);
   const postHandoffContinuation = params.lead.handoffAt !== null;
   const qualificationProgressExpected = expectsQualificationProgress({
     intent: extraction.intent,
     decision,
     allowedNextInformationNeeds,
-    conversationRepairRequired,
     postHandoffContinuation,
-    unresolvedQuestions: knowledge.unresolvedQuestions,
   });
   const groundedAnswerRequired =
     (extraction.signals.questions.length > 0 || params.guidanceNeed != null) &&
@@ -274,21 +267,6 @@ export function buildConversationResponse(params: {
     };
   }
 
-  if (conversationRepairRequired) {
-    return {
-      text: "Похоже, предыдущий ответ прозвучал неудачно. Объясню проще.",
-      nextInformationNeed: null,
-      asksUserQuestion: false,
-      knowledgeEntryIds: knowledge.entryIds,
-      unresolvedQuestions: knowledge.unresolvedQuestions,
-      useNaturalAdaptation: true,
-      contextualReference: knowledge.contextualReferenceResolved,
-      ...adaptiveContext,
-      economicsContext: knowledge.economicsContext,
-      approvedFacts: knowledge.approvedFacts,
-    };
-  }
-
   const guidanceDraft = compactGuidanceDraft(
     params.guidanceNeed,
     knowledge.economicsContext,
@@ -298,11 +276,13 @@ export function buildConversationResponse(params: {
     knowledge.economicsContext,
     knowledge.contextualReferenceResolved,
   );
-  const parts = guidanceDraft
-    ? [guidanceDraft]
-    : contextualEconomicsDraft
-      ? [contextualEconomicsDraft]
-      : knowledge.answerFragments.slice(0, 2);
+  const parts = conversationRepairRequired
+    ? ["Вы правы, предыдущий ответ был неудачным. Продолжу с учётом вашего сообщения."]
+    : guidanceDraft
+      ? [guidanceDraft]
+      : contextualEconomicsDraft
+        ? [contextualEconomicsDraft]
+        : knowledge.answerFragments.slice(0, 2);
   const asksCallTime = params.extraction.signals.questions.some((question) =>
     /(?:\u043a\u043e\u0433\u0434\u0430|\u043a\u0430\u043a\u043e\u0435\s+\u0432\u0440\u0435\u043c\u044f|\u0432\u043e\s+\u0441\u043a\u043e\u043b\u044c\u043a\u043e|\u0443\u0434\u043e\u0431\u043d).{0,35}(?:\u043f\u043e\u0437\u0432\u043e\u043d|\u0441\u0432\u044f\u0437|\u0441\u043e\u0437\u0432\u043e\u043d|\u0437\u0432\u043e\u043d\u043e\u043a)|(?:\u043f\u043e\u0437\u0432\u043e\u043d|\u0441\u0432\u044f\u0437|\u0441\u043e\u0437\u0432\u043e\u043d|\u0437\u0432\u043e\u043d\u043e\u043a).{0,35}(?:\u043a\u043e\u0433\u0434\u0430|\u0432\u0440\u0435\u043c\u044f|\u0443\u0434\u043e\u0431\u043d)|(?:\u043a\u043e\u0433\u0434\u0430|\u0432\u0440\u0435\u043c\u044f).{0,20}$/iu.test(question),
   ) && params.lead.handoffAt !== null;

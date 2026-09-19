@@ -47,7 +47,12 @@ describe("conversation information needs", () => {
 
     const needs = assessInformationNeeds(lead);
 
-    expect(needs.allowedNextInformationNeeds).toEqual(["PHONE_NUMBER"]);
+    expect(needs.allowedNextInformationNeeds).toEqual(expect.arrayContaining([
+      "FREE_TIME",
+      "EXPERIENCE",
+      "BARRIER",
+      "PHONE_NUMBER",
+    ]));
     expect(needs.suggestedNextInformationNeed).toBe("PHONE_NUMBER");
   });
 
@@ -71,5 +76,29 @@ describe("conversation information needs", () => {
       "AVAILABLE_CAPITAL",
     ]));
     expect(needs.allowedNextInformationNeeds).not.toContain("PHONE_NUMBER");
+  });
+
+  it("does not turn an unknown starting scale or an already known timing into a question", () => {
+    const lead = {
+      ...createInitialLead(
+        "lead-advised-scale",
+        "TEST",
+        "external-advised-scale",
+        new Date("2026-09-19T10:00:00.000Z"),
+      ),
+      segment: "SMALL_BUSINESS" as const,
+      city: "Москва",
+      availableCapital: 300_000,
+      availableCapitalConfirmed: true,
+      launchTiming: "WITHIN_MONTH" as const,
+      primaryGoal: "MAIN_BUSINESS" as const,
+      buyingIntent: "CONSIDERING" as const,
+    };
+
+    const needs = assessInformationNeeds(lead);
+
+    expect(needs.missingCriticalFacts).not.toContain("STARTING_UNITS");
+    expect(needs.allowedNextInformationNeeds).not.toContain("STARTING_UNITS");
+    expect(needs.allowedNextInformationNeeds).not.toContain("LAUNCH_TIMING");
   });
 });

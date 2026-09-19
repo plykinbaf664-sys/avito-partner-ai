@@ -510,24 +510,33 @@ function rememberDeferredInformationNeed(params: {
   memory: StoredConversationMemory;
   pendingInformationNeed: InformationNeed | null;
   previousQuestionResponse: ExtractedMessage["signals"]["previousQuestionResponse"];
+  currentIntent: ExtractedMessage["intent"];
+  guidanceNeed?: InformationNeed | null;
   inboundSequence: number;
 }): StoredConversationMemory {
-  if (
-    params.pendingInformationNeed === null ||
-    (params.previousQuestionResponse ?? "NOT_A_RESPONSE") === "NOT_A_RESPONSE"
-  ) {
+  const respondedToPendingTopic =
+    params.pendingInformationNeed !== null &&
+    ((params.previousQuestionResponse ?? "NOT_A_RESPONSE") !== "NOT_A_RESPONSE" ||
+      params.currentIntent === "COMPLAINT");
+  const needsToDefer = [
+    ...(respondedToPendingTopic && params.pendingInformationNeed
+      ? [params.pendingInformationNeed]
+      : []),
+    ...(params.guidanceNeed ? [params.guidanceNeed] : []),
+  ];
+  if (needsToDefer.length === 0) {
     return params.memory;
   }
   return {
     ...params.memory,
     deferredInformationNeeds: [
       ...params.memory.deferredInformationNeeds.filter(
-        (item) => item.need !== params.pendingInformationNeed,
+        (item) => !needsToDefer.includes(item.need),
       ),
-      {
-        need: params.pendingInformationNeed,
+      ...needsToDefer.map((need) => ({
+        need,
         deferredAtInboundSequence: params.inboundSequence,
-      },
+      })),
     ],
   };
 }
@@ -808,31 +817,44 @@ export function createIncomingEventProcessor({
       const phoneReceived =
         extracted.extraction.facts.phoneNumber !== null &&
         extracted.extraction.facts.phoneConfirmed;
-      const phoneFulfillsRecentStep = phoneReceived && latestOutbound !== undefined;
+      const phoneFulfillsManagerStep = phoneReceived &&
+        latestOutbound?.actor === "MANAGER" &&
+        /(?:телефон|номер|позвон|связ)/iu.test(latestOutbound.content);
+      const phoneFulfillsRecentStep = phoneReceived && (
+        currentConversation.pendingInformationNeed === "PHONE_NUMBER" ||
+        phoneFulfillsManagerStep
+      );
       const inboundSequence = prepared.inboundSequence ??
         currentConversation.lastAppliedInboundSequence + 1;
       const storedConversationMemory = parseStoredConversationMemory(
         currentConversation.summary,
       );
+      const semanticGuidanceNeed =
+        extracted.extraction.signals.needsStartupScaleRecommendation === true
+          ? "STARTING_UNITS" as const
+          : null;
+      const guidanceNeed =
+        semanticGuidanceNeed ??
+        (currentConversation.pendingInformationNeed !== null &&
+        ["UNSURE", "DECLINED_TO_ANSWER"].includes(
+          extracted.extraction.signals.previousQuestionResponse ??
+            "NOT_A_RESPONSE",
+        )
+          ? currentConversation.pendingInformationNeed
+          : null);
       const conversationMemory = rememberDeferredInformationNeed({
         memory: storedConversationMemory,
         pendingInformationNeed: currentConversation.pendingInformationNeed,
         previousQuestionResponse:
           extracted.extraction.signals.previousQuestionResponse,
+        currentIntent: extracted.extraction.intent,
+        guidanceNeed,
         inboundSequence,
       });
       const deferredInformationNeeds = activeDeferredInformationNeeds(
         conversationMemory,
         inboundSequence,
       );
-      const guidanceNeed =
-        currentConversation.pendingInformationNeed !== null &&
-        ["UNSURE", "DECLINED_TO_ANSWER"].includes(
-          extracted.extraction.signals.previousQuestionResponse ??
-            "NOT_A_RESPONSE",
-        )
-          ? currentConversation.pendingInformationNeed
-          : null;
       const previouslyExplainedKnowledge =
         conversationMemory.knowledgeEntryIds;
       const knowledge = answerFromKnowledgeBase(extracted.extraction, {
@@ -1042,7 +1064,7 @@ export function createIncomingEventProcessor({
             extracted.extraction.signals.objections.length > 0);
         const noAiReply =
           (responseLlm?.replyAction === "NO_REPLY" && !postHandoffSubstantiveInbound) ||
-          (phoneFulfillsRecentStep && !transactionDecision.shouldHandoffToManager);
+          (phoneFulfillsManagerStep && !transactionDecision.shouldHandoffToManager);
         const shouldSendOutbound = !responseSuppressed && !noAiReply;
         const responseGenerationSource = responseSuppressed
           ? "SUPPRESSED"

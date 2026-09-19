@@ -120,7 +120,6 @@ function criticalInformationNeedsFor(lead: Lead): InformationNeed[] {
   if (lead.segment === "SMALL_BUSINESS") {
     return [
       "AVAILABLE_CAPITAL",
-      "STARTING_UNITS",
       "LAUNCH_TIMING",
       "CITY",
       "GOAL",
@@ -131,7 +130,6 @@ function criticalInformationNeedsFor(lead: Lead): InformationNeed[] {
   }
   const needs: InformationNeed[] = [
     "AVAILABLE_CAPITAL",
-    "STARTING_UNITS",
     "GOAL",
     "LAUNCH_TIMING",
   ];
@@ -174,7 +172,6 @@ export function assessInformationNeeds(
     lead,
     allowedNextInformationNeeds,
     missingCriticalFacts,
-    missingOptionalFacts,
   );
   return {
     knownFacts,
@@ -202,7 +199,7 @@ function selectAllowedInformationNeeds(
       lead.qualificationReason ?? "",
     )
   ) {
-    return ["PHONE_NUMBER"];
+    return [...new Set([...missingOptionalFacts, "PHONE_NUMBER" as const])];
   }
   const conversationalCriticalFacts = missingCriticalFacts.filter(
     (need) => need !== "PHONE_NUMBER" || phoneMayBeRequested,
@@ -248,7 +245,6 @@ function selectNextInformationNeed(
   lead: Lead,
   candidates: InformationNeed[],
   missingCriticalFacts: InformationNeed[],
-  missingOptionalFacts: InformationNeed[],
 ): InformationNeed | null {
   if (candidates.length === 0) return null;
 
@@ -259,13 +255,7 @@ function selectNextInformationNeed(
     missingCriticalFacts.length === 1 &&
     missingCriticalFacts[0] === "PHONE_NUMBER"
   ) {
-    if (candidates.length === 1 && candidates[0] === "PHONE_NUMBER") {
-      return "PHONE_NUMBER";
-    }
-    if (missingOptionalFacts.includes("SCALING_POTENTIAL_UNITS")) {
-      return "SCALING_POTENTIAL_UNITS";
-    }
-    if (missingOptionalFacts.includes("FREE_TIME")) return "FREE_TIME";
+    if (candidates.includes("PHONE_NUMBER")) return "PHONE_NUMBER";
   }
 
   const scores: Record<InformationNeed, number> = {

@@ -227,7 +227,7 @@ describe("due qualification follow-ups workflow", () => {
 
     expect(resumed).toMatchObject({
       conversationId: first.conversationId,
-      suggestedNextInformationNeed: "STARTING_UNITS",
+      suggestedNextInformationNeed: "CITY",
     });
     expect(messages.map((message) => message.direction)).toEqual([
       "INBOUND",

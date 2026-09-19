@@ -185,7 +185,7 @@ describe("incoming partner event workflow", () => {
     expect(result.missingImportantFacts).not.toEqual(
       expect.arrayContaining(["CITY", "AVAILABLE_CAPITAL", "LAUNCH_TIMING"]),
     );
-    expect(result.suggestedNextInformationNeed).toBe("STARTING_UNITS");
+    expect(result.suggestedNextInformationNeed).toBe("GOAL");
     expect(
       await persistence.incomingEvents.findByIdentity("local-test", "event-1"),
     ).toMatchObject({
@@ -716,6 +716,7 @@ describe("incoming partner event workflow", () => {
     const completed = await processEvent(input("event-human-phone", "+79991234567"));
     expect(completed).toMatchObject({ shouldHandoffToManager: false,
       qualificationReason: "USER_REQUESTED_HUMAN", suggestedNextInformationNeed: "AVAILABLE_CAPITAL" });
+    expect(completed.outboundMessage).toMatch(/бюджет|капитал/iu);
     expect((await persistence.leads.findById(completed.leadId!))?.phoneNumber).toBe("+79991234567");
     expect(await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${result.leadId}`)).toBeNull();
   });

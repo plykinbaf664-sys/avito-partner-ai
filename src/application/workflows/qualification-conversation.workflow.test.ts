@@ -114,6 +114,34 @@ describe("multi-turn qualification conversation", () => {
       .toBe("CITY");
   });
 
+  it("does not reject a lead who is unsure how many objects to start with", async () => {
+    const { processEvent } = harness([
+      reply({
+        intent: "QUALIFICATION_INFORMATION",
+        facts: {
+          city: "Москва",
+          availableCapital: 300_000,
+          availableCapitalConfirmed: true,
+          launchTiming: "WITHIN_MONTH",
+          managementReadiness: "READY",
+          primaryGoal: "MAIN_BUSINESS",
+          buyingIntent: "CONSIDERING",
+        },
+      }),
+      reply({
+        intent: "DECLINE",
+        signals: { previousQuestionResponse: "UNSURE" },
+      }),
+    ]);
+
+    await processEvent(input(0, "Привет, есть 300к. Москва"));
+    const result = await processEvent(input(1, "пока что нет"));
+
+    expect(result.qualificationStatus).not.toBe("NO_FIT");
+    expect(result.qualificationReason).not.toBe("DECLINED_BY_LEAD");
+    expect(result.outboundMessage).toBeTruthy();
+  });
+
   it("lets Claude answer a paraphrased approved business question without a literal KB match", async () => {
     const extractMessage = createMessageExtractor({
       llmProvider: new FakeLLMProvider([reply({
@@ -149,7 +177,7 @@ describe("multi-turn qualification conversation", () => {
     ["Кто занимается гостями?", ["администратор", "гостями"]],
     ["Сколько нужно денег?", ["50 000 ₽", "аренду", "залог", "30 000 ₽", "150 000 ₽", "180 000 ₽"]],
     ["Сколько заработаю?", ["около 20 000 ₽", "Гарантированного дохода нет"]],
-    ["Что вообще предлагает компания?", ["субаренде", "команда помогает"]],
+    ["Что вообще предлагает компания?", ["субаренде", "команда компании помогает"]],
     ["Как устроена схема работы?", ["подобрать", "бронирования"]],
     ["Что делает управляющая компания?", ["поиском и запуском", "Расходы"]],
     ["Что делает партнёр?", ["Расходы по бизнесу несёт партнёр"]],
@@ -1172,7 +1200,7 @@ describe("multi-turn qualification conversation", () => {
     expect(turns.map((turn) => turn.suggestedNextInformationNeed)).toEqual([
       "CITY",
       "ADDITIONAL_EXPENSES",
-      "STARTING_UNITS",
+      "LAUNCH_TIMING",
       "LAUNCH_TIMING",
       "MANAGEMENT_READINESS",
       null,
@@ -1319,8 +1347,8 @@ describe("multi-turn qualification conversation", () => {
         usedKnowledgeEntryIds: ["small-business-entry"],
       }),
       JSON.stringify({
-        text: "Понял, 300 000 ₽ на запуск. Со скольких объектов хотите начать?",
-        nextInformationNeed: "STARTING_UNITS",
+        text: "Понял, 300 000 ₽ на запуск. Был ли у Вас опыт в недвижимости или посуточной аренде?",
+        nextInformationNeed: "EXPERIENCE",
         conversationAction: "ACKNOWLEDGE",
       }),
       JSON.stringify({
@@ -1329,18 +1357,19 @@ describe("multi-turn qualification conversation", () => {
         conversationAction: "ACKNOWLEDGE",
       }),
       JSON.stringify({
-        text: "Понял, ориентируетесь на ближайший месяц. Сможете уделять проекту примерно 3–4 часа в день?",
-        nextInformationNeed: "FREE_TIME",
+        text: "Понял, ориентируетесь на ближайший месяц. Оставьте номер телефона, чтобы менеджер мог с Вами связаться?",
+        nextInformationNeed: "PHONE_NUMBER",
         conversationAction: "DISCOVER",
-        usedKnowledgeEntryIds: ["partner-time"],
       }),
       JSON.stringify({
-        text: "Да, предыдущий вопрос прозвучал неудачно. Я хотел только понять, сколько времени вам будет комфортно уделять запуску.",
-        nextInformationNeed: null,
+        text: "Вы правы, не буду повторять уже обсуждённое. Сможете уделять проекту примерно 3–4 часа в день?",
+        nextInformationNeed: "FREE_TIME",
         conversationAction: "REPAIR",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Признал повтор и перешёл к мягкому фактору времени.",
       }),
       JSON.stringify({
-        text: "Отлично, 3–4 часа в день достаточно для участия в запуске. Оставьте номер, чтобы менеджер мог связаться с вами?",
+        text: "Отлично, 3–4 часа в день достаточно для участия в запуске. Оставьте номер, чтобы менеджер мог связаться с Вами?",
         nextInformationNeed: "PHONE_NUMBER",
         conversationAction: "ACKNOWLEDGE",
         usedKnowledgeEntryIds: ["partner-time"],
@@ -1374,7 +1403,7 @@ describe("multi-turn qualification conversation", () => {
       await processEvent(input(104, "300 тысяч, готов")),
       await processEvent(input(105, "Начну с одной, с вами буду запускаться")),
       await processEvent(input(106, "В течение месяца")),
-      await processEvent(input(107, "Ты че несешь?")),
+      await processEvent(input(107, "Вы уже спрашивали это в начале")),
     ];
     const afterComplaint = await persistence.conversations.findById(
       turns[6]!.conversationId!,
@@ -1388,9 +1417,10 @@ describe("multi-turn qualification conversation", () => {
     expect(turns[0]?.suggestedNextInformationNeed).not.toBe("AVAILABLE_CAPITAL");
     expect(turns[3]?.outboundMessage).not.toContain("180 000 ₽");
     expect(turns[4]?.suggestedNextInformationNeed).not.toBe("BUSINESS_MODEL");
-    expect(turns[6]?.conversationState).toBe("QUALIFYING");
-    expect(afterComplaint?.pendingInformationNeed).toBeNull();
-    expect(turns[6]?.outboundMessage).not.toContain("?");
+    expect(turns[6]?.conversationState).toBe("WAITING_TIME");
+    expect(afterComplaint?.pendingInformationNeed).toBe("FREE_TIME");
+    expect(turns[6]?.outboundMessage).toContain("3–4 часа");
+    expect(turns[6]?.outboundMessage).not.toMatch(/номер телефона/iu);
     expect(turns[8]).toMatchObject({
       shouldHandoffToManager: true,
     });
@@ -1537,7 +1567,7 @@ describe("multi-turn qualification conversation", () => {
     expect(responseProvider.callCount).toBe(5);
   });
 
-  it("advises an unsure lead and temporarily moves away from the unresolved topic", async () => {
+  it("gives a final starting-scale recommendation and moves to another topic", async () => {
     const responseErrors = vi.fn();
     const extractionProvider = new FakeLLMProvider([
       reply({
@@ -1549,8 +1579,12 @@ describe("multi-turn qualification conversation", () => {
         },
       }),
       reply({
-        intent: "QUALIFICATION_INFORMATION",
-        signals: { previousQuestionResponse: "UNSURE" },
+        intent: "QUESTION",
+        signals: {
+          questions: ["Это вы мне скажите, со скольких можно при таком раскладе?"],
+          previousQuestionResponse: "CHANGED_TOPIC",
+          needsStartupScaleRecommendation: true,
+        },
       }),
       reply({
         facts: {
@@ -1562,11 +1596,11 @@ describe("multi-turn qualification conversation", () => {
     ]);
     const responseProvider = new FakeLLMProvider([
       JSON.stringify({
-        text: "Сколько объектов вы хотели бы запустить сначала?",
-        nextInformationNeed: "STARTING_UNITS",
+        text: "Привет! Когда примерно хотели бы запустить первый объект?",
+        nextInformationNeed: "LAUNCH_TIMING",
         conversationAction: "DISCOVER",
         qualificationMoveDecision: "ADVANCE",
-        qualificationMoveRationale: "Нужно понять стартовый масштаб.",
+        qualificationMoveRationale: "Полезно понять срок запуска.",
       }),
       JSON.stringify({
         text: "При бюджете 400 000 ₽ по московскому ориентиру можно рассматривать 2 объекта: расчётный запуск составит около 310 000 ₽, а точная смета зависит от квартиры. Какую цель хотите решить этим бизнесом?",
@@ -1576,11 +1610,11 @@ describe("multi-turn qualification conversation", () => {
         qualificationMoveRationale: "Сначала помог с масштабом, затем перешёл к цели.",
       }),
       JSON.stringify({
-        text: "Понял, рассматриваете это как основной бизнес. Когда хотели бы начать запуск?",
-        nextInformationNeed: "LAUNCH_TIMING",
+        text: "Понял, рассматриваете это как основной бизнес. Сможете уделять проекту примерно 3–4 часа в день?",
+        nextInformationNeed: "FREE_TIME",
         conversationAction: "ACKNOWLEDGE",
         qualificationMoveDecision: "ADVANCE",
-        qualificationMoveRationale: "Срок запуска — следующий полезный контекст.",
+        qualificationMoveRationale: "Время — следующий полезный контекст, пока тема срока отложена.",
       }),
     ]);
     const processEvent = createIncomingEventProcessor({
@@ -1593,18 +1627,18 @@ describe("multi-turn qualification conversation", () => {
     });
 
     const first = await processEvent(input(301, "Привет, есть 400 000, я из Москвы"));
-    const second = await processEvent(input(302, "Пока не знаю"));
+    const second = await processEvent(input(302, "Это вы мне скажите, со скольких можно при таком раскладе"));
     const third = await processEvent(input(303, "Как основной бизнес"));
 
-    expect(first.suggestedNextInformationNeed).toBe("STARTING_UNITS");
+    expect(first.suggestedNextInformationNeed).toBe("LAUNCH_TIMING");
     expect(responseErrors).not.toHaveBeenCalledWith(
       "response_generation.fallback",
       expect.anything(),
     );
     expect(second.outboundMessage).toMatch(/(?:двух|2) объекта/iu);
     expect(second.outboundMessage).toContain("цель");
-    expect(second.outboundMessage).not.toBe("Со скольких объектов хотите начать?");
-    expect(third.outboundMessage).toContain("Когда");
+    expect(second.outboundMessage).not.toMatch(/со скольких объектов хотите начать/iu);
+    expect(third.outboundMessage).toContain("3–4 часа");
     expect(third.outboundMessage).not.toMatch(/скольк.*объект/iu);
 
     const secondContext = JSON.parse(
@@ -1615,10 +1649,10 @@ describe("multi-turn qualification conversation", () => {
       economicsContext: unknown;
       allowedQualificationMoves: Array<{ need: string }>;
     };
-    expect(secondContext).toMatchObject({
-      guidanceNeed: "STARTING_UNITS",
-      deferredInformationNeeds: ["STARTING_UNITS"],
-    });
+    expect(secondContext.guidanceNeed).toBe("STARTING_UNITS");
+    expect(secondContext.deferredInformationNeeds).toEqual(
+      expect.arrayContaining(["LAUNCH_TIMING", "STARTING_UNITS"]),
+    );
     expect(secondContext.economicsContext).not.toBeNull();
     expect(secondContext.allowedQualificationMoves.map((move) => move.need))
       .not.toContain("STARTING_UNITS");

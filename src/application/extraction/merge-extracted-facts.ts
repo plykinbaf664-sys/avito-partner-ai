@@ -103,7 +103,15 @@ export function mergeExtractedFacts(
   if (extraction.signals.possibleSecondaryFear !== null) {
     patch.secondaryFear = extraction.signals.possibleSecondaryFear;
   }
-  if (extraction.intent === "DECLINE") {
+  // A short uncertainty or "not yet" answer to the immediately preceding
+  // discovery question is not a rejection of the business.  Keep the
+  // existing intent until the user explicitly declines the opportunity.
+  if (
+    extraction.intent === "DECLINE" &&
+    !["UNSURE", "DECLINED_TO_ANSWER"].includes(
+      extraction.signals.previousQuestionResponse ?? "NOT_A_RESPONSE",
+    )
+  ) {
     patch.buyingIntent = "DECLINED";
   } else if (extraction.signals.wantsHuman) {
     patch.buyingIntent = "WANTS_HUMAN";

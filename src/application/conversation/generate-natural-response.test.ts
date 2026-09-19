@@ -324,37 +324,74 @@ describe("natural response generation", () => {
       .toContain("пропустил вопрос");
   });
 
-  it("requires conversation repair before qualification after a complaint", async () => {
+  it("repairs a repeated question and continues with a different qualification topic", async () => {
     const plan: ConversationResponsePlan = {
-      text: "Когда планируете запуск?",
-      nextInformationNeed: "LAUNCH_TIMING",
+      text: "Вы правы: срок уже обсуждали. Продолжу с учётом ответа.",
+      nextInformationNeed: null,
       asksUserQuestion: true,
       knowledgeEntryIds: [],
       unresolvedQuestions: [],
       useNaturalAdaptation: true,
       currentUserIntent: "COMPLAINT",
       conversationRepairRequired: true,
-      allowedNextInformationNeeds: ["LAUNCH_TIMING"],
+      qualificationProgressExpected: true,
+      deferredInformationNeeds: ["LAUNCH_TIMING"],
+      allowedNextInformationNeeds: ["GOAL"],
+      allowedQualificationMoves: [{
+        need: "GOAL",
+        objective: "понять цель человека",
+      }],
     };
     const repaired = createNaturalResponseGenerator({
       llmProvider: new FakeLLMProvider([JSON.stringify({
-        text: "Да, объяснил неудачно. Если коротко: мы обсуждаем запуск вашего бизнеса с поддержкой команды.",
-        nextInformationNeed: null,
+        text: "Вы правы, срок вы уже назвали. Какую цель хотите решить этим бизнесом?",
+        nextInformationNeed: "GOAL",
         conversationAction: "REPAIR",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Признал повтор и перешёл к другой полезной теме.",
       })]),
     });
     await expect(repaired({ lead: {} as Lead, plan, recentMessages: [] }))
-      .resolves.toMatchObject({ conversationAction: "REPAIR", nextInformationNeed: null });
+      .resolves.toMatchObject({ conversationAction: "REPAIR", nextInformationNeed: "GOAL" });
 
     const questionnaire = createNaturalResponseGenerator({
       llmProvider: new FakeLLMProvider([JSON.stringify({
-        text: "Когда планируете запуск?",
+        text: "Какую цель хотите решить этим бизнесом?",
         nextInformationNeed: "LAUNCH_TIMING",
-        conversationAction: "DISCOVER",
+        conversationAction: "REPAIR",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Попытался повторить прежний вопрос.",
       })]),
     });
     await expect(questionnaire({ lead: {} as Lead, plan, recentMessages: [] }))
       .rejects.toThrow("RESPONSE_POLICY_VIOLATION");
+  });
+
+  it("rejects informal address and accepts respectful Вы wording", async () => {
+    const plan: ConversationResponsePlan = {
+      text: "Когда планируете запуск?",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      allowedNextInformationNeeds: ["LAUNCH_TIMING"],
+    };
+    const generate = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([
+        JSON.stringify({
+          text: "Когда ты хотел бы начать?",
+          nextInformationNeed: "LAUNCH_TIMING",
+        }),
+        JSON.stringify({
+          text: "Когда Вы хотели бы начать?",
+          nextInformationNeed: "LAUNCH_TIMING",
+        }),
+      ]),
+    });
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({ text: "Когда Вы хотели бы начать?" });
   });
 
   it("passes covered topics and semantic move objectives without question templates", async () => {

@@ -150,6 +150,8 @@ export interface ExtractedSignals {
   /** Standalone meaning of an elliptical/contextual user question. */
   resolvedQuestion?: string | null;
   contextualReference?: boolean;
+  /** User asks the consultant to recommend/derive a sensible starting scale. */
+  needsStartupScaleRecommendation?: boolean;
 }
 
 export interface ExtractedMessage {

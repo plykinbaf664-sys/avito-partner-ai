@@ -108,6 +108,7 @@ export const extractedMessageSchema = z
         // question and avoids another union in Anthropic's schema.
         resolvedQuestion: z.string().trim().max(MAX_EXTRACTED_TEXT_LENGTH).default(""),
         contextualReference: z.boolean().default(false),
+        needsStartupScaleRecommendation: z.boolean().default(false),
       })
       .strict(),
     // The extractor can always report its confidence, so null adds no meaning.
@@ -191,6 +192,7 @@ CAPITAL CONFIRMATION: when the user presents an amount as money they have, their
 - Определи функцию CURRENT_MESSAGE в текущем разговоре. CONFIRMATION — короткое согласие или подтверждение предыдущего вопроса; CORRECTION — исправление ранее сообщённого факта; COMPLAINT — раздражение, непонимание или жалоба на качество предыдущего ответа. Не смешивай COMPLAINT с обычным деловым возражением: это сигнал сначала восстановить взаимопонимание.
 - previousQuestionResponse описывает смысл CURRENT_MESSAGE относительно последнего вопроса AI/HUMAN: ANSWERED — содержательно ответил; UNSURE — прямо или по смыслу не знает ответа; DECLINED_TO_ANSWER — не хочет отвечать сейчас; CHANGED_TOPIC — переключил разговор; NOT_A_RESPONSE — предыдущего вопроса нет или сообщение к нему не относится. Не считай UNSURE заполненным qualification fact и не пытайся угадывать значение.
 - Если текущий вопрос использует эллипсис или ссылку на предыдущий контекст («а сколько примерно?», «а это входит?», «там сколько?»), установи contextualReference=true и запиши в resolvedQuestion его самостоятельный смысл с учётом ближайшего однозначного контекста. Не добавляй новых фактов и не усиливай требуемую точность: слова «конкретный», «точный», адрес или выбранный объект допустимы только когда их действительно указал пользователь. Для самостоятельного вопроса resolvedQuestion=null.
+- needsStartupScaleRecommendation=true, когда человек просит консультанта определить или посоветовать разумное количество объектов для старта, в том числе потому что сам не знает его. Это семантический сигнал запроса рекомендации, а не startingUnits: не записывай рекомендованное системой число как решение пользователя.
 - Короткий ответ интерпретируй в контексте непосредственно заданного вопроса. Если PENDING_INFORMATION_NEED=AVAILABLE_CAPITAL и ассистент спросил общий доступный капитал, названная пользователем сумма без прямого ограничения «только на услугу/первый этап» является availableCapital. Если сумма названа уверенно, без «возможно», «постараюсь найти», «наверное» и аналогичной оговорки, установи availableCapitalConfirmed=true. Формулировка «для начала» означает сумму, которую человек готов выделить на первоначальный запуск и сама по себе не является неопределённостью или оплатой только услуги команды.
 - capitalScope=ENTRY_ONLY и entryBudget используй только когда пользователь явно связал сумму с услугой команды, оплатой компании или первым этапом. Не превращай достаточно определённый ответ о капитале в дополнительный финансовый вопрос из-за одной лишь краткости формулировки.
 - «Понял», «ясно», «хорошо» сами по себе не подтверждают бюджет, финансовую готовность, модель бизнеса или иной qualification fact.
@@ -223,8 +225,8 @@ CAPITAL CONFIRMATION: when the user presents an amount as money they have, their
 - launchTiming=READY_NOW для «готов начинать сейчас/в ближайшее время», WITHIN_MONTH для явного горизонта до месяца, WITHIN_THREE_MONTHS для пары/нескольких месяцев, LATER для отложенного старта. Если срок неясен, используй UNKNOWN.
 - hasFreeTime=true, когда человек подтверждает ориентир около 3–4 часов в день или сопоставимую регулярную вовлечённость. hasFreeTime=false означает, что времени мало; это риск, но не отказ. availableTimeDetails сохраняет фактическую формулировку без придуманного числа часов.
 - buyingIntent отражает текущую стадию: EXPLORING — только изучает; CONSIDERING — рассматривает; CONDITIONS_ACCEPTED — подтверждает, что условия подходят; READY_TO_START — явно готов запускаться; WANTS_NEXT_STEP — просит перейти к следующему действию; WANTS_HUMAN/DECLINED — прямой запрос человека/отказ. UNKNOWN — если сигнала нет. Используй историю только для разрешения смысла текущего сигнала.
-- managementReadiness=READY, если человек прямо говорит, что готов работать, взаимодействовать или сотрудничать с управляющей компанией. Не требуй от него отдельного обещания участвовать в ежедневной операционке. managementReadiness=NOT_READY только при прямом отказе участвовать, взаимодействовать и коммуницировать в любом формате. «Мало времени» само по себе не означает NOT_READY.
-- Явную положительную готовность работать с управляющей компанией не записывай в objections.
+- managementReadiness=READY, если человек прямо подтверждает готовность участвовать в необходимых действиях по запуску: просмотрах, заключении договоров и ключевых решениях, либо работать с командой компании по запуску. Не требуй обещания вести ежедневную операционку: объявления, бронирования, гостей и клининг ведёт команда компании. managementReadiness=NOT_READY только при прямом отказе участвовать в запуске и взаимодействовать с командой. «Мало времени» само по себе не означает NOT_READY.
+- Явную положительную готовность участвовать в запуске или работать с командой компании не записывай в objections.
 - requiresGuaranteedIncome=true только когда гарантия дохода является явно обязательным условием. Страх, сомнение или вопрос о доходности не являются таким условием.
 - rejectsBusinessModel=true только при прямом принципиальном отказе от самой модели продукта, а не при вопросе или возражении.
 - possiblePrimaryFear и possibleSecondaryFear — только деловые сигналы для sales-сценария, не психологический диагноз.
@@ -265,6 +267,7 @@ function withExtractionDefaults(value: unknown): unknown {
           previousQuestionResponse: "NOT_A_RESPONSE",
           resolvedQuestion: "",
           contextualReference: false,
+          needsStartupScaleRecommendation: false,
           ...signals,
         }
       : root.signals,
@@ -276,7 +279,9 @@ function explicitlyAcceptsManagementInteraction(text: string): boolean {
   if (/\bне\s+готов/u.test(normalized)) return false;
   return (
     normalized.includes("готов") &&
-    normalized.includes("управляющ") &&
+    ["управляющ", "команд", "компани", "запуск"].some((term) =>
+      normalized.includes(term)
+    ) &&
     ["работ", "взаимодейств", "сотруднич"].some((term) =>
       normalized.includes(term),
     )
