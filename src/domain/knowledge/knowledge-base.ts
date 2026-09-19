@@ -9,6 +9,7 @@ import {
   type RentRangeReference,
 } from "../economics/economics-calculator";
 import { SERVICEABILITY_POLICY } from "../lead/serviceability";
+import type { InformationNeed } from "../conversation/information-needs";
 
 export const knowledgeCategories = [
   "BUSINESS_MODEL",
@@ -70,13 +71,14 @@ const needsIndividualAnswer = (text: string) =>
   asksAboutInvestorTerms(text) ||
   /(?:договор(?:а|у|ом|е|ы|ов)?(?:$|[^а-я])|юридич|налог|страхов|рассроч|скидк|хочу оплат|готов оплат|как оплатить|куда оплатить|api|интеграц|экспорт|франшиз|без залога|изменить условия)/u.test(text) ||
   (
-    /(?:конкретн|выбранн).{0,40}(?:квартир|объект)/u.test(text) ||
+    /какие.{0,30}конкретн.{0,30}(?:квартир|объект)/u.test(text) ||
+    /(?:конкретн|выбранн).{0,40}(?:квартир|объект).{0,40}(?:адрес|улиц|собственник)/u.test(text) ||
     (/(?:квартир|объект).{0,40}(?:по адресу|за \d)/u.test(text) &&
       containsAny(text, [...economicsTerms, "расчет", "смет", "аренд", "залог", "комплектац", "цен", "стоимост", "услови"])) ||
     /(?:этой|этому|моей|моему).{0,40}(?:квартир|объект)/u.test(text) &&
       containsAny(text, [...economicsTerms, "расчет", "смет", "аренд", "залог", "комплектац", "цен", "стоимост", "услови"])
   ) ||
-  /(?:точн|индивидуальн).{0,25}(?:расчет|услови|доход|прибыл|смет)|(?:рассчита|посчита).{0,35}(?:аренд|залог|комплектац|смет)/u.test(text);
+    /(?:рассчита|посчита).{0,35}(?:конкретн|выбранн|адрес|улиц|собственник)/u.test(text);
 
 function formatUnitCount(units: number): string {
   const modulo100 = units % 100;
@@ -269,6 +271,7 @@ export interface KnowledgeConversationContext {
   previousEntryIds?: readonly string[];
   recentMessages?: readonly { direction: "INBOUND" | "OUTBOUND"; content: string }[];
   rentReference?: RentRangeReference;
+  guidanceNeed?: InformationNeed | null;
   leadFacts?: {
     city?: string | null;
     availableCapital?: number | null;
@@ -308,15 +311,20 @@ export function answerFromKnowledgeBase(
   const userStatements = [
     ...extraction.signals.questions,
     ...extraction.signals.objections,
+    ...(extraction.signals.resolvedQuestion
+      ? [extraction.signals.resolvedQuestion]
+      : []),
   ].flatMap(questionParts);
   const directCandidates = PARTNER_KNOWLEDGE_BASE.filter((entry) =>
     userStatements.some((statement) =>
       entry.matches(normalizeQuestion(statement)),
     ),
   );
-  const contextualReference = userStatements.some((statement) =>
-    refersToPreviousContext(normalizeQuestion(statement)),
-  );
+  const contextualReference =
+    extraction.signals.contextualReference === true ||
+    userStatements.some((statement) =>
+      refersToPreviousContext(normalizeQuestion(statement)),
+    );
   const allPreviousCandidates = PARTNER_KNOWLEDGE_BASE.filter((entry) =>
     context.previousEntryIds?.includes(entry.id),
   );
@@ -324,7 +332,7 @@ export function answerFromKnowledgeBase(
     (message) => message.direction === "OUTBOUND",
   );
   const recentGroundedCandidates = latestOutbound
-    ? allPreviousCandidates.filter((entry) =>
+    ? PARTNER_KNOWLEDGE_BASE.filter((entry) =>
       entry.matches(normalizeQuestion(latestOutbound.content)),
     )
     : [];
@@ -361,7 +369,8 @@ export function answerFromKnowledgeBase(
       );
     },
   );
-  const asksAboutAffordableObjects = userStatements.some((statement) => {
+  const asksAboutAffordableObjects = context.guidanceNeed === "STARTING_UNITS" ||
+    userStatements.some((statement) => {
     const normalized = statement.trim().toLocaleLowerCase("ru-RU");
     const mentionsObjects = /объект|квартир|помещен/iu.test(normalized);
     const asksCount = /сколько|какое количество|потяну|влезет|начать/iu.test(normalized);
@@ -371,7 +380,7 @@ export function answerFromKnowledgeBase(
       extraction.facts.availableCapital !== null ||
       context.leadFacts?.availableCapital != null
     );
-  });
+    });
   const availableCapital = extraction.facts.availableCapital ??
     extraction.facts.entryBudget ??
     context.leadFacts?.availableCapital ??
@@ -393,6 +402,7 @@ export function answerFromKnowledgeBase(
   const shouldProvideEconomicsContext =
     asksAboutEconomics ||
     asksAboutAffordableObjects ||
+    context.guidanceNeed === "ADDITIONAL_EXPENSES" ||
     extraction.facts.calculationUnits !== null ||
     matched.some((entry) => entry.id === "small-business-entry");
   const economicsContext = shouldProvideEconomicsContext

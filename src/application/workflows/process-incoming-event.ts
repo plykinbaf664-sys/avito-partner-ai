@@ -24,7 +24,9 @@ import {
 import { buildConversationResponse } from "../../domain/conversation/conversation-response";
 import {
   assessInformationNeeds,
+  informationNeeds,
   stateForInformationNeed,
+  type InformationNeed,
   type InformationNeedsAssessment,
 } from "../../domain/conversation/information-needs";
 import type { Conversation } from "../../domain/conversation/conversation";
@@ -445,16 +447,101 @@ function isRetryableProcessingError(error: unknown): boolean {
   return error instanceof RetryableInfrastructureError;
 }
 
-function parseStoredKnowledgeIds(summary: string | null): string[] {
-  if (!summary) return [];
+interface DeferredInformationNeedMemory {
+  need: InformationNeed;
+  deferredAtInboundSequence: number;
+}
+
+interface StoredConversationMemory {
+  knowledgeEntryIds: string[];
+  deferredInformationNeeds: DeferredInformationNeedMemory[];
+}
+
+const DEFERRED_NEED_COOLDOWN_TURNS = 2;
+
+function parseStoredConversationMemory(summary: string | null): StoredConversationMemory {
+  const empty: StoredConversationMemory = {
+    knowledgeEntryIds: [],
+    deferredInformationNeeds: [],
+  };
+  if (!summary) return empty;
   try {
     const parsed: unknown = JSON.parse(summary);
-    return Array.isArray(parsed)
-      ? parsed.filter((value): value is string => typeof value === "string")
+    if (Array.isArray(parsed)) {
+      return {
+        ...empty,
+        knowledgeEntryIds: parsed.filter(
+          (value): value is string => typeof value === "string",
+        ),
+      };
+    }
+    if (!parsed || typeof parsed !== "object") return empty;
+    const record = parsed as Record<string, unknown>;
+    const knownNeeds = new Set<string>(informationNeeds);
+    const deferred = Array.isArray(record.deferredInformationNeeds)
+      ? record.deferredInformationNeeds.flatMap((value) => {
+          if (!value || typeof value !== "object") return [];
+          const item = value as Record<string, unknown>;
+          return typeof item.need === "string" &&
+            knownNeeds.has(item.need) &&
+            typeof item.deferredAtInboundSequence === "number" &&
+            Number.isSafeInteger(item.deferredAtInboundSequence)
+            ? [{
+                need: item.need as InformationNeed,
+                deferredAtInboundSequence: item.deferredAtInboundSequence,
+              }]
+            : [];
+        })
       : [];
+    return {
+      knowledgeEntryIds: Array.isArray(record.knowledgeEntryIds)
+        ? record.knowledgeEntryIds.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : [],
+      deferredInformationNeeds: deferred,
+    };
   } catch {
-    return [];
+    return empty;
   }
+}
+
+function rememberDeferredInformationNeed(params: {
+  memory: StoredConversationMemory;
+  pendingInformationNeed: InformationNeed | null;
+  previousQuestionResponse: ExtractedMessage["signals"]["previousQuestionResponse"];
+  inboundSequence: number;
+}): StoredConversationMemory {
+  if (
+    params.pendingInformationNeed === null ||
+    (params.previousQuestionResponse ?? "NOT_A_RESPONSE") === "NOT_A_RESPONSE"
+  ) {
+    return params.memory;
+  }
+  return {
+    ...params.memory,
+    deferredInformationNeeds: [
+      ...params.memory.deferredInformationNeeds.filter(
+        (item) => item.need !== params.pendingInformationNeed,
+      ),
+      {
+        need: params.pendingInformationNeed,
+        deferredAtInboundSequence: params.inboundSequence,
+      },
+    ],
+  };
+}
+
+function activeDeferredInformationNeeds(
+  memory: StoredConversationMemory,
+  inboundSequence: number,
+): InformationNeed[] {
+  return memory.deferredInformationNeeds
+    .filter((item) =>
+      inboundSequence - item.deferredAtInboundSequence <=
+        DEFERRED_NEED_COOLDOWN_TURNS,
+    )
+    .map((item) => item.need);
 }
 
 function elapsedMilliseconds(startedAt: number, timer: () => number): number {
@@ -710,11 +797,35 @@ export function createIncomingEventProcessor({
         extracted.extraction.facts.phoneNumber !== null &&
         extracted.extraction.facts.phoneConfirmed;
       const phoneFulfillsRecentStep = phoneReceived && latestOutbound !== undefined;
-      const previouslyExplainedKnowledge = parseStoredKnowledgeIds(
+      const inboundSequence = prepared.inboundSequence ??
+        currentConversation.lastAppliedInboundSequence + 1;
+      const storedConversationMemory = parseStoredConversationMemory(
         currentConversation.summary,
       );
+      const conversationMemory = rememberDeferredInformationNeed({
+        memory: storedConversationMemory,
+        pendingInformationNeed: currentConversation.pendingInformationNeed,
+        previousQuestionResponse:
+          extracted.extraction.signals.previousQuestionResponse,
+        inboundSequence,
+      });
+      const deferredInformationNeeds = activeDeferredInformationNeeds(
+        conversationMemory,
+        inboundSequence,
+      );
+      const guidanceNeed =
+        currentConversation.pendingInformationNeed !== null &&
+        ["UNSURE", "DECLINED_TO_ANSWER"].includes(
+          extracted.extraction.signals.previousQuestionResponse ??
+            "NOT_A_RESPONSE",
+        )
+          ? currentConversation.pendingInformationNeed
+          : null;
+      const previouslyExplainedKnowledge =
+        conversationMemory.knowledgeEntryIds;
       const knowledge = answerFromKnowledgeBase(extracted.extraction, {
         previousEntryIds: previouslyExplainedKnowledge,
+        guidanceNeed,
         recentMessages: history.map(({ direction, actor, content }) => ({ direction, actor, content })),
         leadFacts: {
           city: evaluatedLead.city,
@@ -733,7 +844,9 @@ export function createIncomingEventProcessor({
         qualificationStatus: decision.status,
         qualificationReason: decision.reason,
       };
-      const needs = assessInformationNeeds(evaluatedLead);
+      const needs = assessInformationNeeds(evaluatedLead, {
+        excludedNextInformationNeeds: deferredInformationNeeds,
+      });
       // Qualification assessment exposes missing facts for policy and CRM,
       // but it never selects the next conversational question. Claude gets
       // the complete set of allowed directions and may return one or null.
@@ -746,6 +859,9 @@ export function createIncomingEventProcessor({
         knowledge,
         informationNeeds: needs,
         previouslyExplainedKnowledgeEntryIds: previouslyExplainedKnowledge,
+        deferredInformationNeeds:
+          conversationMemory.deferredInformationNeeds.map((item) => item.need),
+        guidanceNeed,
       });
       const responseGenerationPlan = phoneFulfillsRecentStep
         ? {
@@ -842,7 +958,9 @@ export function createIncomingEventProcessor({
           qualificationStatus: transactionDecision.status,
           qualificationReason: transactionDecision.reason,
         };
-        const transactionNeeds = assessInformationNeeds(transactionLead);
+        const transactionNeeds = assessInformationNeeds(transactionLead, {
+          excludedNextInformationNeeds: deferredInformationNeeds,
+        });
         const adaptiveNextInformationNeed = responseLlm?.nextInformationNeed;
         let transactionNextInformationNeed =
           phoneFulfillsRecentStep || responseLlm?.replyAction === "NO_REPLY"
@@ -864,6 +982,9 @@ export function createIncomingEventProcessor({
           knowledge,
           informationNeeds: transactionNeeds,
           previouslyExplainedKnowledgeEntryIds: previouslyExplainedKnowledge,
+          deferredInformationNeeds:
+            conversationMemory.deferredInformationNeeds.map((item) => item.need),
+          guidanceNeed,
         });
         // If the conversation model is unavailable or rejected by policy, keep
         // the sales workflow alive with the existing deterministic safe draft.
@@ -883,6 +1004,9 @@ export function createIncomingEventProcessor({
             knowledge,
             informationNeeds: transactionNeeds,
             previouslyExplainedKnowledgeEntryIds: previouslyExplainedKnowledge,
+            deferredInformationNeeds:
+              conversationMemory.deferredInformationNeeds.map((item) => item.need),
+            guidanceNeed,
           });
         }
         const canUseAdaptiveResponse =
@@ -946,9 +1070,11 @@ export function createIncomingEventProcessor({
                   : storedConversation.state,
                 targetState,
               );
-        const storedPreviouslyExplainedKnowledge = parseStoredKnowledgeIds(
+        const storedMemory = parseStoredConversationMemory(
           storedConversation.summary,
         );
+        const storedPreviouslyExplainedKnowledge =
+          storedMemory.knowledgeEntryIds;
         const newlyExplainedKnowledge = responseSuppressed
           ? []
           : responseLlm?.usedKnowledgeEntryIds ?? knowledge.entryIds;
@@ -960,6 +1086,16 @@ export function createIncomingEventProcessor({
                 ...newlyExplainedKnowledge,
               ]),
             ];
+        const unresolvedDeferredInformationNeeds =
+          conversationMemory.deferredInformationNeeds.filter(
+            (item) => !transactionNeeds.knownFacts.includes(item.need),
+          );
+        const updatedConversationMemory: StoredConversationMemory = {
+          knowledgeEntryIds: explainedKnowledge,
+          deferredInformationNeeds: responseSuppressed
+            ? storedMemory.deferredInformationNeeds
+            : unresolvedDeferredInformationNeeds,
+        };
         const managerSummary =
           !responseSuppressed &&
           transactionDecision.shouldHandoffToManager
@@ -1079,7 +1215,7 @@ export function createIncomingEventProcessor({
         const updatedConversation: Conversation = {
           ...storedConversation,
           state: nextState,
-          summary: JSON.stringify(explainedKnowledge),
+          summary: JSON.stringify(updatedConversationMemory),
           pendingInformationNeed: responseSuppressed
             ? storedConversation.pendingInformationNeed
             : qualificationCompleted

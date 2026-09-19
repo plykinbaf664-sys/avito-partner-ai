@@ -264,6 +264,66 @@ describe("natural response generation", () => {
     expect(llm.callCount).toBe(1);
   });
 
+  it("retries when a qualification question replaces an answerable current question", async () => {
+    const approvedFact = PARTNER_KNOWLEDGE_BASE.find(
+      (entry) => entry.id === "small-business-entry",
+    )!;
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        text: "Рассматриваете запуск через управляющую компанию?",
+        nextInformationNeed: "BUSINESS_MODEL",
+        conversationAction: "DISCOVER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Продолжить квалификацию.",
+      }),
+      JSON.stringify({
+        text: "Для Москвы предварительный ориентир расходов на один объект — около 130 000 ₽: аренда, расчётный залог и подготовка. Точная сумма зависит от квартиры и собственника. Какую цель хотите решить этим бизнесом?",
+        nextInformationNeed: "GOAL",
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Сначала ответил на вопрос о расходах, затем перешёл к цели.",
+        usedKnowledgeEntryIds: ["small-business-entry"],
+      }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const plan: ConversationResponsePlan = {
+      text: approvedFact.answer,
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [approvedFact.id],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "QUESTION",
+      currentUserQuestions: ["А сколько там примерно?"],
+      groundedAnswerRequired: true,
+      qualificationProgressExpected: true,
+      allowedNextInformationNeeds: ["BUSINESS_MODEL", "GOAL"],
+      allowedQualificationMoves: [
+        { need: "BUSINESS_MODEL", objective: "понять готовность к модели" },
+        { need: "GOAL", objective: "понять цель человека" },
+      ],
+      approvedFacts: [{
+        id: approvedFact.id,
+        category: approvedFact.category,
+        answer: approvedFact.answer,
+      }],
+      economicsContext: buildApprovedEconomicsContext({
+        city: "Москва",
+        availableCapital: 400_000,
+      }),
+    };
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({
+        text: expect.stringContaining("130 000 ₽"),
+        nextInformationNeed: "GOAL",
+        conversationAction: "ANSWER",
+      });
+    expect(llm.callCount).toBe(2);
+    expect(JSON.parse(llm.requests[1]!.userMessage).validationFeedback)
+      .toContain("пропустил вопрос");
+  });
+
   it("requires conversation repair before qualification after a complaint", async () => {
     const plan: ConversationResponsePlan = {
       text: "Когда планируете запуск?",

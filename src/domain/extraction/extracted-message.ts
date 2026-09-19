@@ -140,6 +140,16 @@ export interface ExtractedSignals {
   possiblePrimaryFear: BusinessBarrier | null;
   possibleSecondaryFear: BusinessBarrier | null;
   wantsHuman: boolean;
+  /** Semantic relation of this message to the immediately preceding question. */
+  previousQuestionResponse?:
+    | "ANSWERED"
+    | "UNSURE"
+    | "DECLINED_TO_ANSWER"
+    | "CHANGED_TOPIC"
+    | "NOT_A_RESPONSE";
+  /** Standalone meaning of an elliptical/contextual user question. */
+  resolvedQuestion?: string | null;
+  contextualReference?: boolean;
 }
 
 export interface ExtractedMessage {

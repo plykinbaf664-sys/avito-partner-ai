@@ -72,6 +72,46 @@ const rejectionMessages: Partial<Record<QualificationReasonCode, string>> = {
     "Помимо услуги команды, для запуска нужно самостоятельно оплатить аренду, залог и базовую комплектацию объекта. Вы указали, что не готовы финансировать эти обязательные расходы, поэтому в текущем формате запуск не получится.",
 };
 
+function compactGuidanceDraft(
+  guidanceNeed: InformationNeed | null | undefined,
+  economics: ApprovedEconomicsContext | undefined,
+): string | null {
+  if (guidanceNeed !== "STARTING_UNITS" || !economics) return null;
+  const scenario = economics.scenarios.find(
+    (candidate) => candidate.affordableObjectCount !== null,
+  );
+  const estimate = scenario?.affordableObjectCount;
+  if (!scenario || !estimate || economics.availableCapital === null) return null;
+  const maxUnits = estimate.maxUnitsAtMinCost;
+  const unitsLabel = maxUnits === 1 ? "1 объекта" : `${maxUnits} объектов`;
+  const capital = economics.availableCapital
+    .toLocaleString("ru-RU")
+    .replaceAll("\u00a0", " ");
+  return `При бюджете ${capital} ₽ по сценарию «${scenario.label}» можно рассмотреть запуск до ${unitsLabel}. Это ориентир: точная смета зависит от квартиры, аренды и условий по залогу.`;
+}
+
+function compactContextualEconomicsDraft(
+  extraction: ExtractedMessage,
+  economics: ApprovedEconomicsContext | undefined,
+  contextualReferenceResolved = false,
+): string | null {
+  if (
+    !economics ||
+    (!extraction.signals.contextualReference && !contextualReferenceResolved) ||
+    extraction.signals.questions.length === 0
+  ) {
+    return null;
+  }
+  const scenario = economics.scenarios.find((candidate) => candidate.oneObjectLaunch !== null);
+  const launch = scenario?.oneObjectLaunch;
+  if (!scenario || !launch) return null;
+  const format = (value: number) => value.toLocaleString("ru-RU").replaceAll("\u00a0", " ");
+  const range = launch.totalMin === launch.totalMax
+    ? `${format(launch.totalMin)} ₽`
+    : `примерно ${format(launch.totalMin)}–${format(launch.totalMax)} ₽`;
+  return `По этому ориентиру запуск одного объекта — ${range}. В расчёте учтены услуга запуска, аренда, расчётный залог и базовая подготовка; фактический залог зависит от объекта и собственника.`;
+}
+
 export interface ConversationResponsePlan {
   text: string;
   nextInformationNeed: InformationNeed | null;
@@ -105,6 +145,9 @@ export interface ConversationResponsePlan {
   }>;
   /** Policy requires progress, while Claude still chooses the topic and wording. */
   qualificationProgressExpected?: boolean;
+  deferredInformationNeeds?: InformationNeed[];
+  guidanceNeed?: InformationNeed | null;
+  groundedAnswerRequired?: boolean;
 }
 
 const qualificationProgressIntents = new Set<MessageIntent>([
@@ -142,6 +185,8 @@ export function buildConversationResponse(params: {
   knowledge: KnowledgeAnswer;
   informationNeeds?: InformationNeedsAssessment;
   previouslyExplainedKnowledgeEntryIds?: readonly string[];
+  deferredInformationNeeds?: readonly InformationNeed[];
+  guidanceNeed?: InformationNeed | null;
 }): ConversationResponsePlan {
   const { extraction, decision, nextInformationNeed, knowledge } = params;
   const conversationRepairRequired = extraction.intent === "COMPLAINT";
@@ -161,6 +206,9 @@ export function buildConversationResponse(params: {
     postHandoffContinuation,
     unresolvedQuestions: knowledge.unresolvedQuestions,
   });
+  const groundedAnswerRequired =
+    (extraction.signals.questions.length > 0 || params.guidanceNeed != null) &&
+    (knowledge.answerFragments.length > 0 || knowledge.economicsContext !== undefined);
   const adaptiveContext = {
     allowedNextInformationNeeds,
     allowedNextQuestions: allowedNextInformationNeeds.map((need) => ({
@@ -186,11 +234,24 @@ export function buildConversationResponse(params: {
       ...new Set(params.previouslyExplainedKnowledgeEntryIds ?? []),
     ],
     qualificationProgressExpected,
+    deferredInformationNeeds: [...new Set(params.deferredInformationNeeds ?? [])],
+    guidanceNeed: params.guidanceNeed ?? null,
+    groundedAnswerRequired,
   };
 
   if (decision.nextAction === "REJECT_POLITELY") {
+    const compactRejectedAnswer = compactGuidanceDraft(
+      params.guidanceNeed,
+      knowledge.economicsContext,
+    ) ?? compactContextualEconomicsDraft(
+      extraction,
+      knowledge.economicsContext,
+      knowledge.contextualReferenceResolved,
+    );
     const answeredThenRejected = [
-      ...knowledge.answerFragments,
+      ...(compactRejectedAnswer
+        ? [compactRejectedAnswer]
+        : knowledge.answerFragments.slice(0, 2)),
       rejectionMessages[decision.reason] ??
         "К сожалению, текущий формат вам не подойдёт. Спасибо за разговор.",
     ];
@@ -223,7 +284,20 @@ export function buildConversationResponse(params: {
     };
   }
 
-  const parts = [...knowledge.answerFragments];
+  const guidanceDraft = compactGuidanceDraft(
+    params.guidanceNeed,
+    knowledge.economicsContext,
+  );
+  const contextualEconomicsDraft = compactContextualEconomicsDraft(
+    extraction,
+    knowledge.economicsContext,
+    knowledge.contextualReferenceResolved,
+  );
+  const parts = guidanceDraft
+    ? [guidanceDraft]
+    : contextualEconomicsDraft
+      ? [contextualEconomicsDraft]
+      : knowledge.answerFragments.slice(0, 2);
   const phoneDeclined = nextInformationNeed === "PHONE_NUMBER" && params.lead.objections.some((objection) =>
     /телефон|номер/iu.test(objection) && /не хочу|не дам|не буду|отказыва|не готов|пока не/iu.test(objection));
   if (knowledge.unresolvedQuestions.length > 0) {

@@ -64,6 +64,26 @@ describe("contextual partner knowledge", () => {
     expect(answer.unresolvedQuestions).toEqual([]);
   });
 
+  it("resolves an elliptical cost question from the previous launch-expense turn", () => {
+    const extraction = question("А сколько там примерно?");
+    extraction.signals.contextualReference = true;
+    extraction.signals.resolvedQuestion =
+      "Сколько примерно составят аренда, залог и подготовка одного объекта?";
+    const answer = answerFromKnowledgeBase(extraction, {
+      recentMessages: [{
+        direction: "OUTBOUND",
+        content: "Аренда, залог и подготовка оплачиваются отдельно от услуги запуска.",
+      }],
+      leadFacts: { city: "Москва", availableCapital: 400_000 },
+    });
+
+    expect(answer.contextualReferenceResolved).toBe(true);
+    expect(answer.entryIds).toContain("small-business-entry");
+    expect(answer.answerFragments.join(" ")).toContain("180 000 ₽");
+    expect(answer.economicsContext?.scenarios[0]?.rentReference.rentMin)
+      .toBe(50_000);
+  });
+
   it("uses the preceding one-object economics context for two objects", () => {
     const answer = answerFromKnowledgeBase(
       question("А если два объекта?", { calculationUnits: 2 }),

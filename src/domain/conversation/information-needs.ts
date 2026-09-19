@@ -156,6 +156,7 @@ function criticalInformationNeedsFor(lead: Lead): InformationNeed[] {
 
 export function assessInformationNeeds(
   lead: Lead,
+  options: { excludedNextInformationNeeds?: readonly InformationNeed[] } = {},
 ): InformationNeedsAssessment {
   const knownFacts = informationNeeds.filter((need) => isKnown(lead, need));
   const criticalInformationNeeds = criticalInformationNeedsFor(lead);
@@ -165,11 +166,12 @@ export function assessInformationNeeds(
   const missingOptionalFacts = optionalInformationNeeds.filter(
     (need) => !knownFacts.includes(need) && !missingCriticalFacts.includes(need),
   );
+  const excluded = new Set(options.excludedNextInformationNeeds ?? []);
   const allowedNextInformationNeeds = selectAllowedInformationNeeds(
     lead,
     missingCriticalFacts,
     missingOptionalFacts,
-  );
+  ).filter((need) => !excluded.has(need));
   const suggestedNextInformationNeed = selectNextInformationNeed(
     lead,
     allowedNextInformationNeeds,

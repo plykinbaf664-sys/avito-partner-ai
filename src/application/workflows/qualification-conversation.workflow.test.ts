@@ -249,6 +249,10 @@ describe("multi-turn qualification conversation", () => {
     const llm = new FakeLLMProvider([JSON.stringify({
       text: adapted,
       nextInformationNeed: "CITY",
+      conversationAction: "ANSWER",
+      qualificationMoveDecision: "ADVANCE",
+      qualificationMoveRationale: "Ответил на вопрос и уточнил город.",
+      usedKnowledgeEntryIds: ["operations-guests"],
     })]);
     const extractMessage = createMessageExtractor({ llmProvider: new FakeLLMProvider([
       reply({ intent: "QUESTION", signals: { questions: ["Кто занимается гостями?"] } }),
@@ -1500,8 +1504,12 @@ describe("multi-turn qualification conversation", () => {
         qualificationMoveRationale: "Пользователь пока только присматривается и не готов углублять эту тему.",
       }),
       JSON.stringify({
-        text: "Возможность запуска зависит от города, поэтому подскажите, где планируете работать?",
+        text: "Подтверждённо работаем в Видном, Подольске, Домодедово, Балашихе, Химках и Волгограде. В каком городе планируете запуск?",
         nextInformationNeed: "CITY",
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Ответил по доступным городам и уточнил город пользователя.",
+        usedKnowledgeEntryIds: ["supported-cities"],
       }),
     ]);
     const processEvent = createIncomingEventProcessor({
@@ -1530,5 +1538,100 @@ describe("multi-turn qualification conversation", () => {
     expect(fourth.outboundMessage).not.toContain("город");
     expect(fifth.outboundMessage).toContain("город");
     expect(responseProvider.callCount).toBe(5);
+  });
+
+  it("advises an unsure lead and temporarily moves away from the unresolved topic", async () => {
+    const responseErrors = vi.fn();
+    const extractionProvider = new FakeLLMProvider([
+      reply({
+        facts: {
+          city: "Москва",
+          availableCapital: 400_000,
+          availableCapitalConfirmed: true,
+          buyingIntent: "CONSIDERING",
+        },
+      }),
+      reply({
+        intent: "QUALIFICATION_INFORMATION",
+        signals: { previousQuestionResponse: "UNSURE" },
+      }),
+      reply({
+        facts: {
+          primaryGoal: "MAIN_BUSINESS",
+          buyingIntent: "CONSIDERING",
+        },
+        signals: { previousQuestionResponse: "ANSWERED" },
+      }),
+    ]);
+    const responseProvider = new FakeLLMProvider([
+      JSON.stringify({
+        text: "Сколько объектов вы хотели бы запустить сначала?",
+        nextInformationNeed: "STARTING_UNITS",
+        conversationAction: "DISCOVER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Нужно понять стартовый масштаб.",
+      }),
+      JSON.stringify({
+        text: "При бюджете 400 000 ₽ по московскому ориентиру можно рассматривать 2 объекта: расчётный запуск составит около 310 000 ₽, а точная смета зависит от квартиры. Какую цель хотите решить этим бизнесом?",
+        nextInformationNeed: "GOAL",
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Сначала помог с масштабом, затем перешёл к цели.",
+      }),
+      JSON.stringify({
+        text: "Понял, рассматриваете это как основной бизнес. Когда хотели бы начать запуск?",
+        nextInformationNeed: "LAUNCH_TIMING",
+        conversationAction: "ACKNOWLEDGE",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Срок запуска — следующий полезный контекст.",
+      }),
+    ]);
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: extractionProvider }),
+      generateNaturalResponse: createNaturalResponseGenerator({ llmProvider: responseProvider }),
+      logger: { info: vi.fn(), error: responseErrors },
+      generateId: () => `unsure-guidance-${++nextId}`,
+      now: () => new Date(`2026-09-19T13:${String(nextId).padStart(2, "0")}:00Z`),
+    });
+
+    const first = await processEvent(input(301, "Привет, есть 400 000, я из Москвы"));
+    const second = await processEvent(input(302, "Пока не знаю"));
+    const third = await processEvent(input(303, "Как основной бизнес"));
+
+    expect(first.suggestedNextInformationNeed).toBe("STARTING_UNITS");
+    expect(responseErrors).not.toHaveBeenCalledWith(
+      "response_generation.fallback",
+      expect.anything(),
+    );
+    expect(second.outboundMessage).toMatch(/(?:двух|2) объекта/iu);
+    expect(second.outboundMessage).toContain("цель");
+    expect(second.outboundMessage).not.toBe("Со скольких объектов хотите начать?");
+    expect(third.outboundMessage).toContain("Когда");
+    expect(third.outboundMessage).not.toMatch(/скольк.*объект/iu);
+
+    const secondContext = JSON.parse(
+      responseProvider.requests[1]!.userMessage,
+    ) as {
+      guidanceNeed: string | null;
+      deferredInformationNeeds: string[];
+      economicsContext: unknown;
+      allowedQualificationMoves: Array<{ need: string }>;
+    };
+    expect(secondContext).toMatchObject({
+      guidanceNeed: "STARTING_UNITS",
+      deferredInformationNeeds: ["STARTING_UNITS"],
+    });
+    expect(secondContext.economicsContext).not.toBeNull();
+    expect(secondContext.allowedQualificationMoves.map((move) => move.need))
+      .not.toContain("STARTING_UNITS");
+
+    const lead = await persistence.leads.findById(third.leadId!);
+    expect(lead).toMatchObject({
+      city: "Москва",
+      availableCapital: 400_000,
+      startingUnits: null,
+      primaryGoal: "MAIN_BUSINESS",
+    });
   });
 });
