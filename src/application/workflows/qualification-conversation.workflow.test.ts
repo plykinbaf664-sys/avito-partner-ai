@@ -107,8 +107,11 @@ describe("multi-turn qualification conversation", () => {
     const result = await processEvent(input(0, "Здравствуйте, мне интересно"));
 
     expect(result.suggestedNextInformationNeed).toBe("CITY");
-    expect(result.outboundMessage).toMatch(/город|городе/iu);
+    expect(result.outboundMessage).toBeTruthy();
     expect(result.outboundMessage).not.toMatch(/какую сумму|капитал|бюджет/iu);
+    expect(result.outboundMessage).not.toContain("?");
+    expect((await persistence.conversations.findById(result.conversationId!))?.pendingInformationNeed)
+      .toBeNull();
   });
 
   it("lets Claude answer a paraphrased approved business question without a literal KB match", async () => {
@@ -164,7 +167,7 @@ describe("multi-turn qualification conversation", () => {
     ["Можно ли начать с одного объекта?", ["начать можно с одного объекта", "3–5 объектов"]],
     ["Как инвестору смотреть брони?", ["CRM", "онлайн-режиме"]],
     ["Кто будет заниматься гостями моей квартиры?", ["администратор"]],
-  ])("answers the approved KB question before continuing qualification: %s", async (question, fragments) => {
+  ])("answers the approved KB question without a deterministic qualification prompt: %s", async (question, fragments) => {
     const { processEvent } = harness([
       reply({ intent: "QUESTION", signals: { questions: [question] } }),
     ]);
@@ -174,12 +177,10 @@ describe("multi-turn qualification conversation", () => {
     expect(result.outboundMessage).not.toContain("уточнить у менеджера");
     expect(result.outboundMessage).not.toContain("Передам менеджеру");
     expect(result.outboundMessage!.length).toBeLessThanOrEqual(1_000);
-    expect(result.outboundMessage!.match(/\?/gu)).toHaveLength(1);
-    expect(result.outboundMessage).toMatch(/бюджет|сумм|капитал/iu);
-    expect(result.outboundMessage!.indexOf(fragments[0]!)).toBeLessThan(result.outboundMessage!.lastIndexOf("?"));
+    expect(result.outboundMessage).toBeTruthy();
   });
 
-  it("answers a question and asks only the next gap without repeating a known budget", async () => {
+  it("answers a question without repeating a known budget or forcing the next gap", async () => {
     const { processEvent } = harness([reply({ intent: "QUESTION",
       facts: { availableCapital: 200_000, availableCapitalConfirmed: true },
       signals: { questions: ["Кто занимается гостями?"] } })]);
@@ -188,7 +189,7 @@ describe("multi-turn qualification conversation", () => {
     expect(result.shouldHandoffToManager).toBe(false);
     expect(result.suggestedNextInformationNeed).not.toBe("AVAILABLE_CAPITAL");
     expect(result.outboundMessage).not.toContain("Какую сумму");
-    expect(result.outboundMessage!.match(/\?/gu)).toHaveLength(1);
+    expect(result.outboundMessage).toBeTruthy();
   });
 
   it("answers Moscow availability and service payment before continuing qualification", async () => {
@@ -199,7 +200,6 @@ describe("multi-turn qualification conversation", () => {
     expect(result.outboundMessage).toContain("Подтверждённые города");
     expect(result.outboundMessage).toContain("50 000 ₽");
     expect(result.outboundMessage).toContain("юридическое сопровождение");
-    expect(result.outboundMessage).toMatch(/бюджет|сумм|капитал/iu);
     expect(result.outboundMessage).not.toContain("Оставьте, пожалуйста, номер");
     expect(result.shouldHandoffToManager).toBe(false);
   });
@@ -218,7 +218,6 @@ describe("multi-turn qualification conversation", () => {
     expect(result.outboundMessage).toContain(known);
     expect(result.outboundMessage).toContain(unknown);
     expect(result.outboundMessage!.indexOf(known)).toBeLessThan(result.outboundMessage!.indexOf("эту часть лучше уточнить"));
-    expect(result.outboundMessage).toMatch(/бюджет|сумм|капитал/iu);
   });
 
   it("still honors an explicit human request even when the KB answers the question", async () => {
@@ -291,7 +290,7 @@ describe("multi-turn qualification conversation", () => {
     expect(result.outboundMessage).not.toMatch(/общий доступный капитал|отдельный бюджет/iu);
   });
 
-  it.each(["unavailable", "unsafe"])("keeps the KB answer and next question when adaptation is %s", async (failure) => {
+  it.each(["unavailable", "unsafe"])("keeps the KB answer without deterministic questioning when adaptation is %s", async (failure) => {
     const extractMessage = createMessageExtractor({ llmProvider: new FakeLLMProvider([
       reply({ intent: "QUESTION", signals: { questions: ["Какие условия предлагаете?"] } }),
     ]) });
@@ -305,7 +304,6 @@ describe("multi-turn qualification conversation", () => {
     expect(result.shouldHandoffToManager).toBe(false);
     expect(result.outboundMessage).toContain("субаренде");
     expect(result.outboundMessage).toContain("80 000 ₽");
-    expect(result.outboundMessage).toMatch(/бюджет|сумм|капитал/iu);
     expect(result.outboundMessage).not.toContain("уточнить у менеджера");
   });
 
@@ -385,9 +383,9 @@ describe("multi-turn qualification conversation", () => {
       qualificationStatus: "HOT",
       shouldHandoffToManager: false,
       suggestedNextInformationNeed: "PHONE_NUMBER",
-      conversationState: "WAITING_PHONE",
+      conversationState: "QUALIFYING",
     });
-    expect(beforePhone.outboundMessage).toContain("номер телефона");
+    expect(beforePhone.outboundMessage).toBeTruthy();
     expect(await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${beforePhone.leadId}`)).toBeNull();
     expect((await persistence.leads.findById(beforePhone.leadId!))?.handoffAt).toBeNull();
     const crm = createCrmService(persistence);
@@ -561,9 +559,9 @@ describe("multi-turn qualification conversation", () => {
       deliveryRetryable: null, lastDeliveryErrorCode: null, externalNotificationId: null,
       createdAt: oldTime, updatedAt: oldTime, sentAt: null });
     const resumed = await processEvent(input(2, "Кто занимается гостями?"));
-    expect(resumed).toMatchObject({ qualificationStatus: "PRIORITY", conversationState: "WAITING_PHONE", shouldHandoffToManager: false });
+    expect(resumed).toMatchObject({ qualificationStatus: "PRIORITY", conversationState: "QUALIFYING", shouldHandoffToManager: false });
     expect(resumed.outboundMessage).toContain("администратор");
-    expect(resumed.outboundMessage).toContain("номер телефона");
+    expect(resumed.outboundMessage).toBeTruthy();
     const completed = await processEvent(input(3, "+79991234567"));
     expect(completed.shouldHandoffToManager).toBe(true);
     expect(await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${lead.id}`))
@@ -628,7 +626,6 @@ describe("multi-turn qualification conversation", () => {
     ]);
     const result = await processEvent(input(1, question));
     expect(result.outboundMessage).toContain("Собственная квартира не обязательна");
-    expect(result.outboundMessage).toContain("бюджет");
     expect(result.qualificationStatus).not.toBe("NO_FIT");
   });
 
@@ -641,17 +638,15 @@ describe("multi-turn qualification conversation", () => {
     expect(result.qualificationStatus).toBe("NEEDS_MORE_INFO");
     expect(result.shouldHandoffToManager).toBe(false);
     expect(result.outboundMessage).toContain("ключевых моментов");
-    expect(result.outboundMessage).toContain("бюджет");
   });
 
-  it("answers who handles guests before asking the next useful question", async () => {
+  it("answers who handles guests without forcing another qualification topic", async () => {
     const question = "Кто будет заниматься гостями?";
     const { processEvent } = harness([
       reply({ intent: "QUESTION", signals: { questions: [question] } }),
     ]);
     const result = await processEvent(input(1, question));
     expect(result.outboundMessage).toContain("администратор");
-    expect(result.outboundMessage).toMatch(/бюджет|сумм|капитал/iu);
   });
 
   it("explains economics without promising a guaranteed income", async () => {
@@ -757,8 +752,8 @@ describe("multi-turn qualification conversation", () => {
       entryBudget: 50_000,
       availableCapital: null,
     });
-    expect(result.outboundMessage).toContain("аренда, залог");
-    expect(result.outboundMessage).toContain("отдельный бюджет");
+    expect(result.outboundMessage).toBeTruthy();
+    expect(result.outboundMessage).not.toContain("отдельный бюджет");
   });
 
   it("rejects only an explicit refusal to fund required expenses beyond 50,000", async () => {
@@ -1432,5 +1427,66 @@ describe("multi-turn qualification conversation", () => {
       `manager-handoff:${turns[8]!.leadId}`,
     )).not.toBeNull();
     expect(responseProvider.callCount).toBe(10);
+  });
+
+  it("does not turn an unresolved fact into a repeated question across topics", async () => {
+    const extractionProvider = new FakeLLMProvider([
+      reply({ intent: "GENERAL_INTEREST", facts: { buyingIntent: "EXPLORING" } }),
+      reply({ intent: "QUALIFICATION_INFORMATION", facts: { buyingIntent: "CONSIDERING" } }),
+      reply({ facts: { primaryGoal: "ADDITIONAL_INCOME", buyingIntent: "CONSIDERING" } }),
+      reply({ intent: "QUALIFICATION_INFORMATION" }),
+      reply({
+        intent: "QUESTION",
+        signals: { questions: ["В каком городе можно запускаться?"] },
+      }),
+    ]);
+    const responseProvider = new FakeLLMProvider([
+      JSON.stringify({
+        text: "Здравствуйте! В каком городе планируете запуск?",
+        nextInformationNeed: "CITY",
+      }),
+      JSON.stringify({
+        text: "Понял, город пока не определили. Какую задачу хотите решить этим бизнесом?",
+        nextInformationNeed: "GOAL",
+      }),
+      JSON.stringify({
+        text: "Понял, рассматриваете проект как дополнительный доход. Был ли у вас опыт в недвижимости или посуточной аренде?",
+        nextInformationNeed: "EXPERIENCE",
+      }),
+      JSON.stringify({
+        text: "Понял, к вопросу об опыте можно вернуться позже.",
+        nextInformationNeed: null,
+      }),
+      JSON.stringify({
+        text: "Возможность запуска зависит от города, поэтому подскажите, где планируете работать?",
+        nextInformationNeed: "CITY",
+      }),
+    ]);
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: extractionProvider }),
+      generateNaturalResponse: createNaturalResponseGenerator({
+        llmProvider: responseProvider,
+      }),
+      generateId: () => `global-memory-${++nextId}`,
+      now: () => new Date(`2026-09-01T12:${String(nextId).padStart(2, "0")}:00Z`),
+    });
+
+    const first = await processEvent(input(201, "Здравствуйте, мне интересно"));
+    const second = await processEvent(input(202, "Пока не определился, где запускаться"));
+    const third = await processEvent(input(203, "Хочу дополнительный доход"));
+    const fourth = await processEvent(input(204, "Пока просто присматриваюсь"));
+    const fifth = await processEvent(input(205, "В каком городе можно запускаться?"));
+
+    const conversation = await persistence.conversations.findById(first.conversationId!);
+    const lead = await persistence.leads.findById(first.leadId!);
+    expect(conversation).toMatchObject({ pendingInformationNeed: "CITY" });
+    expect(lead?.city).toBeNull();
+    expect(second.outboundMessage).toContain("задачу");
+    expect(third.outboundMessage).toContain("опыт");
+    expect(fourth.outboundMessage).not.toContain("?");
+    expect(fourth.outboundMessage).not.toContain("город");
+    expect(fifth.outboundMessage).toContain("город");
+    expect(responseProvider.callCount).toBe(5);
   });
 });

@@ -51,7 +51,10 @@ function currentNextStep(lead: Lead, conversation: Conversation | null, history:
   if (["QUALIFIED", "PRIORITY", "HOT", "WARM"].includes(lead.qualificationStatus) && !hasConfirmedPhone(lead)) {
     return "PHONE_NUMBER";
   }
-  return conversation?.pendingInformationNeed ?? assessInformationNeeds(lead).suggestedNextInformationNeed;
+  // A missing field is policy metadata, not an instruction for the next
+  // conversational question. The Test Chat Lab should show the persisted
+  // Claude-selected move only; otherwise report that the dialogue continues.
+  return conversation?.pendingInformationNeed ?? "CONTINUE_CONVERSATION";
 }
 
 export function createTestChatLabService({

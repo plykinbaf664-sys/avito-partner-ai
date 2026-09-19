@@ -708,7 +708,7 @@ describe("incoming partner event workflow", () => {
     );
     expect(result).toMatchObject({
       requiresHumanHandoff: false,
-      conversationState: "WAITING_PHONE",
+      conversationState: "QUALIFYING",
       qualificationStatus: "NEEDS_MORE_INFO",
       qualificationReason: "USER_REQUESTED_HUMAN",
     });

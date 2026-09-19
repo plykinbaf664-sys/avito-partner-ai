@@ -152,18 +152,21 @@ describe("qualification follow-up policy", () => {
     ).toEqual({ eligible: false, reason: "ALREADY_FOLLOWED_UP" });
   });
 
-  it("continues the unresolved budget context", () => {
+  it("does not turn an unresolved field into a deterministic question", () => {
     const text = buildQualificationFollowUp(conversation(), "Какой у вас бюджет?");
-    expect(text.toLocaleLowerCase("ru-RU")).toContain("бюджет");
+    expect(text.toLocaleLowerCase("ru-RU")).toContain("продолжить");
+    expect(text).not.toContain("?");
+    expect(text).not.toMatch(/бюджет|капитал/iu);
     expect(text).not.toContain("Вы ещё заинтересованы");
   });
 
-  it("asks whether the disclosed launch budget fits instead of repeating a generic budget question", () => {
+  it("keeps the deterministic follow-up fallback neutral after a disclosed budget", () => {
     const text = buildQualificationFollowUp(
       conversation(),
       "Ориентир старта одного объекта — 150 000–180 000 ₽.",
     );
-    expect(text).toContain("такой бюджет на запуск вам подходит?");
+    expect(text).toContain("продолжить");
+    expect(text).not.toContain("?");
     expect(text).not.toContain("Какую сумму");
   });
 });

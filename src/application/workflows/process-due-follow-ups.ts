@@ -2,7 +2,6 @@ import { assessInformationNeeds } from "@/domain/conversation/information-needs"
 import type { ConversationResponsePlan } from "@/domain/conversation/conversation-response";
 import {
   qualificationObjectiveForInformationNeed,
-  questionForInformationNeed,
 } from "@/domain/conversation/conversation-response";
 import type { Conversation } from "@/domain/conversation/conversation";
 import type { InformationNeed } from "@/domain/conversation/information-needs";
@@ -36,7 +35,6 @@ function followUpDeduplicationKey(conversation: Conversation): string {
 
 function buildFollowUpPlan(
   lead: Lead,
-  conversation: Conversation,
 ): ConversationResponsePlan {
   const needs = assessInformationNeeds(lead);
   const qualificationSatisfied = QUALIFIED_STATUSES.includes(
@@ -45,24 +43,17 @@ function buildFollowUpPlan(
   const allowedNextInformationNeeds: InformationNeed[] =
     qualificationSatisfied && !hasConfirmedPhone(lead)
       ? ["PHONE_NUMBER"]
-      : conversation.pendingInformationNeed !== null &&
-          !needs.knownFacts.includes(conversation.pendingInformationNeed)
-        ? [conversation.pendingInformationNeed]
-        : needs.allowedNextInformationNeeds;
-  const nextInformationNeed = allowedNextInformationNeeds[0] ?? null;
+      : needs.allowedNextInformationNeeds;
   return {
     text:
       "Сформируй одно короткое естественное продолжение разговора после паузы.",
-    nextInformationNeed,
-    asksUserQuestion: nextInformationNeed !== null,
+    nextInformationNeed: null,
+    asksUserQuestion: false,
     knowledgeEntryIds: [],
     unresolvedQuestions: [],
     useNaturalAdaptation: true,
     allowedNextInformationNeeds,
-    allowedNextQuestions: allowedNextInformationNeeds.map((need) => ({
-      need,
-      question: questionForInformationNeed(need, lead),
-    })),
+    allowedNextQuestions: [],
     allowedQualificationMoves: allowedNextInformationNeeds.map((need) => ({
       need,
       objective: qualificationObjectiveForInformationNeed(need),
@@ -171,7 +162,7 @@ export function createDueFollowUpsProcessor({
           deduplicationKey,
           message: null,
           created: false,
-          plan: buildFollowUpPlan(lead, conversation),
+          plan: buildFollowUpPlan(lead),
           history,
         };
       });

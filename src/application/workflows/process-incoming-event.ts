@@ -433,7 +433,11 @@ function buildResult({
 
 function safeErrorCode(error: unknown): string {
   if (!(error instanceof Error)) return "UNKNOWN_PROCESSING_ERROR";
-  const code = "code" in error ? String(error.code) : error.name;
+  const code = "code" in error
+    ? String(error.code)
+    : error.message && /^[A-Z0-9_.:-]+$/u.test(error.message)
+      ? error.message
+      : error.name;
   return code.replace(/[^A-Za-z0-9_.:-]/g, "_").slice(0, 100);
 }
 
@@ -730,10 +734,10 @@ export function createIncomingEventProcessor({
         qualificationReason: decision.reason,
       };
       const needs = assessInformationNeeds(evaluatedLead);
-      const nextInformationNeed =
-        decision.nextAction === "CONTINUE_QUALIFICATION"
-          ? needs.suggestedNextInformationNeed
-          : null;
+      // Qualification assessment exposes missing facts for policy and CRM,
+      // but it never selects the next conversational question. Claude gets
+      // the complete set of allowed directions and may return one or null.
+      const nextInformationNeed = null;
       const responsePlan = buildConversationResponse({
         lead: evaluatedLead,
         extraction: extracted.extraction,
@@ -845,14 +849,13 @@ export function createIncomingEventProcessor({
             ? null
             : transactionDecision.nextAction !== "CONTINUE_QUALIFICATION"
               ? null
-              : responseLlm !== null
-                ? adaptiveNextInformationNeed != null &&
-                    transactionNeeds.allowedNextInformationNeeds.includes(
-                      adaptiveNextInformationNeed,
-                    )
-                  ? adaptiveNextInformationNeed
-                  : null
-                : transactionNeeds.suggestedNextInformationNeed;
+              : responseLlm !== null &&
+                  adaptiveNextInformationNeed != null &&
+                  transactionNeeds.allowedNextInformationNeeds.includes(
+                    adaptiveNextInformationNeed,
+                  )
+                ? adaptiveNextInformationNeed
+                : null;
         const transactionResponsePlan = buildConversationResponse({
           lead: transactionLead,
           extraction: extracted.extraction,

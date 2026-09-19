@@ -226,8 +226,11 @@ function validateResponsePolicy(
   for (const claim of claimsRequiringGrounding) {
     if (claim.test(answer) && !claim.test(groundedText)) invalid();
   }
+  const makesIncomeClaim =
+    /доход|зараб|прибыл|окуп/iu.test(answer) &&
+    (adaptedAmounts.size > 0 || /гарант|ориентир|в\s+месяц|с\s+объект/iu.test(answer));
   if (incomeDisclaimer.test(groundedText) &&
-      /доход|зараб|прибыл|окуп/iu.test(answer) &&
+      makesIncomeClaim &&
       !incomeDisclaimer.test(answer)) invalid();
   const allowedNextInformationNeeds =
     plan.allowedNextInformationNeeds ??
@@ -236,7 +239,6 @@ function validateResponsePolicy(
     selectedInformationNeed !== null &&
     !allowedNextInformationNeeds.includes(selectedInformationNeed)
   ) invalid();
-  if (!plan.asksUserQuestion && selectedInformationNeed !== null) invalid();
   const questionCount = text.match(/\?/gu)?.length ?? 0;
   if (questionCount > 1) invalid();
   if (selectedInformationNeed === null && questionCount > 0) invalid();
@@ -314,8 +316,10 @@ availableCapital означает общий бюджет, который чел
         triggerType,
         silenceMs: silenceMs ?? null,
         fallbackDraft: plan.text,
-        qualificationMoveAvailable: plan.asksUserQuestion,
-        defaultNextInformationNeed: plan.nextInformationNeed,
+        qualificationMoveAvailable:
+          plan.allowedQualificationMoves !== undefined
+            ? plan.allowedQualificationMoves.length > 0
+            : plan.asksUserQuestion,
         allowedQualificationMoves: plan.allowedQualificationMoves ?? [],
         knownFacts: plan.knownFacts ?? [],
         missingCriticalFacts: plan.missingCriticalFacts ?? [],

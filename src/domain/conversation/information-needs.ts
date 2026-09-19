@@ -236,8 +236,9 @@ function selectNextInformationNeed(
 ): InformationNeed | null {
   if (candidates.length === 0) return null;
 
-  // Keep a deterministic fallback when response generation is unavailable.
-  // The LLM may choose another item only from this validated candidate set.
+  // Keep a stable policy suggestion for observability/CRM only. The workflow
+  // exposes the complete candidate set to the conversation brain and never
+  // turns this value into an outbound question by itself.
   if (
     missingCriticalFacts.length === 1 &&
     missingCriticalFacts[0] === "PHONE_NUMBER"

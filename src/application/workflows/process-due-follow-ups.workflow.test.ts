@@ -77,17 +77,34 @@ describe("due qualification follow-ups workflow", () => {
     const responseProvider = new FakeOutboundProvider();
     const outboundProvider = new FakeOutboundProvider();
     const generateId = () => `follow-up-test-${++nextId}`;
+    const generateNaturalResponse: NaturalResponseGenerator = async ({ plan }) => {
+      const need = plan.allowedQualificationMoves?.[0]?.need ?? null;
+      const text = need === "STARTING_UNITS"
+        ? "Со скольких объектов хотите начать?"
+        : need === "AVAILABLE_CAPITAL"
+          ? "Какой бюджет в целом рассматриваете для запуска?"
+          : "Если тема ещё актуальна, можем продолжить разговор.";
+      return {
+        text,
+        model: "fake",
+        inputTokens: 1,
+        outputTokens: 1,
+        nextInformationNeed: need,
+      };
+    };
     return {
       processEvent: createIncomingEventProcessor({
         persistence,
         extractMessage: createMessageExtractor({ llmProvider: llm }),
         outboundProvider: responseProvider,
+        generateNaturalResponse,
         generateId,
         now: () => currentTime,
       }),
       processDue: createDueFollowUpsProcessor({
         persistence,
         outboundProvider,
+        generateNaturalResponse,
         generateId,
       }),
       outboundProvider,
@@ -119,7 +136,7 @@ describe("due qualification follow-ups workflow", () => {
     );
 
     expect(due.created).toHaveLength(1);
-    expect(due.created[0]?.content.toLocaleLowerCase("ru-RU")).toContain("бюджет");
+    expect(due.created[0]?.content).toContain("продолжить");
     expect(repeated.created).toHaveLength(0);
     expect(outboundProvider.requests).toHaveLength(1);
     expect(messages.filter((message) => message.direction === "OUTBOUND")).toHaveLength(2);
@@ -211,7 +228,6 @@ describe("due qualification follow-ups workflow", () => {
     expect(resumed).toMatchObject({
       conversationId: first.conversationId,
       suggestedNextInformationNeed: "STARTING_UNITS",
-      outboundMessage: expect.stringContaining("объектов"),
     });
     expect(messages.map((message) => message.direction)).toEqual([
       "INBOUND",
@@ -229,6 +245,13 @@ describe("due qualification follow-ups workflow", () => {
       persistence,
       extractMessage: createMessageExtractor({ llmProvider: llm }),
       outboundProvider: new FakeOutboundProvider(),
+      generateNaturalResponse: async ({ plan }) => ({
+        text: "Если тема ещё актуальна, можем продолжить разговор.",
+        model: "fake",
+        inputTokens: 1,
+        outputTokens: 1,
+        nextInformationNeed: plan.allowedQualificationMoves?.[0]?.need ?? null,
+      }),
       generateId,
       now: () => currentTime,
     });
@@ -238,6 +261,13 @@ describe("due qualification follow-ups workflow", () => {
     const processDue = createDueFollowUpsProcessor({
       persistence,
       outboundProvider,
+      generateNaturalResponse: async ({ plan }) => ({
+        text: "Если тема ещё актуальна, можем продолжить разговор.",
+        model: "fake",
+        inputTokens: 1,
+        outputTokens: 1,
+        nextInformationNeed: plan.allowedQualificationMoves?.[0]?.need ?? null,
+      }),
       generateId,
     });
     const first = await processEvent(input("event-failed-follow-up", "Здравствуйте"));

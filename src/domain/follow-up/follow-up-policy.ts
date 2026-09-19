@@ -1,5 +1,4 @@
 import type { Conversation } from "../conversation/conversation";
-import { questionForInformationNeed } from "../conversation/conversation-response";
 import type { Lead } from "../lead/lead";
 
 export const FOLLOW_UP_POLICY = Object.freeze({
@@ -70,33 +69,12 @@ export function buildQualificationFollowUp(
   conversation: Conversation,
   lastOutboundText: string | null,
 ): string {
-  const need = conversation.pendingInformationNeed;
-  if (need) {
-    const disclosedLaunchBudget = lastOutboundText !== null &&
-      /(?:150\s*000|180\s*000|150\s*тыс|180\s*тыс).{0,100}(?:бюджет|запуск|старт)|(?:бюджет|запуск|старт).{0,100}(?:150\s*000|180\s*000|150\s*тыс|180\s*тыс)/iu.test(lastOutboundText);
-    const question = need === "AVAILABLE_CAPITAL" && disclosedLaunchBudget
-      ? "Подскажите, такой бюджет на запуск вам подходит?"
-      : questionForInformationNeed(need);
-    const contextualLeadIn: Partial<Record<typeof need, string>> = {
-      AVAILABLE_CAPITAL:
-        "Чтобы понять подходящий формат старта, уточню финансовый контекст.",
-      ADDITIONAL_EXPENSES:
-        "Возвращаюсь к вопросу о расходах на сам объект.",
-      BUSINESS_MODEL:
-        "Чтобы точнее понять, подходит ли вам формат, уточню один момент.",
-      LAUNCH_TIMING: "Возвращаюсь к нашему разговору о возможном запуске.",
-      CITY: "Чтобы проверить возможность работы по вашему направлению, уточню один момент.",
-      STARTING_UNITS: "Чтобы оценить подходящий формат старта, уточню один момент.",
-      SCALING_POTENTIAL_UNITS: "Чтобы понять потенциал развития, уточню один момент.",
-      GOAL: "Чтобы лучше понять вашу задачу, вернусь к одному вопросу.",
-      MANAGEMENT_READINESS: "Чтобы понять, насколько формат вам подходит, уточню один момент.",
-      FREE_TIME: "Возвращаюсь к нашему разговору и уточню один момент.",
-      EXPERIENCE: "Возвращаюсь к нашему разговору и уточню один момент.",
-      BARRIER: "Возвращаюсь к нашему разговору и уточню один момент.",
-    };
-    return `${contextualLeadIn[need] ?? "Возвращаюсь к нашему разговору."} ${question}`;
-  }
-
+  // A deterministic fallback must never turn an unresolved field into a
+  // questionnaire prompt. The natural-response layer receives all allowed
+  // directions and owns the conversational move; if it is unavailable, keep
+  // the follow-up neutral and preserve the conversation for a later retry.
+  void conversation;
+  void lastOutboundText;
   return lastOutboundText?.trim()
     ? "Возвращаюсь к нашему разговору. Если тема ещё актуальна, можем продолжить с того места, где остановились."
     : "Если тема запуска ещё актуальна, можем спокойно продолжить разговор.";
