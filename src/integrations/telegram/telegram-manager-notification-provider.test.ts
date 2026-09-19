@@ -43,6 +43,12 @@ function request(
       launchTiming: "WITHIN_MONTH",
       goal: "ADDITIONAL_INCOME",
       financialReadiness: "HIGH",
+      financialBarrier: null,
+      desiredIncome: 60_000,
+      availableTime: "3–4 часа в день",
+      buyingIntent: "READY_TO_START",
+      qualificationStatus: "HOT",
+      qualificationRationale: "Критические данные собраны, готовность подтверждена.",
       primaryBarrier: null,
       secondaryBarrier: null,
       objections: [],
@@ -375,6 +381,12 @@ describe("Telegram manager notifications", () => {
     expect(card).toContain("🔥 Новый квалифицированный лид");
     expect(card).toContain("Цель: дополнительный доход");
     expect(card).toContain("Срок запуска: в течение месяца");
+    expect(card).toContain("Статус: горячий");
+    expect(card).toContain("Финансовая готовность: высокая");
+    expect(card).toContain("Желаемый доход: 60");
+    expect(card).toContain("Намерение: готов начинать");
+    expect(card).toContain("Доступное время: 3–4 часа в день");
+    expect(card).toContain("Почему квалифицирован: Критические данные собраны");
     expect(card).toContain("Источник: Avito");
     expect(card).toContain("ID диалога: real-chat-id");
     expect(card).not.toMatch(/WITHIN_MONTH|ADDITIONAL_INCOME|HIGH|HOT/);

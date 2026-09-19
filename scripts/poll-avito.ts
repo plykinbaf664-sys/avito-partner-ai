@@ -20,6 +20,9 @@ async function main() {
   process.on("SIGTERM", onStop);
   try {
     do {
+      // Retry cards left pending by a crash or a temporary Telegram failure.
+      // Running before the poll leaves the normal interval between attempts.
+      await runtime.deliverPendingManagerNotifications();
       const result = await runtime.pollAvitoMessages(new Date());
       console.log(`AVITO_POLLING=${result.status} accepted=${result.accepted} processed=${result.processed} duplicates=${result.duplicates} failed=${result.failed} terminalSkipped=${result.terminalSkipped}`);
       const followUpResult = await runtime.processDueFollowUps(new Date());

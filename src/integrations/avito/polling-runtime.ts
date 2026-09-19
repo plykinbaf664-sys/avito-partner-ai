@@ -2,6 +2,7 @@ import { createNaturalResponseGenerator } from "@/application/conversation/gener
 import { createMessageExtractor } from "@/application/extraction/extract-message";
 import { ConsoleStructuredLogger } from "@/application/observability/structured-logger";
 import { createDueFollowUpsProcessor } from "@/application/workflows/process-due-follow-ups";
+import { createPendingManagerNotificationDelivery } from "@/application/delivery/deliver-pending-manager-notifications";
 import { createIncomingEventProcessor } from "@/application/workflows/process-incoming-event";
 import { createAvitoMessagePoller } from "@/application/workflows/poll-avito-messages";
 import { readAvitoChannelEnvironment, readInboundEnvironment, readTelegramEnvironment } from "@/config/environment";
@@ -28,17 +29,18 @@ export async function createRuntimeAvitoPolling(options: { chatId?: string } = {
   });
   const naturalResponseGenerator = createNaturalResponseGenerator({ llmProvider });
   const outboundProvider = new AvitoOutboundMessageProvider(client, logger);
+  const managerNotificationProvider = telegram.enabled
+    ? new TelegramManagerNotificationProvider(
+        { botToken: telegram.botToken!, logger },
+        persistence,
+      )
+    : undefined;
   const processIncomingEvent = createIncomingEventProcessor({
     persistence,
     extractMessage: createMessageExtractor({ llmProvider }),
     generateNaturalResponse: naturalResponseGenerator,
     outboundProvider,
-    managerNotificationProvider: telegram.enabled
-      ? new TelegramManagerNotificationProvider(
-          { botToken: telegram.botToken!, logger },
-          persistence,
-        )
-      : undefined,
+    managerNotificationProvider,
     logger,
   });
   return {
@@ -56,6 +58,13 @@ export async function createRuntimeAvitoPolling(options: { chatId?: string } = {
       generateNaturalResponse: naturalResponseGenerator,
       logger,
     }),
+    deliverPendingManagerNotifications: managerNotificationProvider
+      ? createPendingManagerNotificationDelivery({
+          persistence,
+          provider: managerNotificationProvider,
+          logger,
+        })
+      : async () => undefined,
     close: () => persistence.close(),
   };
 }

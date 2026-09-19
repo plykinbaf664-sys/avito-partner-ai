@@ -56,6 +56,26 @@ const goalLabels: Record<string, string> = {
   SCALE_EXISTING_BUSINESS: "масштабирование бизнеса", USE_OWN_PROPERTY: "использовать свою недвижимость",
   RECOVER_PREVIOUS_FAILURE: "новый запуск после неудачного опыта", UNKNOWN: "Не указано",
 };
+const qualificationLabels: Record<string, string> = {
+  QUALIFIED: "квалифицирован", PRIORITY: "приоритетный", HOT: "горячий",
+  WARM: "тёплый", BORDERLINE: "пограничный", NURTURE: "отложенный",
+};
+const financialReadinessLabels: Record<string, string> = {
+  HIGH: "высокая", READY: "подтверждена", BORDERLINE: "пограничная",
+  INCOMPATIBLE: "не соответствует", UNKNOWN: "не выяснена",
+};
+const buyingIntentLabels: Record<string, string> = {
+  GENERAL_INTEREST: "общий интерес", EXPLORING: "изучает",
+  CONSIDERING: "рассматривает", CONDITIONS_ACCEPTED: "условия подходят",
+  READY_TO_START: "готов начинать", WANTS_NEXT_STEP: "хочет следующий шаг",
+  WANTS_HUMAN: "хочет поговорить с человеком", DECLINED: "отказался",
+  UNKNOWN: "не выяснено",
+};
+const financialBarrierLabels: Record<string, string> = {
+  ADDITIONAL_LAUNCH_CAPITAL_UNKNOWN: "не подтверждён полный капитал запуска",
+  UNWILLING_TO_FUND_REQUIRED_EXPENSES: "не готов финансировать расходы объекта",
+  CAPITAL_BELOW_LAUNCH_RANGE: "капитал ниже расчётного диапазона запуска",
+};
 const barrierLabels: Record<string, string> = {
   FEAR_LOSE_MONEY: "опасается потерять деньги", FEAR_LOW_DEMAND: "сомневается в спросе",
   FEAR_NO_PROPERTY: "сложно найти объект", FEAR_OPERATIONAL_LOAD: "опасается операционной нагрузки",
@@ -73,9 +93,11 @@ export function formatTelegramManagerCard(
   addLine(lines, "Имя", summary.name);
   addLine(lines, "Телефон", summary.phoneNumber);
   lines.push("");
+  addLine(lines, "Статус", qualificationLabels[summary.qualificationStatus] ?? summary.qualificationStatus);
   addLine(lines, "Сегмент", segmentLabels[summary.segment] ?? "Не указано");
   addLine(lines, "Город", summary.city);
   addLine(lines, "Капитал", formatMoney(summary.availableCapital));
+  addLine(lines, "Финансовая готовность", financialReadinessLabels[summary.financialReadiness] ?? "не выяснена");
   addLine(
     lines,
     "Стартовый объём",
@@ -90,12 +112,17 @@ export function formatTelegramManagerCard(
   );
   addLine(lines, "Срок запуска", timingLabels[summary.launchTiming ?? "UNKNOWN"] ?? "Не указано");
   addLine(lines, "Цель", goalLabels[summary.goal ?? "UNKNOWN"] ?? "Не указано");
+  addLine(lines, "Желаемый доход", formatMoney(summary.desiredIncome));
+  addLine(lines, "Намерение", buyingIntentLabels[summary.buyingIntent ?? "UNKNOWN"] ?? "не выяснено");
+  addLine(lines, "Доступное время", summary.availableTime);
   addLine(lines, "Ключевые факты", compactManagerSummary(summary));
   const concerns = [
     ...summary.questions, ...summary.objections,
     barrierLabels[summary.primaryBarrier ?? ""], barrierLabels[summary.secondaryBarrier ?? ""],
+    financialBarrierLabels[summary.financialBarrier ?? ""],
   ].filter(Boolean);
   addLine(lines, "Вопросы / возражения", [...new Set(concerns)].slice(0, 4).join("; "));
+  addLine(lines, "Почему квалифицирован", summary.qualificationRationale);
   addLine(lines, "Следующий шаг", summary.recommendedNextStep);
   addLine(lines, "Источник", origin?.source.toLowerCase() === "avito" ? "Avito" : origin?.source ?? "Не указано");
   addLine(lines, "ID диалога", origin?.externalLeadId ?? "Не указано");
@@ -108,7 +135,6 @@ function compactManagerSummary(summary: ManagerSummary): string | null {
     summary.additionalExpensesReadiness === "READY" ? "готов к дополнительным расходам" : null,
     summary.businessExperience ? `опыт: ${compact(summary.businessExperience, 70)}` : null,
     summary.shortTermRentalExperience ? `опыт посуточной аренды: ${compact(summary.shortTermRentalExperience, 70)}` : null,
-    summary.availableTime ? `время: ${compact(summary.availableTime, 70)}` : null,
   ].filter((value): value is string => Boolean(value));
   return values.length > 0 ? values.join("; ") : null;
 }
