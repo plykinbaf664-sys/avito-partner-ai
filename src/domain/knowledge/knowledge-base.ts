@@ -57,6 +57,34 @@ const economicsTerms = [
 const mentionsFiftyThousand = (text: string) =>
   /(^|[^\d])50(?:\s*000|\s*тыс)/u.test(text);
 
+const asksAboutStartupCosts = (text: string) => {
+  const hasExplicitCostContext = containsAny(text, [
+    "деньг",
+    "денег",
+    "бюджет",
+    "влож",
+    "стоимост",
+    "обойд",
+    "руб",
+    "тысяч",
+    "расход",
+    "аренд",
+    "залог",
+    "оснащ",
+    "комплектац",
+    "первый этап",
+  ]);
+  const hasLaunchContext = containsAny(text, [
+    "запуск",
+    "старт",
+    "нача",
+    "объект",
+    "квартир",
+  ]);
+  const asksForAmount = /(?:сколько|какая сумма|какой бюджет).{0,45}(?:нужно|надо|потребуется|стоит|обойд)/u.test(text);
+  return hasExplicitCostContext || (hasLaunchContext && asksForAmount);
+};
+
 const normalizeQuestion = (text: string) =>
   text.trim().toLocaleLowerCase("ru-RU").replaceAll("ё", "е");
 
@@ -146,6 +174,7 @@ export const PARTNER_KNOWLEDGE_BASE: readonly KnowledgeEntry[] = [
       "Услуга помощи в запуске бизнеса стоит 50 000 ₽. Отдельно партнёр оплачивает аренду, залог, подготовку объекта — ориентир 30 000 ₽ на один объект — и другие операционные расходы. Залог зависит от объекта и собственника; для предварительного расчёта используется ориентир в один месяц аренды. При таком допущении старт одного объекта составляет около 150 000 ₽ при аренде 35 000 ₽ и около 180 000 ₽ при аренде 50 000 ₽. Это расчётные ориентиры, а не фиксированная смета или рыночная цена конкретного города.",
     matches: (text) =>
       mentionsFiftyThousand(text) ||
+      asksAboutStartupCosts(text) ||
       containsAny(text, [
         "первый этап",
         "субаренд",
@@ -153,9 +182,6 @@ export const PARTNER_KNOWLEDGE_BASE: readonly KnowledgeEntry[] = [
         "залог",
         "оснащен",
         "расход",
-        "сколько нужно",
-        "сколько надо",
-        "сколько вообще",
         "хватит",
         "бюджет запуска",
         "сколько денег",
@@ -319,6 +345,15 @@ export function answerFromKnowledgeBase(
       ? [extraction.signals.resolvedQuestion]
       : []),
   ].flatMap(questionParts);
+  const surfaceStatements = [
+    ...extraction.signals.questions,
+    ...extraction.signals.objections,
+  ].flatMap(questionParts);
+  const surfaceCandidates = PARTNER_KNOWLEDGE_BASE.filter((entry) =>
+    surfaceStatements.some((statement) =>
+      entry.matches(normalizeQuestion(statement)),
+    ),
+  );
   const directCandidates = PARTNER_KNOWLEDGE_BASE.filter((entry) =>
     userStatements.some((statement) =>
       entry.matches(normalizeQuestion(statement)),
@@ -342,7 +377,11 @@ export function answerFromKnowledgeBase(
       entry.matches(normalizeQuestion(latestOutbound.content)),
     )
     : [];
-  const previousCandidates = contextualReference
+  // A direct answer to the current question has priority. Previous topics are
+  // retrieval context only when the current wording is genuinely elliptical;
+  // a pronoun such as "это" must not drag an unrelated old topic into a clear
+  // new question.
+  const previousCandidates = contextualReference && directCandidates.length === 0
     ? (recentGroundedCandidates.length > 0
       ? recentGroundedCandidates.slice(0, 3)
       : allPreviousCandidates.slice(-1))
@@ -493,7 +532,10 @@ export function answerFromKnowledgeBase(
     entryIds: matched.map((entry) => entry.id),
     unresolvedQuestions,
     contextualReferenceResolved:
-      contextualReference && previousCandidates.length > 0 && unresolvedQuestions.length === 0,
+      contextualReference && unresolvedQuestions.length === 0 && (
+        previousCandidates.length > 0 ||
+        (surfaceCandidates.length === 0 && directCandidates.length > 0)
+      ),
     economicsContext,
     approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({
       id,

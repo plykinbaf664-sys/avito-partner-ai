@@ -169,6 +169,30 @@ describe("contextual partner knowledge", () => {
     expect(time.answerFragments.join(" ")).toContain("3–4 часов в день");
   });
 
+  it("answers a time question from the current topic without reviving previous economics", () => {
+    const answer = answerFromKnowledgeBase(
+      question("А сколько времени на это надо?", {
+        city: "Москва",
+        availableCapital: 500_000,
+        availableCapitalConfirmed: true,
+      }),
+      {
+        previousEntryIds: ["small-business-entry"],
+        recentMessages: [{
+          direction: "OUTBOUND",
+          content: "Готовы участвовать в запуске: ездить на просмотры и заключать договоры?",
+        }],
+        leadFacts: { city: "Москва", availableCapital: 500_000 },
+      },
+    );
+
+    expect(answer.entryIds).toEqual(["partner-time"]);
+    expect(answer.answerFragments.join(" ")).toContain("3–4 часов в день");
+    expect(answer.answerFragments.join(" ")).not.toContain("180 000 ₽");
+    expect(answer.economicsContext).toBeUndefined();
+    expect(answer.contextualReferenceResolved).toBe(false);
+  });
+
   it.each([
     "Мне самому нужно отвечать гостям?",
     "А объявления кто размещает?",

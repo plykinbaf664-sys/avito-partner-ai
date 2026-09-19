@@ -324,6 +324,81 @@ describe("natural response generation", () => {
       .toContain("пропустил вопрос");
   });
 
+  it("keeps a direct time question anchored to time instead of reviving startup costs", async () => {
+    const partnerTime = PARTNER_KNOWLEDGE_BASE.find(
+      (entry) => entry.id === "partner-time",
+    )!;
+    const startupCosts = PARTNER_KNOWLEDGE_BASE.find(
+      (entry) => entry.id === "small-business-entry",
+    )!;
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        text: "Запуск одного объекта в Москве стоит около 180 000 ₽. Готовы участвовать в запуске?",
+        nextInformationNeed: "MANAGEMENT_READINESS",
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Продолжить квалификацию.",
+        answerCoverage: "FULL",
+        usedKnowledgeEntryIds: [startupCosts.id],
+      }),
+      JSON.stringify({
+        text: "На старте ориентир — около 3–4 часов в день: на просмотры, договоры и ключевые решения. Такой объём времени Вам подходит?",
+        nextInformationNeed: "FREE_TIME",
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Ответить про время и естественно уточнить доступность.",
+        answerCoverage: "FULL",
+        usedKnowledgeEntryIds: [partnerTime.id],
+      }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const plan: ConversationResponsePlan = {
+      text: partnerTime.answer,
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [partnerTime.id],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "QUESTION",
+      currentUserQuestions: ["А сколько времени на это надо?"],
+      currentTurnRequiresAnswer: true,
+      groundedAnswerRequired: true,
+      qualificationProgressExpected: true,
+      allowedNextInformationNeeds: ["FREE_TIME", "MANAGEMENT_READINESS"],
+      allowedQualificationMoves: [
+        { need: "FREE_TIME", objective: "понять доступное для проекта время" },
+        { need: "MANAGEMENT_READINESS", objective: "понять готовность участвовать в запуске" },
+      ],
+      approvedFacts: [partnerTime, startupCosts].map((entry) => ({
+        id: entry.id,
+        category: entry.category,
+        answer: entry.answer,
+      })),
+    };
+
+    await expect(generate({
+      lead: { city: "Москва", availableCapital: 500_000 } as Lead,
+      plan,
+      recentMessages: [{
+        direction: "OUTBOUND",
+        content: "Готовы участвовать в запуске: ездить на просмотры, заключать договоры аренды и принимать ключевые решения?",
+      }, {
+        direction: "INBOUND",
+        content: "А сколько времени на это надо?",
+      }],
+    })).resolves.toMatchObject({
+      text: expect.stringContaining("3–4 часов в день"),
+      nextInformationNeed: "FREE_TIME",
+      conversationAction: "ANSWER",
+    });
+    expect(llm.callCount).toBe(2);
+    expect(JSON.parse(llm.requests[0]!.userMessage)).toMatchObject({
+      currentKnowledgeEntryIds: [partnerTime.id],
+    });
+    expect(JSON.parse(llm.requests[1]!.userMessage).validationFeedback)
+      .toContain("пропустил вопрос");
+  });
+
   it("answers a semantic request even when no literal KB fragment matched", async () => {
     const llm = new FakeLLMProvider([
       JSON.stringify({
