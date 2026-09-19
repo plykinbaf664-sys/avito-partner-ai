@@ -281,12 +281,10 @@ export function evaluateQualification(
   if (facts.primaryGoal === null || facts.primaryGoal === "UNKNOWN") {
     informationGaps.push("GOAL_UNKNOWN");
   }
-  if (
-    facts.segment === "SMALL_BUSINESS" &&
-    facts.businessModelReadiness === "UNKNOWN"
-  ) {
-    informationGaps.push("BUSINESS_MODEL_READINESS_UNKNOWN");
-  }
+  // The conversation is already scoped to this business model.  Readiness is
+  // still stored and explicit rejection remains a hard blocker, but an
+  // unknown value must not force a redundant "are you considering our model?"
+  // question or prevent otherwise complete qualification.
   if (
     financialAssessment.financialReadiness !== "HIGH" &&
     financialAssessment.financialReadiness !== "READY"

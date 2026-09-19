@@ -5,6 +5,7 @@ import {
   calculateEconomicsEstimate,
   findApprovedRentReference,
   GENERAL_RENT_RANGE_REFERENCE,
+  PARTNER_MONTHLY_INCOME_PER_UNIT_REFERENCE,
   type ApprovedEconomicsContext,
   type RentRangeReference,
 } from "../economics/economics-calculator";
@@ -440,6 +441,19 @@ export function answerFromKnowledgeBase(
         .toLocaleString("ru-RU")
         .replaceAll("\u00a0", " ");
       return `Для ${formatUnitCount(estimate.units)} ориентир по доходу составляет около ${monthlyIncome} ₽ в месяц. ${estimate.disclaimer}`;
+    }
+    if (asksAboutEconomics && availableCapital !== null && economicsContext) {
+      const incomeScenarios = economicsContext.scenarios
+        .filter((scenario) => scenario.affordableObjectCount !== null)
+        .map((scenario) => {
+          const count = scenario.affordableObjectCount!.maxUnitsAtMinCost;
+          const income = (count * PARTNER_MONTHLY_INCOME_PER_UNIT_REFERENCE)
+            .toLocaleString("ru-RU").replaceAll("\u00a0", " ");
+          return `${scenario.label}: при таком ориентире капитала до ${formatUnitCount(count)}, около ${income} ₽/мес`;
+        });
+      if (incomeScenarios.length > 0) {
+        return `${entry.answer} При капитале около ${formatMoney(availableCapital)} ориентир по доступному объёму и доходу такой: ${incomeScenarios.join("; ")}. Это расчётный ориентир, а не гарантия.`;
+      }
     }
     if (
       affordableObjects === null &&

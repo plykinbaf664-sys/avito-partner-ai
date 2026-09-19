@@ -303,7 +303,10 @@ export function buildConversationResponse(params: {
   if (knowledge.unresolvedQuestions.length > 0) {
     const topics = knowledge.unresolvedQuestions
       .map((question) => question.replace(/[?\r\n]+/gu, " ").trim()).join("; ");
-    parts.push(`По вопросу «${topics}» у меня нет подтверждённых деталей — эту часть лучше уточнить у менеджера.`);
+    const requiresContractContext = /договор|юридич|налог|страхов|оплат|рассроч|скидк/iu.test(topics);
+    parts.push(requiresContractContext
+      ? `Нюансы по вопросу «${topics}» лучше уточнить у менеджера; по остальным условиям я помогу сориентироваться.`
+      : `По вопросу «${topics}» у меня нет подтверждённых деталей — эту часть лучше уточнить у менеджера.`);
   }
 
   if (decision.shouldHandoffToManager && !postHandoffContinuation) {

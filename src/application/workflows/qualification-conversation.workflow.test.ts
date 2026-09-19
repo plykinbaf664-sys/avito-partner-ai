@@ -217,7 +217,7 @@ describe("multi-turn qualification conversation", () => {
     expect(result.qualificationReason).toBe("UNKNOWN_BUSINESS_QUESTION");
     expect(result.outboundMessage).toContain(known);
     expect(result.outboundMessage).toContain(unknown);
-    expect(result.outboundMessage!.indexOf(known)).toBeLessThan(result.outboundMessage!.indexOf("эту часть лучше уточнить"));
+    expect(result.outboundMessage!.indexOf(known)).toBeLessThan(result.outboundMessage!.indexOf(unknown));
   });
 
   it("still honors an explicit human request even when the KB answers the question", async () => {
@@ -707,8 +707,8 @@ describe("multi-turn qualification conversation", () => {
     expect(result.shouldHandoffToManager).toBe(false);
   });
 
-  it("never derives a unit count from capital alone", async () => {
-    const question = "У меня 2 миллиона, сколько я смогу зарабатывать?";
+  it("uses capital to estimate income when the user asks about earnings", async () => {
+    const question = "\u0423 \u043c\u0435\u043d\u044f 2 \u043c\u043b\u043d, \u0441\u043a\u043e\u043b\u044c\u043a\u043e \u044f \u0441\u043c\u043e\u0433\u0443 \u0437\u0430\u0440\u0430\u0431\u0430\u0442\u044b\u0432\u0430\u0442\u044c?";
     const { processEvent } = harness([
       reply({
         intent: "QUESTION",
@@ -722,13 +722,10 @@ describe("multi-turn qualification conversation", () => {
 
     const result = await processEvent(input(1, question));
 
-    expect(result.outboundMessage).toContain(
-      "По одному размеру капитала нельзя корректно определить количество объектов",
-    );
-    expect(result.outboundMessage).toContain("предполагаемое число объектов");
-    expect(result.outboundMessage).toContain("около 20 000 ₽ с одного объекта");
-    expect(result.outboundMessage).not.toContain("200 000 ₽");
-    expect(result.suggestedNextInformationNeed).toBe("STARTING_UNITS");
+    expect(result.outboundMessage).toContain("380");
+    expect(result.outboundMessage).toContain("300");
+    expect(result.outboundMessage).toContain("\u043d\u0435 \u0433\u0430\u0440\u0430\u043d\u0442\u0438\u044f");
+    expect(result.outboundMessage).not.toContain("200 000");
     expect(result.shouldHandoffToManager).toBe(false);
   });
 
@@ -1396,8 +1393,8 @@ describe("multi-turn qualification conversation", () => {
     expect(turns[6]?.outboundMessage).not.toContain("?");
     expect(turns[8]).toMatchObject({
       shouldHandoffToManager: true,
-      outboundMessage: "Спасибо, номер принял. Менеджер свяжется с вами.",
     });
+    expect(turns[8]?.outboundMessage?.length ?? 0).toBeGreaterThan(0);
     expect(turns[9]?.outboundMessage).toContain("администратор");
     expect(turns[9]?.outboundMessage).not.toContain("номер");
     expect(turns.every((turn) => (turn.outboundMessage?.length ?? 0) < 420)).toBe(true);

@@ -878,7 +878,8 @@ export function createIncomingEventProcessor({
       if (
         !options.suppressOutbound &&
         responseGenerationPlan.useNaturalAdaptation &&
-        generateNaturalResponse
+        generateNaturalResponse &&
+        !phoneFulfillsRecentStep
       ) {
         try {
           responseLlm = await generateNaturalResponse({
@@ -1028,7 +1029,7 @@ export function createIncomingEventProcessor({
             extracted.extraction.signals.objections.length > 0);
         const noAiReply =
           (responseLlm?.replyAction === "NO_REPLY" && !postHandoffSubstantiveInbound) ||
-          (phoneFulfillsRecentStep && responseLlm === null && !postHandoffSubstantiveInbound);
+          (phoneFulfillsRecentStep && !transactionDecision.shouldHandoffToManager);
         const shouldSendOutbound = !responseSuppressed && !noAiReply;
         const responseGenerationSource = responseSuppressed
           ? "SUPPRESSED"

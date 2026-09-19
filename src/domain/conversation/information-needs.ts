@@ -124,7 +124,6 @@ function criticalInformationNeedsFor(lead: Lead): InformationNeed[] {
       "LAUNCH_TIMING",
       "CITY",
       "GOAL",
-      "BUSINESS_MODEL",
       "ADDITIONAL_EXPENSES",
       "MANAGEMENT_READINESS",
       "PHONE_NUMBER",
@@ -134,7 +133,6 @@ function criticalInformationNeedsFor(lead: Lead): InformationNeed[] {
     "AVAILABLE_CAPITAL",
     "STARTING_UNITS",
     "GOAL",
-    "BUSINESS_MODEL",
     "LAUNCH_TIMING",
   ];
   if (

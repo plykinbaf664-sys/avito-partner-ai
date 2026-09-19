@@ -147,7 +147,7 @@ describe("full local Avito channel workflow", () => {
 
     expect(first.leadId).toBe(second.leadId);
     expect(second.shouldHandoffToManager).toBe(true);
-    expect(avitoClient.sendTextMessage).toHaveBeenCalledTimes(1);
+    expect(avitoClient.sendTextMessage).toHaveBeenCalledTimes(2);
     expect(telegram.calls).toHaveLength(1);
     expect(telegram.calls[0]).toMatchObject({ chatId: "1001" });
     const lead = await persistence.leads.findById(second.leadId!);
