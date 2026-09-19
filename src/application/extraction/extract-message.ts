@@ -277,6 +277,47 @@ function withExtractionDefaults(value: unknown): unknown {
   };
 }
 
+function normalizeSignalEvidence(value: string): string {
+  return value
+    .toLocaleLowerCase("ru-RU")
+    .replaceAll("ё", "е")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .replace(/\s+/gu, " ");
+}
+
+function isGroundedInCurrentMessage(signal: string, currentMessage: string): boolean {
+  const normalizedSignal = normalizeSignalEvidence(signal);
+  const normalizedMessage = normalizeSignalEvidence(currentMessage);
+  if (!normalizedSignal || !normalizedMessage) return false;
+  if (
+    normalizedMessage.includes(normalizedSignal) ||
+    normalizedSignal.includes(normalizedMessage)
+  ) return true;
+
+  const signalTokens = new Set(
+    normalizedSignal.split(" ").filter((token) => token.length >= 3),
+  );
+  const messageTokens = new Set(
+    normalizedMessage.split(" ").filter((token) => token.length >= 3),
+  );
+  if (signalTokens.size === 0 || messageTokens.size === 0) return false;
+  const overlap = [...signalTokens].filter((token) => messageTokens.has(token)).length;
+  return overlap / signalTokens.size >= 0.6;
+}
+
+function ungroundedCurrentMessageSignals(
+  extraction: ExtractedMessage,
+  currentMessage: string,
+): string[] {
+  return [
+    ...extraction.signals.questions.map((value) => ({ field: "questions", value })),
+    ...extraction.signals.objections.map((value) => ({ field: "objections", value })),
+  ]
+    .filter(({ value }) => !isGroundedInCurrentMessage(value, currentMessage))
+    .map(({ field }) => field);
+}
+
 function explicitlyAcceptsManagementInteraction(text: string): boolean {
   const normalized = text.trim().toLocaleLowerCase("ru-RU");
   if (/\bне\s+готов/u.test(normalized)) return false;
@@ -338,9 +379,7 @@ export function createMessageExtractor({
     const generatedSchema = z.toJSONSchema(extractedMessageSchema);
     const jsonSchema = { ...generatedSchema };
     delete jsonSchema.$schema;
-    const response = await llmProvider.generateText({
-      systemPrompt: EXTRACTION_SYSTEM_PROMPT,
-      userMessage: JSON.stringify({
+    const userMessage = JSON.stringify({
         type: "UNTRUSTED_CONVERSATION_CONTEXT",
         CURRENT_MESSAGE: validatedText,
         PENDING_INFORMATION_NEED:
@@ -376,19 +415,45 @@ export function createMessageExtractor({
             actor: actor ?? (direction === "INBOUND" ? "USER" : "AI"),
             content: content.slice(0, MAX_RECENT_LLM_MESSAGE_LENGTH),
           })),
-      }),
-      maxTokens,
-      jsonSchema,
-    });
-
-    const parsed = extractedMessageSchema.safeParse(
-      withExtractionDefaults(parseJson(response.text)),
-    );
-    if (!parsed.success) {
-      throw new InvalidExtractionOutputError(
-        `LLM extraction failed validation: ${z.prettifyError(parsed.error)}`,
-        { cause: parsed.error },
+      });
+    const requestExtraction = (validationFeedback?: string) =>
+      llmProvider.generateText({
+        systemPrompt: validationFeedback
+          ? `${EXTRACTION_SYSTEM_PROMPT}\n\nTRUSTED_VALIDATION_FEEDBACK: ${validationFeedback}`
+          : EXTRACTION_SYSTEM_PROMPT,
+        userMessage,
+        maxTokens,
+        jsonSchema,
+      });
+    const parseExtraction = (response: LlmTextResponse) => {
+      const parsed = extractedMessageSchema.safeParse(
+        withExtractionDefaults(parseJson(response.text)),
       );
+      if (!parsed.success) {
+        throw new InvalidExtractionOutputError(
+          `LLM extraction failed validation: ${z.prettifyError(parsed.error)}`,
+          { cause: parsed.error },
+        );
+      }
+      return parsed;
+    };
+
+    let response = await requestExtraction();
+    let totalInputTokens = response.inputTokens;
+    let totalOutputTokens = response.outputTokens;
+    let parsed = parseExtraction(response);
+    if (ungroundedCurrentMessageSignals(parsed.data, validatedText).length > 0) {
+      response = await requestExtraction(
+        "The previous output copied or invented questions/objections that are not present in CURRENT_MESSAGE. Extract signals only from CURRENT_MESSAGE. RECENT_MESSAGES may resolve references, but their text must never be emitted as a current question or objection.",
+      );
+      totalInputTokens += response.inputTokens;
+      totalOutputTokens += response.outputTokens;
+      parsed = parseExtraction(response);
+      if (ungroundedCurrentMessageSignals(parsed.data, validatedText).length > 0) {
+        throw new InvalidExtractionOutputError(
+          "LLM extraction emitted questions or objections not grounded in CURRENT_MESSAGE",
+        );
+      }
     }
 
     const ambiguousServiceFeeOnly =
@@ -469,8 +534,8 @@ export function createMessageExtractor({
       extraction,
       llm: {
         model: response.model,
-        inputTokens: response.inputTokens,
-        outputTokens: response.outputTokens,
+        inputTokens: totalInputTokens,
+        outputTokens: totalOutputTokens,
       },
     };
   };

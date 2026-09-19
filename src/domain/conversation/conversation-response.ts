@@ -212,6 +212,23 @@ export function buildConversationResponse(params: {
   // of this turn. Literal KB matching only supplies convenient fragments; it
   // must never decide whether Claude may answer from the full approved context.
   const groundedAnswerRequired = currentTurnRequiresAnswer;
+  const previouslyExplainedKnowledgeEntryIds = new Set(
+    params.previouslyExplainedKnowledgeEntryIds ?? [],
+  );
+  // Approved knowledge remains available to Claude, but a previously explained
+  // topic must not become default copy for an ordinary qualification answer.
+  // A new question/clarification may legitimately revisit the same topic.
+  const knowledgeEntryIdsForCurrentTurn = currentTurnRequiresAnswer
+    ? knowledge.entryIds
+    : knowledge.entryIds.filter(
+        (entryId) => !previouslyExplainedKnowledgeEntryIds.has(entryId),
+      );
+  const answerFragmentsForCurrentTurn = knowledge.answerFragments.filter(
+    (_fragment, index) => {
+      const entryId = knowledge.entryIds[index];
+      return entryId === undefined || knowledgeEntryIdsForCurrentTurn.includes(entryId);
+    },
+  );
   const adaptiveContext = {
     allowedNextInformationNeeds,
     allowedNextQuestions: allowedNextInformationNeeds.map((need) => ({
@@ -257,7 +274,7 @@ export function buildConversationResponse(params: {
     const answeredThenRejected = [
       ...(compactRejectedAnswer
         ? [compactRejectedAnswer]
-        : knowledge.answerFragments.slice(0, 2)),
+        : answerFragmentsForCurrentTurn.slice(0, 2)),
       rejectionMessages[decision.reason] ??
         "К сожалению, текущий формат вам не подойдёт. Спасибо за разговор.",
     ];
@@ -265,9 +282,9 @@ export function buildConversationResponse(params: {
       text: answeredThenRejected.join(" "),
       nextInformationNeed: null,
       asksUserQuestion: false,
-      knowledgeEntryIds: knowledge.entryIds,
+      knowledgeEntryIds: knowledgeEntryIdsForCurrentTurn,
       unresolvedQuestions: [],
-      useNaturalAdaptation: knowledge.answerFragments.length > 0,
+      useNaturalAdaptation: answerFragmentsForCurrentTurn.length > 0,
       contextualReference: knowledge.contextualReferenceResolved,
       ...adaptiveContext,
       economicsContext: knowledge.economicsContext,
@@ -290,7 +307,7 @@ export function buildConversationResponse(params: {
       ? [guidanceDraft]
       : contextualEconomicsDraft
         ? [contextualEconomicsDraft]
-        : knowledge.answerFragments.slice(0, 2);
+        : answerFragmentsForCurrentTurn.slice(0, 2);
   const asksCallTime = params.extraction.signals.questions.some((question) =>
     /(?:\u043a\u043e\u0433\u0434\u0430|\u043a\u0430\u043a\u043e\u0435\s+\u0432\u0440\u0435\u043c\u044f|\u0432\u043e\s+\u0441\u043a\u043e\u043b\u044c\u043a\u043e|\u0443\u0434\u043e\u0431\u043d).{0,35}(?:\u043f\u043e\u0437\u0432\u043e\u043d|\u0441\u0432\u044f\u0437|\u0441\u043e\u0437\u0432\u043e\u043d|\u0437\u0432\u043e\u043d\u043e\u043a)|(?:\u043f\u043e\u0437\u0432\u043e\u043d|\u0441\u0432\u044f\u0437|\u0441\u043e\u0437\u0432\u043e\u043d|\u0437\u0432\u043e\u043d\u043e\u043a).{0,35}(?:\u043a\u043e\u0433\u0434\u0430|\u0432\u0440\u0435\u043c\u044f|\u0443\u0434\u043e\u0431\u043d)|(?:\u043a\u043e\u0433\u0434\u0430|\u0432\u0440\u0435\u043c\u044f).{0,20}$/iu.test(question),
   ) && params.lead.handoffAt !== null;
@@ -333,7 +350,7 @@ export function buildConversationResponse(params: {
     nextInformationNeed,
     asksUserQuestion:
       !decision.shouldHandoffToManager && nextInformationNeed !== null && !phoneDeclined,
-    knowledgeEntryIds: knowledge.entryIds,
+    knowledgeEntryIds: knowledgeEntryIdsForCurrentTurn,
     unresolvedQuestions: knowledge.unresolvedQuestions,
     useNaturalAdaptation: true,
     contextualReference: knowledge.contextualReferenceResolved,

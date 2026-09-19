@@ -526,6 +526,70 @@ describe("natural response generation", () => {
     expect(context.allowedNextQuestions).toBeUndefined();
   });
 
+  it("regenerates instead of repeating a recently explained knowledge topic", async () => {
+    const repeated = "Команда помогает с поиском и запуском объектов, объявлениями, бронированиями, дистанционным заселением, гостями, клинингом, календарями и координацией персонала. Расходы по бизнесу несёт партнёр как владелец своего бизнеса. Какой бюджет готовы выделить?";
+    const corrected = "Москва, понял. Какой бюджет в целом Вы готовы выделить на запуск?";
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        replyAction: "SEND_REPLY",
+        text: repeated,
+        nextInformationNeed: "AVAILABLE_CAPITAL",
+        conversationAction: "DISCOVER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "нужен следующий факт",
+        answerCoverage: "FULL",
+        unresolvedTopics: [],
+        usedKnowledgeEntryIds: ["company-responsibilities"],
+      }),
+      JSON.stringify({
+        replyAction: "SEND_REPLY",
+        text: corrected,
+        nextInformationNeed: "AVAILABLE_CAPITAL",
+        conversationAction: "DISCOVER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "город уже принят, продолжаем без повтора",
+        answerCoverage: "FULL",
+        unresolvedTopics: [],
+        usedKnowledgeEntryIds: [],
+      }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const plan: ConversationResponsePlan = {
+      text: "Какой бюджет в целом Вы готовы выделить на запуск?",
+      nextInformationNeed: "AVAILABLE_CAPITAL",
+      asksUserQuestion: true,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "QUALIFICATION_INFORMATION",
+      currentTurnRequiresAnswer: false,
+      previouslyExplainedKnowledgeEntryIds: ["company-responsibilities"],
+      allowedNextInformationNeeds: ["AVAILABLE_CAPITAL"],
+      allowedQualificationMoves: [{
+        need: "AVAILABLE_CAPITAL",
+        objective: "понять доступный капитал на запуск",
+      }],
+      approvedFacts: [{
+        id: "company-responsibilities",
+        category: "RESPONSIBILITIES",
+        answer: "Команда помогает с запуском и операционной работой.",
+      }],
+    };
+
+    await expect(generate({
+      lead: { city: "Москва" } as Lead,
+      plan,
+      recentMessages: [{
+        direction: "OUTBOUND",
+        content: "Команда помогает с поиском и запуском объектов, объявлениями, бронированиями, дистанционным заселением, гостями, клинингом, календарями и координацией персонала. Расходы по бизнесу несёт партнёр как владелец своего бизнеса. В каком городе Вы планируете запускать объекты?",
+      }],
+    })).resolves.toMatchObject({ text: corrected });
+    expect(llm.callCount).toBe(2);
+    expect(JSON.parse(llm.requests[1]!.userMessage)).toMatchObject({
+      validationFeedback: expect.stringContaining("существенно повторяет недавний ответ"),
+    });
+  });
+
   it("passes deterministic economics capability and rejects invented values", async () => {
     const economicsContext = buildApprovedEconomicsContext({
       availableCapital: 250_000,

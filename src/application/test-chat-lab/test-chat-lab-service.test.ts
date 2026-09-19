@@ -16,9 +16,13 @@ import {
   TEST_CHAT_LAB_SOURCE,
 } from "./test-chat-lab-service";
 
-function extractionReply(facts: Partial<ExtractedFacts> = {}): string {
+function extractionReply(
+  facts: Partial<ExtractedFacts> = {},
+  signals: Partial<ExtractedSignals> = {},
+  intent: ExtractedMessage["intent"] = "GENERAL_INTEREST",
+): string {
   const extraction: ExtractedMessage = {
-    intent: "GENERAL_INTEREST",
+    intent,
     facts: {
       phoneNumber: "",
       phoneConfirmed: false,
@@ -54,6 +58,7 @@ function extractionReply(facts: Partial<ExtractedFacts> = {}): string {
       possiblePrimaryFear: null,
       possibleSecondaryFear: null,
       wantsHuman: false,
+      ...signals,
     } satisfies ExtractedSignals,
     confidence: 0.9,
     uncertainty: [],
@@ -142,5 +147,69 @@ describe("isolated Test Chat Lab workflow", () => {
     const second = await lab.advanceTime("session-2", at(4));
     expect(second.followUp?.sent).toBe(0);
     expect(outbound.requests).toHaveLength(2);
+  });
+
+  it("does not replay an explained business overview when the client answers with a city", async () => {
+    const businessOverview = "Команда помогает подобрать и запустить объект, вести объявления, бронирования и работу с гостями.";
+    const llm = new FakeLLMProvider([
+      extractionReply({}, {
+        questions: ["Расскажите подробнее"],
+        requiresSubstantiveAnswer: true,
+      }, "QUESTION"),
+      JSON.stringify({
+        replyAction: "SEND_REPLY",
+        text: `${businessOverview} В каком городе Вы планируете запуск?`,
+        nextInformationNeed: "CITY",
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "после ответа естественно уточнить город",
+        answerCoverage: "FULL",
+        unresolvedTopics: [],
+        usedKnowledgeEntryIds: ["company-responsibilities"],
+      }),
+      extractionReply({}, {
+        questions: ["Расскажите подробнее"],
+        previousQuestionResponse: "DECLINED_TO_ANSWER",
+        requiresSubstantiveAnswer: true,
+      }, "QUESTION"),
+      extractionReply({ city: "Москва" }, {
+        questions: [],
+        previousQuestionResponse: "ANSWERED",
+        requiresSubstantiveAnswer: false,
+      }, "QUALIFICATION_INFORMATION"),
+      JSON.stringify({
+        replyAction: "SEND_REPLY",
+        text: "Москва, понял. Какой бюджет в целом Вы готовы выделить на запуск?",
+        nextInformationNeed: "AVAILABLE_CAPITAL",
+        conversationAction: "DISCOVER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "город принят, следующий полезный факт — бюджет",
+        answerCoverage: "FULL",
+        unresolvedTopics: [],
+        usedKnowledgeEntryIds: [],
+      }),
+    ]);
+    const outbound = new FakeOutboundProvider();
+    const lab = createTestChatLabService({
+      persistence,
+      llmProvider: llm,
+      outboundProvider: outbound,
+      managerNotificationProvider: new FakeManagerNotificationProvider(),
+    });
+
+    await lab.clientMessage("session-repeat", "Расскажите подробнее", at(0), "client-1");
+    const result = await lab.clientMessage("session-repeat", "Москва", at(0), "client-2");
+    const lead = await persistence.leads.findByExternalIdentity(
+      TEST_CHAT_LAB_SOURCE,
+      "session-repeat",
+    );
+
+    expect(llm.callCount).toBe(5);
+    expect(lead?.city).toBe("Москва");
+    expect(outbound.requests).toHaveLength(2);
+    expect(outbound.requests[1]?.text).toContain("Москва");
+    expect(outbound.requests[1]?.text).not.toContain(businessOverview);
+    expect(result.snapshot.messages.filter((message) => message.actor === "AI"))
+      .toHaveLength(2);
   });
 });

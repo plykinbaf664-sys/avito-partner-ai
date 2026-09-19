@@ -222,6 +222,35 @@ function validateResponsePolicy(
     throw new Error("RESPONSE_POLICY_MISSING_CURRENT_INTENT_ANSWER");
   }
   const normalizedReply = text.trim().toLocaleLowerCase("ru-RU");
+  const normalizedReplyTokens = new Set(
+    normalizedReply
+      .replaceAll("ё", "е")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim()
+      .split(/\s+/u)
+      .filter((token) => token.length >= 3),
+  );
+  const substantiallyRepeatsRecentOutbound = recentMessages
+    .filter((message) => message.direction === "OUTBOUND")
+    .slice(-4)
+    .some((message) => {
+      const priorTokens = new Set(
+        message.content
+          .toLocaleLowerCase("ru-RU")
+          .replaceAll("ё", "е")
+          .replace(/[^\p{L}\p{N}]+/gu, " ")
+          .trim()
+          .split(/\s+/u)
+          .filter((token) => token.length >= 3),
+      );
+      if (normalizedReplyTokens.size < 12 || priorTokens.size < 12) return false;
+      const overlap = [...normalizedReplyTokens]
+        .filter((token) => priorTokens.has(token)).length;
+      return overlap / Math.min(normalizedReplyTokens.size, priorTokens.size) >= 0.72;
+    });
+  if (substantiallyRepeatsRecentOutbound) {
+    throw new Error("RESPONSE_POLICY_REPEATED_RECENT_CONTENT");
+  }
   const genericAcknowledgements = new Set(["\u043f\u043e\u043d\u044f\u043b", "\u043f\u043e\u043d\u044f\u0442\u043d\u043e", "\u0445\u043e\u0440\u043e\u0448\u043e", "\u0443\u0447\u0442\u0443", "\u043f\u0440\u0438\u043d\u044f\u043b"]);
   if (
     plan.currentTurnRequiresAnswer === true &&
@@ -234,6 +263,14 @@ function validateResponsePolicy(
   }
   const approvedFactIds = new Set((plan.approvedFacts ?? []).map((fact) => fact.id));
   if ((usedKnowledgeEntryIds ?? []).some((id) => !approvedFactIds.has(id))) invalid();
+  if (
+    plan.currentTurnRequiresAnswer !== true &&
+    (usedKnowledgeEntryIds ?? []).some((id) =>
+      (plan.previouslyExplainedKnowledgeEntryIds ?? []).includes(id)
+    )
+  ) {
+    throw new Error("RESPONSE_POLICY_REPEATED_KNOWLEDGE_TOPIC");
+  }
   if (
     plan.groundedAnswerRequired === true &&
     plan.knowledgeEntryIds.length > 0 &&
@@ -517,6 +554,8 @@ IMPORTANT CONVERSATION RULES:
           "RESPONSE_POLICY_MISSING_CURRENT_INTENT_ANSWER",
           "RESPONSE_POLICY_INFORMAL_ADDRESS",
           "RESPONSE_POLICY_REPEATED_GUIDANCE_TOPIC",
+          "RESPONSE_POLICY_REPEATED_KNOWLEDGE_TOPIC",
+          "RESPONSE_POLICY_REPEATED_RECENT_CONTENT",
         ].includes(error.message)
       ) {
         throw error;
@@ -528,6 +567,10 @@ IMPORTANT CONVERSATION RULES:
           ? "Предыдущий вариант перешёл на неформальное обращение. Перепиши ответ, обращаясь к клиенту только уважительно на «Вы»: вы, вам, ваш, готовы, хотели бы."
           : error.message === "RESPONSE_POLICY_REPEATED_GUIDANCE_TOPIC"
             ? "Предыдущий вариант снова спросил тему, по которой человек запросил рекомендацию. Дай конечную рекомендацию по economicsContext и выбери другую тему из allowedQualificationMoves."
+          : error.message === "RESPONSE_POLICY_REPEATED_KNOWLEDGE_TOPIC"
+            ? "Предыдущий вариант повторно объяснил уже раскрытую тему, хотя человек этого не просил. Коротко отреагируй только на CURRENT_MESSAGE и при необходимости выбери один новый уместный move."
+          : error.message === "RESPONSE_POLICY_REPEATED_RECENT_CONTENT"
+            ? "Предыдущий вариант существенно повторяет недавний ответ. Не пересказывай уже сказанное: учти текущую реплику и продолжи разговор новым уместным шагом."
             : "Предыдущий вариант остановил активную квалификацию без причины. Сначала отреагируй на текущий intent, затем выбери ОДИН естественный следующий шаг из allowedQualificationMoves. Не повторяй уже известное.";
       response = await requestResponse(validationFeedback);
       validated = parseAndValidate(response);

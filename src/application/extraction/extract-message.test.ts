@@ -419,4 +419,80 @@ describe("message extraction schema", () => {
     expect(llm.requests[0]?.systemPrompt).toContain("COMPLAINT — раздражение");
     expect(llm.requests[0]?.systemPrompt).toContain("3–4 часов в день");
   });
+
+  it("retries when extraction copies a previous user question into the current turn", async () => {
+    const reply = (overrides: {
+      city: string | null;
+      questions: string[];
+      previousQuestionResponse: "ANSWERED" | "DECLINED_TO_ANSWER";
+      requiresSubstantiveAnswer: boolean;
+      intent: "QUESTION" | "QUALIFICATION_INFORMATION";
+    }) => JSON.stringify({
+      intent: overrides.intent,
+      facts: {
+        phoneNumber: "", phoneConfirmed: false, city: overrides.city,
+        budget: null, budgetConfirmed: false, availableCapital: -1,
+        availableCapitalConfirmed: false, entryBudget: -1,
+        additionalLaunchCapital: -1, capitalScope: "UNKNOWN",
+        additionalExpensesReadiness: "UNKNOWN",
+        businessModelReadiness: "UNKNOWN", calculationUnits: -1,
+        startingUnits: null, scalingPotentialUnits: null, hasFreeTime: null,
+        availableTimeDetails: null, businessExperience: null,
+        shortTermRentalExperience: null, ownsProperty: null,
+        desiredIncome: null, primaryGoal: "UNKNOWN", buyingIntent: "UNKNOWN",
+        launchTiming: null, managementReadiness: null,
+        requiresGuaranteedIncome: null, rejectsBusinessModel: null,
+      },
+      signals: {
+        questions: overrides.questions, objections: [],
+        possiblePrimaryFear: null, possibleSecondaryFear: null,
+        wantsHuman: false,
+        previousQuestionResponse: overrides.previousQuestionResponse,
+        resolvedQuestion: "", contextualReference: false,
+        needsStartupScaleRecommendation: false,
+        requiresSubstantiveAnswer: overrides.requiresSubstantiveAnswer,
+      },
+      confidence: 0.95,
+      uncertainty: [],
+    });
+    const llm = new FakeLLMProvider([
+      reply({
+        city: null,
+        questions: ["Расскажите подробнее"],
+        previousQuestionResponse: "DECLINED_TO_ANSWER",
+        requiresSubstantiveAnswer: true,
+        intent: "QUESTION",
+      }),
+      reply({
+        city: "Москва",
+        questions: [],
+        previousQuestionResponse: "ANSWERED",
+        requiresSubstantiveAnswer: false,
+        intent: "QUALIFICATION_INFORMATION",
+      }),
+    ]);
+
+    const result = await createMessageExtractor({ llmProvider: llm })({
+      text: "Москва",
+      recentMessages: [
+        { direction: "INBOUND", content: "Расскажите подробнее" },
+        {
+          direction: "OUTBOUND",
+          content: "Команда помогает с запуском. В каком городе вы планируете запуск?",
+        },
+      ],
+    });
+
+    expect(llm.callCount).toBe(2);
+    expect(llm.requests[1]?.systemPrompt).toContain("TRUSTED_VALIDATION_FEEDBACK");
+    expect(result.extraction).toMatchObject({
+      intent: "QUALIFICATION_INFORMATION",
+      facts: { city: "Москва" },
+      signals: {
+        questions: [],
+        previousQuestionResponse: "ANSWERED",
+        requiresSubstantiveAnswer: false,
+      },
+    });
+  });
 });
