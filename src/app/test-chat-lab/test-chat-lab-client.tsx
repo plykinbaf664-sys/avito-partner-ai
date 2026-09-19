@@ -4,9 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
   testChatLabScenarios,
   type TestChatLabAction,
-  type TestChatLabActionResult,
   type TestChatLabSnapshot,
 } from "@/application/test-chat-lab/test-chat-lab-contract";
+import { readTestChatLabResponse } from "./test-chat-lab-api";
 
 function freshSession(): string {
   return typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -51,10 +51,9 @@ export function TestChatLabClient() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ ...action, sessionId, virtualNow: action.virtualNow ?? virtualNow }),
       });
-      const body = await response.json() as { ok: boolean; result?: TestChatLabActionResult; error?: string };
-      if (!response.ok || !body.ok || !body.result) throw new Error(body.error ?? "LAB_FAILED");
-      setState(body.result.snapshot);
-      setVirtualNow(body.result.snapshot.virtualNow);
+      const result = await readTestChatLabResponse(response);
+      setState(result.snapshot);
+      setVirtualNow(result.snapshot.virtualNow);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "LAB_FAILED");
     } finally {

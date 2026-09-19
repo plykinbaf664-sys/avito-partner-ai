@@ -73,4 +73,36 @@ describe("Test Chat Lab API route", () => {
     );
     expect(close).toHaveBeenCalledTimes(1);
   });
+
+  it("returns structured JSON for malformed request bodies", async () => {
+    const response = await POST(new Request("http://localhost/api/test-chat-lab", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{",
+    }));
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: "INVALID_JSON",
+    });
+  });
+
+  it("returns structured JSON when the Test Chat Lab workflow fails", async () => {
+    clientMessage.mockRejectedValueOnce(new Error("simulated workflow failure"));
+    const response = await POST(new Request("http://localhost/api/test-chat-lab", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(validAction),
+    }));
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    await expect(response.json()).resolves.toEqual({
+      ok: false,
+      error: "TEST_CHAT_LAB_FAILED",
+    });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
 });
