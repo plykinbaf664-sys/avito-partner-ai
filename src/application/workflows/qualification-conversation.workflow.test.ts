@@ -109,9 +109,9 @@ describe("multi-turn qualification conversation", () => {
     expect(result.suggestedNextInformationNeed).toBe("CITY");
     expect(result.outboundMessage).toBeTruthy();
     expect(result.outboundMessage).not.toMatch(/какую сумму|капитал|бюджет/iu);
-    expect(result.outboundMessage).not.toContain("?");
+    expect(result.outboundMessage).toContain("?");
     expect((await persistence.conversations.findById(result.conversationId!))?.pendingInformationNeed)
-      .toBeNull();
+      .toBe("CITY");
   });
 
   it("lets Claude answer a paraphrased approved business question without a literal KB match", async () => {
@@ -383,7 +383,7 @@ describe("multi-turn qualification conversation", () => {
       qualificationStatus: "HOT",
       shouldHandoffToManager: false,
       suggestedNextInformationNeed: "PHONE_NUMBER",
-      conversationState: "QUALIFYING",
+      conversationState: "WAITING_PHONE",
     });
     expect(beforePhone.outboundMessage).toBeTruthy();
     expect(await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${beforePhone.leadId}`)).toBeNull();
@@ -753,7 +753,8 @@ describe("multi-turn qualification conversation", () => {
       availableCapital: null,
     });
     expect(result.outboundMessage).toBeTruthy();
-    expect(result.outboundMessage).not.toContain("отдельный бюджет");
+    expect(result.outboundMessage).toContain("аренда");
+    expect(result.outboundMessage).toContain("залог");
   });
 
   it("rejects only an explicit refusal to fund required expenses beyond 50,000", async () => {
@@ -1429,6 +1430,45 @@ describe("multi-turn qualification conversation", () => {
     expect(responseProvider.callCount).toBe(10);
   });
 
+  it("does not let a generic acknowledgement stall an active sales turn", async () => {
+    const extractionProvider = new FakeLLMProvider([
+      reply({ intent: "GENERAL_INTEREST", facts: { buyingIntent: "EXPLORING" } }),
+    ]);
+    const responseProvider = new FakeLLMProvider([
+      JSON.stringify({
+        text: "Понял.",
+        nextInformationNeed: null,
+        conversationAction: "ACKNOWLEDGE",
+      }),
+      JSON.stringify({
+        text: "Здравствуйте! В каком городе планируете запуск?",
+        nextInformationNeed: "CITY",
+        conversationAction: "DISCOVER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Для начала полезно понять регион запуска.",
+      }),
+    ]);
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: extractionProvider }),
+      generateNaturalResponse: createNaturalResponseGenerator({
+        llmProvider: responseProvider,
+      }),
+      generateId: () => `progress-${++nextId}`,
+      now: () => new Date(`2026-09-01T11:${String(nextId).padStart(2, "0")}:00Z`),
+    });
+
+    const result = await processEvent(input(151, "Здравствуйте, мне интересно"));
+    const conversation = await persistence.conversations.findById(
+      result.conversationId!,
+    );
+
+    expect(result.outboundMessage).toContain("город");
+    expect(result.outboundMessage).not.toBe("Понял.");
+    expect(conversation?.pendingInformationNeed).toBe("CITY");
+    expect(responseProvider.callCount).toBe(2);
+  });
+
   it("does not turn an unresolved fact into a repeated question across topics", async () => {
     const extractionProvider = new FakeLLMProvider([
       reply({ intent: "GENERAL_INTEREST", facts: { buyingIntent: "EXPLORING" } }),
@@ -1456,6 +1496,8 @@ describe("multi-turn qualification conversation", () => {
       JSON.stringify({
         text: "Понял, к вопросу об опыте можно вернуться позже.",
         nextInformationNeed: null,
+        qualificationMoveDecision: "DEFER",
+        qualificationMoveRationale: "Пользователь пока только присматривается и не готов углублять эту тему.",
       }),
       JSON.stringify({
         text: "Возможность запуска зависит от города, поэтому подскажите, где планируете работать?",

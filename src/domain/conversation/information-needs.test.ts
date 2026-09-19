@@ -41,6 +41,8 @@ describe("conversation information needs", () => {
       primaryGoal: "MAIN_BUSINESS" as const,
       businessModelReadiness: "ACCEPTS" as const,
       managementReadiness: "READY" as const,
+      qualificationStatus: "HOT" as const,
+      qualificationReason: "PHONE_UNKNOWN" as const,
     };
 
     const needs = assessInformationNeeds(lead);

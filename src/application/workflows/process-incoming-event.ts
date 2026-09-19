@@ -844,7 +844,7 @@ export function createIncomingEventProcessor({
         };
         const transactionNeeds = assessInformationNeeds(transactionLead);
         const adaptiveNextInformationNeed = responseLlm?.nextInformationNeed;
-        const transactionNextInformationNeed =
+        let transactionNextInformationNeed =
           phoneFulfillsRecentStep || responseLlm?.replyAction === "NO_REPLY"
             ? null
             : transactionDecision.nextAction !== "CONTINUE_QUALIFICATION"
@@ -856,7 +856,7 @@ export function createIncomingEventProcessor({
                   )
                 ? adaptiveNextInformationNeed
                 : null;
-        const transactionResponsePlan = buildConversationResponse({
+        let transactionResponsePlan = buildConversationResponse({
           lead: transactionLead,
           extraction: extracted.extraction,
           decision: transactionDecision,
@@ -865,6 +865,26 @@ export function createIncomingEventProcessor({
           informationNeeds: transactionNeeds,
           previouslyExplainedKnowledgeEntryIds: previouslyExplainedKnowledge,
         });
+        // If the conversation model is unavailable or rejected by policy, keep
+        // the sales workflow alive with the existing deterministic safe draft.
+        // This fallback is exceptional: during normal operation Claude chooses
+        // freely among every allowed qualification direction.
+        if (
+          responseLlm === null &&
+          transactionResponsePlan.qualificationProgressExpected === true
+        ) {
+          transactionNextInformationNeed =
+            transactionNeeds.suggestedNextInformationNeed;
+          transactionResponsePlan = buildConversationResponse({
+            lead: transactionLead,
+            extraction: extracted.extraction,
+            decision: transactionDecision,
+            nextInformationNeed: transactionNextInformationNeed,
+            knowledge,
+            informationNeeds: transactionNeeds,
+            previouslyExplainedKnowledgeEntryIds: previouslyExplainedKnowledge,
+          });
+        }
         const canUseAdaptiveResponse =
           responseLlm !== null &&
           responseLlm.replyAction !== "NO_REPLY" &&

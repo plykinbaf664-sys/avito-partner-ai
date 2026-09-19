@@ -187,6 +187,83 @@ describe("natural response generation", () => {
       });
   });
 
+  it("retries a vacuous acknowledgement when active qualification must progress", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        text: "Понял.",
+        nextInformationNeed: null,
+        conversationAction: "ACKNOWLEDGE",
+      }),
+      JSON.stringify({
+        text: "Понял. Когда хотели бы запустить первый объект?",
+        nextInformationNeed: "LAUNCH_TIMING",
+        conversationAction: "DISCOVER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Срок запуска — уместный следующий шаг после подтверждения бюджета.",
+      }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const plan: ConversationResponsePlan = {
+      text: "Когда примерно рассматриваете запуск?",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "CONFIRMATION",
+      qualificationProgressExpected: true,
+      allowedNextInformationNeeds: ["LAUNCH_TIMING", "GOAL"],
+      allowedQualificationMoves: [
+        { need: "LAUNCH_TIMING", objective: "понять срок запуска" },
+        { need: "GOAL", objective: "понять цель человека" },
+      ],
+    };
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({
+        nextInformationNeed: "LAUNCH_TIMING",
+        qualificationMoveDecision: "ADVANCE",
+      });
+    expect(llm.callCount).toBe(2);
+    expect(JSON.parse(llm.requests[1]!.userMessage)).toMatchObject({
+      qualificationProgressExpected: true,
+      validationFeedback: expect.stringContaining("остановил активную квалификацию"),
+    });
+  });
+
+  it("lets Claude defer a qualification question for a concrete conversational reason", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({
+      text: "Понял, к этому можно вернуться позже.",
+      nextInformationNeed: null,
+      conversationAction: "ACKNOWLEDGE",
+      qualificationMoveDecision: "DEFER",
+      qualificationMoveRationale: "Пользователь явно попросил пока не углубляться в тему.",
+    })]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const plan: ConversationResponsePlan = {
+      text: "Какую цель хотите решить этим бизнесом?",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "QUALIFICATION_INFORMATION",
+      qualificationProgressExpected: true,
+      allowedNextInformationNeeds: ["GOAL", "CITY"],
+      allowedQualificationMoves: [
+        { need: "GOAL", objective: "понять цель человека" },
+        { need: "CITY", objective: "узнать город запуска" },
+      ],
+    };
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({
+        nextInformationNeed: null,
+        qualificationMoveDecision: "DEFER",
+      });
+    expect(llm.callCount).toBe(1);
+  });
+
   it("requires conversation repair before qualification after a complaint", async () => {
     const plan: ConversationResponsePlan = {
       text: "Когда планируете запуск?",

@@ -191,6 +191,14 @@ function selectAllowedInformationNeeds(
   missingCriticalFacts: InformationNeed[],
   missingOptionalFacts: InformationNeed[],
 ): InformationNeed[] {
+  // Phone is the final bridge to handoff, never an early discovery shortcut.
+  // Qualification exposes PHONE_UNKNOWN only after mandatory criteria pass.
+  const phoneMayBeRequested =
+    lead.qualificationReason === "PHONE_UNKNOWN" ||
+    ["HOT", "PRIORITY"].includes(lead.qualificationStatus);
+  const conversationalCriticalFacts = missingCriticalFacts.filter(
+    (need) => need !== "PHONE_NUMBER" || phoneMayBeRequested,
+  );
   if (isFreshDiscoveryLead(lead)) {
     // Keep the business requirements deterministic, but give the conversation
     // brain a human discovery choice.  Capital remains a valid gap; it is no
@@ -201,14 +209,14 @@ function selectAllowedInformationNeeds(
         ...(missingOptionalFacts.includes("EXPERIENCE")
           ? ["EXPERIENCE" as const]
           : []),
-        ...missingCriticalFacts,
+        ...conversationalCriticalFacts,
       ]),
     ];
   }
-  if (missingCriticalFacts.length === 0) return [...missingOptionalFacts];
+  if (conversationalCriticalFacts.length === 0) return [...missingOptionalFacts];
   if (
-    missingCriticalFacts.length === 1 &&
-    missingCriticalFacts[0] === "PHONE_NUMBER"
+    conversationalCriticalFacts.length === 1 &&
+    conversationalCriticalFacts[0] === "PHONE_NUMBER"
   ) {
     return [
       ...missingOptionalFacts,
@@ -222,7 +230,7 @@ function selectAllowedInformationNeeds(
   return [
     ...new Set([
       ...(lead.city === null ? ["CITY" as const] : []),
-      ...missingCriticalFacts,
+      ...conversationalCriticalFacts,
       ...missingOptionalFacts,
     ]),
   ];

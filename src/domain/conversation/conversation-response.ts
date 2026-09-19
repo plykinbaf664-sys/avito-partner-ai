@@ -103,6 +103,35 @@ export interface ConversationResponsePlan {
     need: InformationNeed;
     objective: string;
   }>;
+  /** Policy requires progress, while Claude still chooses the topic and wording. */
+  qualificationProgressExpected?: boolean;
+}
+
+const qualificationProgressIntents = new Set<MessageIntent>([
+  "GREETING",
+  "GENERAL_INTEREST",
+  "QUALIFICATION_INFORMATION",
+  "QUESTION",
+  "CONFIRMATION",
+  "CORRECTION",
+]);
+
+function expectsQualificationProgress(params: {
+  intent: MessageIntent;
+  decision: QualificationDecision;
+  allowedNextInformationNeeds: InformationNeed[];
+  conversationRepairRequired: boolean;
+  postHandoffContinuation: boolean;
+  unresolvedQuestions: string[];
+}): boolean {
+  return (
+    params.decision.nextAction === "CONTINUE_QUALIFICATION" &&
+    params.allowedNextInformationNeeds.length > 0 &&
+    !params.conversationRepairRequired &&
+    !params.postHandoffContinuation &&
+    params.unresolvedQuestions.length === 0 &&
+    qualificationProgressIntents.has(params.intent)
+  );
 }
 
 export function buildConversationResponse(params: {
@@ -124,6 +153,14 @@ export function buildConversationResponse(params: {
     : candidateNextInformationNeeds;
   const preferDiscoveryContext = isFreshDiscoveryLead(params.lead);
   const postHandoffContinuation = params.lead.handoffAt !== null;
+  const qualificationProgressExpected = expectsQualificationProgress({
+    intent: extraction.intent,
+    decision,
+    allowedNextInformationNeeds,
+    conversationRepairRequired,
+    postHandoffContinuation,
+    unresolvedQuestions: knowledge.unresolvedQuestions,
+  });
   const adaptiveContext = {
     allowedNextInformationNeeds,
     allowedNextQuestions: allowedNextInformationNeeds.map((need) => ({
@@ -148,6 +185,7 @@ export function buildConversationResponse(params: {
     previouslyExplainedKnowledgeEntryIds: [
       ...new Set(params.previouslyExplainedKnowledgeEntryIds ?? []),
     ],
+    qualificationProgressExpected,
   };
 
   if (decision.nextAction === "REJECT_POLITELY") {
