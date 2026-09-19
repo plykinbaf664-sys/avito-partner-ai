@@ -214,6 +214,14 @@ function validateResponsePolicy(
   ) {
     throw new Error("RESPONSE_POLICY_MISSING_CURRENT_INTENT_ANSWER");
   }
+  const normalizedReply = text.trim().toLocaleLowerCase("ru-RU");
+  const genericAcknowledgements = new Set(["\u043f\u043e\u043d\u044f\u043b", "\u043f\u043e\u043d\u044f\u0442\u043d\u043e", "\u0445\u043e\u0440\u043e\u0448\u043e", "\u0443\u0447\u0442\u0443", "\u043f\u0440\u0438\u043d\u044f\u043b"]);
+  if (plan.currentUserQuestions?.length && genericAcknowledgements.has(normalizedReply.replace(/[.!??\s]+$/gu, ""))) {
+    throw new Error("RESPONSE_POLICY_GENERIC_ACK_FOR_QUESTION");
+  }
+  if (plan.greetingRequired === true && !/^(?:\u0437\u0434\u0440\u0430\u0432\u0441\u0442\u0432\u0443\u0439\u0442\u0435|\u043f\u0440\u0438\u0432\u0435\u0442|\u0434\u043e\u0431\u0440\u044b\u0439\s+(?:\u0434\u0435\u043d\u044c|\u0432\u0435\u0447\u0435\u0440|\u0443\u0442\u0440\u043e))/iu.test(text.trim())) {
+    throw new Error("RESPONSE_POLICY_MISSING_INITIAL_GREETING");
+  }
   const approvedFactIds = new Set((plan.approvedFacts ?? []).map((fact) => fact.id));
   if ((usedKnowledgeEntryIds ?? []).some((id) => !approvedFactIds.has(id))) invalid();
   if (
@@ -374,6 +382,11 @@ RECENT_MESSAGES содержит последние USER, AI и HUMAN turns. У�
 availableCapital означает общий бюджет, который человек готов вложить в запуск бизнеса. Не заставляй его искусственно делить сумму на «первый этап» и «весь капитал», если он сам такого разделения не вводил.
 Ориентир вовлечённости партнёра — около 3–4 часов в день. Это мягкий фактор: выясняй его только когда уместно и не превращай нехватку времени в автоматический отказ.
 Перед возвратом JSON перечитай text: проверь согласование слов, естественность русского языка, отсутствие канцелярита, внутренних терминов и обрывков фраз. Не превращай ответ в анкету, не дави и не используй искусственный дефицит.
+IMPORTANT CONVERSATION RULES:
+- If the user message answers the immediately preceding AI question, acknowledge it and do not restate the business overview or ask the same topic again.
+- If the user asks a concrete question, answer it first; never return a generic acknowledgement when a grounded answer or scheduling question is possible.
+- After handoff the conversation remains active. For a manager-call question, ask for the preferred day and approximate time.
+- Use approved calculations briefly and do not print the whole economics context unless requested.
 `.trim(),
       userMessage: JSON.stringify({
         triggerType,
@@ -404,6 +417,8 @@ availableCapital означает общий бюджет, который чел
         currentUserObjections: plan.currentUserObjections ?? [],
         currentUncertainty: plan.currentUncertainty ?? [],
         conversationRepairRequired: plan.conversationRepairRequired === true,
+        greetingRequired: plan.greetingRequired === true,
+        previousQuestionResponse: plan.previousQuestionResponse ?? "NOT_A_RESPONSE",
         previouslyExplainedKnowledgeEntryIds:
           plan.previouslyExplainedKnowledgeEntryIds ?? [],
         economicsContext: plan.economicsContext ?? null,

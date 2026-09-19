@@ -309,10 +309,13 @@ export function answerFromKnowledgeBase(
   extraction: ExtractedMessage,
   context: KnowledgeConversationContext = {},
 ): KnowledgeAnswer {
+  const previousQuestionResponse = extraction.signals.previousQuestionResponse ?? "NOT_A_RESPONSE";
+  const answeredPreviousQuestion = ["ANSWERED", "UNSURE", "DECLINED_TO_ANSWER"].includes(previousQuestionResponse);
+  const hasNewQuestion = extraction.signals.questions.length > 0;
   const userStatements = [
     ...extraction.signals.questions,
     ...extraction.signals.objections,
-    ...(extraction.signals.resolvedQuestion
+    ...(extraction.signals.resolvedQuestion && (!answeredPreviousQuestion || hasNewQuestion)
       ? [extraction.signals.resolvedQuestion]
       : []),
   ].flatMap(questionParts);
@@ -322,9 +325,11 @@ export function answerFromKnowledgeBase(
     ),
   );
   const contextualReference =
-    extraction.signals.contextualReference === true ||
-    userStatements.some((statement) =>
-      refersToPreviousContext(normalizeQuestion(statement)),
+    (!answeredPreviousQuestion || hasNewQuestion) && (
+      extraction.signals.contextualReference === true ||
+      userStatements.some((statement) =>
+        refersToPreviousContext(normalizeQuestion(statement)),
+      )
     );
   const allPreviousCandidates = PARTNER_KNOWLEDGE_BASE.filter((entry) =>
     context.previousEntryIds?.includes(entry.id),

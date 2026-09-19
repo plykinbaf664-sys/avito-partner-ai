@@ -782,6 +782,17 @@ export function createIncomingEventProcessor({
       }
 
       const evaluatedAt = clock();
+      // Keep a requested callback slot visible in the existing CRM questions
+      // context after handoff, without adding a second scheduling workflow.
+      if (
+        currentLead.handoffAt !== null &&
+        /(?:\u0437\u0430\u0432\u0442\u0440\u0430|\u0441\u0435\u0433\u043e\u0434\u043d\u044f|\u0443\u0442\u0440\u043e\u043c|\u0432\u0435\u0447\u0435\u0440\u043e\u043c|\u0432\u00a0?\d{1,2}\s*(?:\u0447\u0430\u0441|:)|\d{1,2}\s*:\s*\d{2})/iu.test(input.text)
+      ) {
+        extracted.extraction.signals.questions = [
+          ...extracted.extraction.signals.questions,
+          `\u0412\u0440\u0435\u043c\u044f \u0441\u0432\u044f\u0437\u0438: ${input.text}`,
+        ];
+      }
       let evaluatedLead = mergeExtractedFacts(
         currentLead,
         extracted.extraction,
@@ -793,6 +804,7 @@ export function createIncomingEventProcessor({
       const latestOutbound = history.findLast(
         (message) => message.direction === "OUTBOUND",
       );
+      const greetingRequired = !history.some((message) => message.direction === "INBOUND");
       const phoneReceived =
         extracted.extraction.facts.phoneNumber !== null &&
         extracted.extraction.facts.phoneConfirmed;
@@ -862,6 +874,7 @@ export function createIncomingEventProcessor({
         deferredInformationNeeds:
           conversationMemory.deferredInformationNeeds.map((item) => item.need),
         guidanceNeed,
+        greetingRequired,
       });
       const responseGenerationPlan = phoneFulfillsRecentStep
         ? {
