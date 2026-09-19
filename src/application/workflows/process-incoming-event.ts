@@ -34,6 +34,7 @@ import { transitionConversation } from "../../domain/conversation/conversation-s
 import type { IncomingEvent } from "../../domain/event/incoming-event";
 import type { ExtractedMessage } from "../../domain/extraction/extracted-message";
 import type { Lead } from "../../domain/lead/lead";
+import { recordPreferredContactTime } from "../../domain/lead/preferred-contact-time";
 import type { Message } from "../../domain/message/message";
 import type { ManagerNotification } from "../../domain/notification/manager-notification";
 import { followUpEligibleAt } from "../../domain/follow-up/follow-up-policy";
@@ -806,20 +807,25 @@ export function createIncomingEventProcessor({
         latestOutbound !== undefined &&
         /(?:\u043a\u0430\u043a\u043e\u0439|\u0432\u00a0?\u043a\u0430\u043a\u043e\u0439).{0,30}(?:\u0434\u0435\u043d\u044c|\u0432\u0440\u0435\u043c\u044f)|(?:\u043a\u043e\u0433\u0434\u0430|\u0432\u043e\u00a0?\u0441\u043a\u043e\u043b\u044c\u043a\u043e|\u0443\u0434\u043e\u0431\u043d).{0,35}(?:\u0437\u0432\u043e\u043d|\u0441\u0432\u044f\u0437|\u043f\u0440\u0438\u043d\u044f\u0442\u044c)/iu.test(latestOutbound.content) &&
         extracted.extraction.signals.previousQuestionResponse === "ANSWERED";
-      if (
+      const callbackPreference =
         currentLead.handoffAt !== null &&
         (explicitCallbackSlot || answeredCallbackQuestion)
-      ) {
-        extracted.extraction.signals.questions = [
-          ...extracted.extraction.signals.questions,
-          `\u0423\u0434\u043e\u0431\u043d\u043e\u0435 \u0432\u0440\u0435\u043c\u044f \u0441\u0432\u044f\u0437\u0438: ${input.text}`,
-        ];
-      }
+          ? input.text
+          : null;
       let evaluatedLead = mergeExtractedFacts(
         currentLead,
         extracted.extraction,
         evaluatedAt,
       );
+      if (callbackPreference !== null) {
+        evaluatedLead = {
+          ...evaluatedLead,
+          questions: recordPreferredContactTime(
+            evaluatedLead.questions,
+            callbackPreference,
+          ),
+        };
+      }
       const greetingRequired = !history.some((message) => message.direction === "INBOUND");
       const phoneReceived =
         extracted.extraction.facts.phoneNumber !== null &&
@@ -904,6 +910,7 @@ export function createIncomingEventProcessor({
           conversationMemory.deferredInformationNeeds.map((item) => item.need),
         guidanceNeed,
         greetingRequired,
+        callbackPreferenceCaptured: callbackPreference !== null,
       });
       const responseGenerationPlan = phoneFulfillsRecentStep
         ? {
@@ -990,6 +997,15 @@ export function createIncomingEventProcessor({
           extracted.extraction,
           now,
         );
+        if (callbackPreference !== null) {
+          transactionLead = {
+            ...transactionLead,
+            questions: recordPreferredContactTime(
+              transactionLead.questions,
+              callbackPreference,
+            ),
+          };
+        }
         const transactionDecision = evaluateQualification(transactionLead, qualificationContextForLead(transactionLead, {
           wantsHuman: extracted.extraction.signals.wantsHuman,
           unknownBusinessQuestion:
@@ -1028,6 +1044,7 @@ export function createIncomingEventProcessor({
           deferredInformationNeeds:
             conversationMemory.deferredInformationNeeds.map((item) => item.need),
           guidanceNeed,
+          callbackPreferenceCaptured: callbackPreference !== null,
         });
         // If the conversation model is unavailable or rejected by policy, keep
         // the sales workflow alive with the existing deterministic safe draft.
@@ -1050,6 +1067,7 @@ export function createIncomingEventProcessor({
             deferredInformationNeeds:
               conversationMemory.deferredInformationNeeds.map((item) => item.need),
             guidanceNeed,
+            callbackPreferenceCaptured: callbackPreference !== null,
           });
         }
         const canUseAdaptiveResponse =

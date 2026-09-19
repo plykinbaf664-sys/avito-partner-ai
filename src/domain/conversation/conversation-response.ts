@@ -6,6 +6,10 @@ import {
 import type { ExtractedMessage } from "../extraction/extracted-message";
 import type { MessageIntent } from "../extraction/extracted-message";
 import type { Lead } from "../lead/lead";
+import {
+  asksForPreferredCallbackTime,
+  preferredContactTimeFromQuestions,
+} from "../lead/preferred-contact-time";
 import type {
   QualificationDecision,
   QualificationReasonCode,
@@ -151,6 +155,8 @@ export interface ConversationResponsePlan {
   guidanceNeed?: InformationNeed | null;
   groundedAnswerRequired?: boolean;
   currentTurnRequiresAnswer?: boolean;
+  preferredContactTime?: string | null;
+  callbackPreferenceCaptured?: boolean;
 }
 
 const qualificationProgressIntents = new Set<MessageIntent>([
@@ -188,6 +194,7 @@ export function buildConversationResponse(params: {
   deferredInformationNeeds?: readonly InformationNeed[];
   guidanceNeed?: InformationNeed | null;
   greetingRequired?: boolean;
+  callbackPreferenceCaptured?: boolean;
 }): ConversationResponsePlan {
   const { extraction, decision, nextInformationNeed, knowledge } = params;
   const conversationRepairRequired = extraction.intent === "COMPLAINT";
@@ -197,6 +204,9 @@ export function buildConversationResponse(params: {
   const allowedNextInformationNeeds = candidateNextInformationNeeds;
   const preferDiscoveryContext = isFreshDiscoveryLead(params.lead);
   const postHandoffContinuation = params.lead.handoffAt !== null;
+  const preferredContactTime = preferredContactTimeFromQuestions(
+    params.lead.questions,
+  );
   const qualificationProgressExpected = expectsQualificationProgress({
     intent: extraction.intent,
     decision,
@@ -260,6 +270,8 @@ export function buildConversationResponse(params: {
     guidanceNeed: params.guidanceNeed ?? null,
     groundedAnswerRequired,
     currentTurnRequiresAnswer,
+    preferredContactTime,
+    callbackPreferenceCaptured: params.callbackPreferenceCaptured === true,
   };
 
   if (decision.nextAction === "REJECT_POLITELY") {
@@ -308,11 +320,19 @@ export function buildConversationResponse(params: {
       : contextualEconomicsDraft
         ? [contextualEconomicsDraft]
         : answerFragmentsForCurrentTurn.slice(0, 2);
-  const asksCallTime = params.extraction.signals.questions.some((question) =>
-    /(?:\u043a\u043e\u0433\u0434\u0430|\u043a\u0430\u043a\u043e\u0435\s+\u0432\u0440\u0435\u043c\u044f|\u0432\u043e\s+\u0441\u043a\u043e\u043b\u044c\u043a\u043e|\u0443\u0434\u043e\u0431\u043d).{0,35}(?:\u043f\u043e\u0437\u0432\u043e\u043d|\u0441\u0432\u044f\u0437|\u0441\u043e\u0437\u0432\u043e\u043d|\u0437\u0432\u043e\u043d\u043e\u043a)|(?:\u043f\u043e\u0437\u0432\u043e\u043d|\u0441\u0432\u044f\u0437|\u0441\u043e\u0437\u0432\u043e\u043d|\u0437\u0432\u043e\u043d\u043e\u043a).{0,35}(?:\u043a\u043e\u0433\u0434\u0430|\u0432\u0440\u0435\u043c\u044f|\u0443\u0434\u043e\u0431\u043d)|(?:\u043a\u043e\u0433\u0434\u0430|\u0432\u0440\u0435\u043c\u044f).{0,20}$/iu.test(question),
-  ) && params.lead.handoffAt !== null;
+  const asksCallTime =
+    preferredContactTime === null &&
+    params.lead.handoffAt !== null &&
+    params.extraction.signals.questions.some(asksForPreferredCallbackTime);
   if (asksCallTime) {
     parts.splice(0, parts.length, "\u041c\u0435\u043d\u0435\u0434\u0436\u0435\u0440 \u0441\u0432\u044f\u0436\u0435\u0442\u0441\u044f \u0441 \u0432\u0430\u043c\u0438. \u041d\u0430\u043f\u0438\u0448\u0438\u0442\u0435, \u043f\u043e\u0436\u0430\u043b\u0443\u0439\u0441\u0442\u0430, \u0432 \u043a\u0430\u043a\u043e\u0439 \u0434\u0435\u043d\u044c \u0438 \u043f\u0440\u0438\u043c\u0435\u0440\u043d\u043e\u0435 \u0432\u0440\u0435\u043c\u044f \u0432\u0430\u043c \u0443\u0434\u043e\u0431\u043d\u043e \u043f\u0440\u0438\u043d\u044f\u0442\u044c \u0437\u0432\u043e\u043d\u043e\u043a.");
+  }
+  if (params.callbackPreferenceCaptured && preferredContactTime) {
+    parts.splice(
+      0,
+      parts.length,
+      `Спасибо, зафиксировал: ${preferredContactTime}. Менеджер свяжется с вами в это время.`,
+    );
   }
   const phoneDeclined = nextInformationNeed === "PHONE_NUMBER" && params.lead.objections.some((objection) =>
     /телефон|номер/iu.test(objection) && /не хочу|не дам|не буду|отказыва|не готов|пока не/iu.test(objection));

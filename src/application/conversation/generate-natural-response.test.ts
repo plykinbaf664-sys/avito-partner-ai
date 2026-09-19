@@ -932,6 +932,37 @@ describe("natural response generation", () => {
     })).resolves.toMatchObject({ replyAction: "NO_REPLY", text: "", nextInformationNeed: null });
   });
 
+  it("does not ask for callback time again after the preference was captured", async () => {
+    const repeated = "Менеджер свяжется с вами. В какой день и время вам удобно принять звонок?";
+    const confirmation = "Спасибо, зафиксировал: завтра в 10 утра по Москве. Менеджер свяжется с вами в это время.";
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: repeated }),
+      JSON.stringify({ text: confirmation }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+
+    await expect(generate({
+      lead: {} as Lead,
+      plan: {
+        text: confirmation,
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: [],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+        postHandoffContinuation: true,
+        preferredContactTime: "завтра в 10 утра по Москве",
+        callbackPreferenceCaptured: true,
+      },
+      recentMessages: [
+        { direction: "OUTBOUND", content: "Напишите, когда вам удобно принять звонок менеджера." },
+        { direction: "INBOUND", content: "Завтра в 10 утра по Москве" },
+      ],
+    })).resolves.toMatchObject({ text: confirmation });
+    expect(JSON.parse(llm.requests[1]!.userMessage).validationFeedback)
+      .toContain("уже назвал preferredContactTime");
+  });
+
   it("rejects an ungrounded business condition in a contextual answer", async () => {
     const plan: ConversationResponsePlan = {
       text: "Первый этап — около 50 000 ₽. Это ориентир, итог зависит от объекта.",

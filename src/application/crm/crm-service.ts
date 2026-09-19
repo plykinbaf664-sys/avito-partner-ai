@@ -7,6 +7,7 @@ import { normalizePhoneNumber } from "@/domain/lead/phone-number";
 import { assessLeadSegment } from "@/domain/lead/lead-segment";
 import { evaluateQualification, hasConfirmedPhone } from "@/domain/qualification/qualification-policy";
 import { assessInformationNeeds } from "@/domain/conversation/information-needs";
+import { preferredContactTimeFromQuestions } from "@/domain/lead/preferred-contact-time";
 import type {
   CrmLeadDetails,
   CrmLeadFilter,
@@ -18,12 +19,6 @@ export const CRM_PAGE_SIZE = 50;
 export const CRM_MAX_SEARCH_LENGTH = 100;
 export const CRM_EXPORT_BATCH_SIZE = 500;
 export const CRM_MAX_PAGE = 1_000_000;
-
-function preferredContactTime(questions: readonly string[]): string | null {
-  const prefix = "Удобное время связи:";
-  const note = questions.findLast((question) => question.startsWith(prefix));
-  return note?.slice(prefix.length).trim() || null;
-}
 
 function toRecord(snapshot: CrmLeadSnapshot): CrmLeadRecord {
   const { lead, conversation, managerNotification } = snapshot;
@@ -57,7 +52,7 @@ function toRecord(snapshot: CrmLeadSnapshot): CrmLeadRecord {
     scalingPotentialUnits: lead.scalingPotentialUnits,
     hasFreeTime: lead.hasFreeTime,
     availableTimeDetails: lead.availableTimeDetails,
-    preferredContactTime: preferredContactTime(lead.questions),
+    preferredContactTime: preferredContactTimeFromQuestions(lead.questions),
     goal: lead.primaryGoal,
     desiredIncome: lead.desiredIncome,
     launchTiming: lead.launchTiming,

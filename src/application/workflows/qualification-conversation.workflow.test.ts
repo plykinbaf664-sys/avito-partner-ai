@@ -580,6 +580,9 @@ describe("multi-turn qualification conversation", () => {
       reply({
         signals: { previousQuestionResponse: "ANSWERED" },
       }),
+      reply({
+        signals: { previousQuestionResponse: "ANSWERED" },
+      }),
     ]);
 
     const qualified = await processEvent(input(30, "Готов начать в Химках, есть 200 тысяч"));
@@ -590,11 +593,22 @@ describe("multi-turn qualification conversation", () => {
     expect(handedOff.outboundMessage).toContain("в какой день");
     expect(handedOff.outboundMessage).toContain("согласовать уже с менеджером");
 
-    await processEvent(input(32, "Завтра в 16:00"));
+    const scheduled = await processEvent(input(32, "Завтра в 16:00"));
+    expect(scheduled.outboundMessage).toContain("Завтра в 16:00");
+    expect(scheduled.outboundMessage).not.toContain("в какой день");
+    expect(scheduled.extraction?.signals.questions).not.toContain(
+      "Удобное время связи: Завтра в 16:00",
+    );
+
+    const corrected = await processEvent(input(33, "Завтра в 10 утра по Москве"));
     const lead = await persistence.leads.findById(qualified.leadId!);
     const crm = await createCrmService(persistence).getLead(qualified.leadId!);
-    expect(lead?.questions).toContain("Удобное время связи: Завтра в 16:00");
-    expect(crm?.preferredContactTime).toBe("Завтра в 16:00");
+    expect(corrected.outboundMessage).toContain("Завтра в 10 утра по Москве");
+    expect(corrected.outboundMessage).not.toContain("в какой день");
+    expect(lead?.questions.filter((question) =>
+      question.startsWith("Удобное время связи:"),
+    )).toEqual(["Удобное время связи: Завтра в 10 утра по Москве"]);
+    expect(crm?.preferredContactTime).toBe("Завтра в 10 утра по Москве");
     expect((await persistence.managerNotifications.findByIdempotencyKey(
       `manager-handoff:${qualified.leadId}`,
     ))?.id).toBe(notification?.id);
