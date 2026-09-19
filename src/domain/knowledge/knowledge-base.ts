@@ -104,7 +104,7 @@ export const PARTNER_KNOWLEDGE_BASE: readonly KnowledgeEntry[] = [
     id: "offer-overview",
     category: "BUSINESS_MODEL",
     answer:
-      "Вы запускаете свой бизнес на субаренде, а команда помогает подобрать и запустить объект. Услуга запуска стоит 50 000 ₽; отдельно партнёр оплачивает аренду, залог, подготовку объекта и операционные расходы. При залоге в размере месячной аренды ориентир старта одного объекта считается как 80 000 ₽ плюс две месячные аренды. Дальше управляющая компания помогает с рекламой, бронированиями, гостями и координацией персонала. Это ориентировочная модель, а не фиксированная смета; доход не гарантируется.",
+      "Вы запускаете свой бизнес на субаренде, а команда помогает подобрать и запустить объект. Услуга запуска стоит 50 000 ₽; отдельно партнёр оплачивает аренду, залог, подготовку объекта и операционные расходы. Для предварительного расчёта с залогом в один месяц используется ориентир 80 000 ₽ плюс две месячные аренды, но фактический залог зависит от объекта и собственника. Дальше управляющая компания помогает с рекламой, бронированиями, гостями и координацией персонала. Это ориентировочная модель, а не фиксированная смета; доход не гарантируется.",
     matches: (text) => /(?:услови|предлага|предложени|схем[аы]|модель работ|формат работ|суть бизнес|что за бизнес|чем занимаетесь)/u.test(text),
   },
   {
@@ -140,7 +140,7 @@ export const PARTNER_KNOWLEDGE_BASE: readonly KnowledgeEntry[] = [
     id: "small-business-entry",
     category: "BUSINESS_MODEL",
     answer:
-      "Услуга помощи в запуске бизнеса стоит 50 000 ₽. Отдельно партнёр оплачивает аренду, залог, подготовку объекта — ориентир 30 000 ₽ на один объект — и другие операционные расходы. При залоге в размере месячной аренды старт одного объекта считается как 80 000 ₽ плюс две месячные аренды: при аренде 35 000 ₽ это около 150 000 ₽, при аренде 50 000 ₽ — около 180 000 ₽. Это расчётные ориентиры, а не фиксированная смета или рыночная цена конкретного города.",
+      "Услуга помощи в запуске бизнеса стоит 50 000 ₽. Отдельно партнёр оплачивает аренду, залог, подготовку объекта — ориентир 30 000 ₽ на один объект — и другие операционные расходы. Залог зависит от объекта и собственника; для предварительного расчёта используется ориентир в один месяц аренды. При таком допущении старт одного объекта составляет около 150 000 ₽ при аренде 35 000 ₽ и около 180 000 ₽ при аренде 50 000 ₽. Это расчётные ориентиры, а не фиксированная смета или рыночная цена конкретного города.",
     matches: (text) =>
       mentionsFiftyThousand(text) ||
       containsAny(text, [
@@ -250,7 +250,7 @@ export const PARTNER_KNOWLEDGE_BASE: readonly KnowledgeEntry[] = [
     id: "partner-time",
     category: "RESPONSIBILITIES",
     answer:
-      "Партнёру нужно участвовать в запуске и ключевых решениях, в том числе ездить на подходящие объекты и заключать договоры. Несколько часов в день — положительный ориентир; если времени меньше, это не автоматический отказ, но менеджеру важно учитывать такой риск.",
+      "Партнёру нужно участвовать в запуске и ключевых решениях, в том числе ездить на подходящие объекты и заключать договоры. Ориентир вовлечённости — около 3–4 часов в день; если времени меньше, это не автоматический отказ, но менеджеру важно учитывать такой риск.",
     matches: (text) =>
       containsAny(text, ["сколько времени", "часов в день", "свободного времени", "мало времени"]),
   },
@@ -390,12 +390,19 @@ export function answerFromKnowledgeBase(
     : null;
   const city = extraction.facts.city ?? context.leadFacts?.city ?? null;
   const effectiveRentReference = context.rentReference ?? findApprovedRentReference(city);
-  const economicsContext = buildApprovedEconomicsContext({
-    availableCapital,
-    requestedUnits,
-    city,
-    rentReference: effectiveRentReference ?? undefined,
-  });
+  const shouldProvideEconomicsContext =
+    asksAboutEconomics ||
+    asksAboutAffordableObjects ||
+    extraction.facts.calculationUnits !== null ||
+    matched.some((entry) => entry.id === "small-business-entry");
+  const economicsContext = shouldProvideEconomicsContext
+    ? buildApprovedEconomicsContext({
+        availableCapital,
+        requestedUnits,
+        city,
+        rentReference: effectiveRentReference ?? undefined,
+      })
+    : undefined;
   const affordableObjects = asksAboutAffordableObjects && availableCapital !== null
     ? calculateAffordableObjectCount({
       availableCapital,
@@ -434,7 +441,7 @@ export function answerFromKnowledgeBase(
   });
 
   if (affordableObjects && availableCapital !== null) {
-    const scenarios = economicsContext.scenarios.filter((scenario) => scenario.affordableObjectCount !== null);
+    const scenarios = economicsContext!.scenarios.filter((scenario) => scenario.affordableObjectCount !== null);
     const scenarioText = scenarios.map((scenario) => {
       const count = scenario.affordableObjectCount!;
       const units = count.maxUnitsAtMinCost === count.maxUnitsAtMaxCost

@@ -706,8 +706,11 @@ export function createIncomingEventProcessor({
         extracted.extraction.facts.phoneNumber !== null &&
         extracted.extraction.facts.phoneConfirmed;
       const phoneFulfillsRecentStep = phoneReceived && latestOutbound !== undefined;
+      const previouslyExplainedKnowledge = parseStoredKnowledgeIds(
+        currentConversation.summary,
+      );
       const knowledge = answerFromKnowledgeBase(extracted.extraction, {
-        previousEntryIds: parseStoredKnowledgeIds(currentConversation.summary),
+        previousEntryIds: previouslyExplainedKnowledge,
         recentMessages: history.map(({ direction, actor, content }) => ({ direction, actor, content })),
         leadFacts: {
           city: evaluatedLead.city,
@@ -738,6 +741,7 @@ export function createIncomingEventProcessor({
         nextInformationNeed,
         knowledge,
         informationNeeds: needs,
+        previouslyExplainedKnowledgeEntryIds: previouslyExplainedKnowledge,
       });
       const responseGenerationPlan = phoneFulfillsRecentStep
         ? {
@@ -746,6 +750,7 @@ export function createIncomingEventProcessor({
             nextInformationNeed: null,
             allowedNextInformationNeeds: [],
             allowedNextQuestions: [],
+            allowedQualificationMoves: [],
           }
         : responsePlan;
       let responseLlm: Awaited<ReturnType<NaturalResponseGenerator>> | null =
@@ -838,14 +843,16 @@ export function createIncomingEventProcessor({
         const transactionNextInformationNeed =
           phoneFulfillsRecentStep || responseLlm?.replyAction === "NO_REPLY"
             ? null
-            : transactionDecision.nextAction === "CONTINUE_QUALIFICATION"
-              ? adaptiveNextInformationNeed &&
-                  transactionNeeds.allowedNextInformationNeeds.includes(
-                    adaptiveNextInformationNeed,
-                  )
-                ? adaptiveNextInformationNeed
-                : transactionNeeds.suggestedNextInformationNeed
-              : null;
+            : transactionDecision.nextAction !== "CONTINUE_QUALIFICATION"
+              ? null
+              : responseLlm !== null
+                ? adaptiveNextInformationNeed != null &&
+                    transactionNeeds.allowedNextInformationNeeds.includes(
+                      adaptiveNextInformationNeed,
+                    )
+                  ? adaptiveNextInformationNeed
+                  : null
+                : transactionNeeds.suggestedNextInformationNeed;
         const transactionResponsePlan = buildConversationResponse({
           lead: transactionLead,
           extraction: extracted.extraction,
@@ -853,6 +860,7 @@ export function createIncomingEventProcessor({
           nextInformationNeed: transactionNextInformationNeed,
           knowledge,
           informationNeeds: transactionNeeds,
+          previouslyExplainedKnowledgeEntryIds: previouslyExplainedKnowledge,
         });
         const canUseAdaptiveResponse =
           responseLlm !== null &&
@@ -893,7 +901,12 @@ export function createIncomingEventProcessor({
               ? "HANDOFF"
               : transactionDecision.shouldHandoffToManager
                 ? "QUALIFIED"
-                : stateForInformationNeed(transactionNextInformationNeed);
+                : transactionDecision.nextAction === "CONTINUE_QUALIFICATION" &&
+                    transactionNextInformationNeed === null
+                  ? storedConversation.state === "NEW"
+                    ? "DISCOVERY"
+                    : "QUALIFYING"
+                  : stateForInformationNeed(transactionNextInformationNeed);
         // Legacy premature handoffs without a phone must resume qualification.
         const resumeIncompleteHandoff =
           storedConversation.state === "HANDOFF" &&
@@ -910,15 +923,18 @@ export function createIncomingEventProcessor({
                   : storedConversation.state,
                 targetState,
               );
-        const previouslyExplainedKnowledge = parseStoredKnowledgeIds(
+        const storedPreviouslyExplainedKnowledge = parseStoredKnowledgeIds(
           storedConversation.summary,
         );
+        const newlyExplainedKnowledge = responseSuppressed
+          ? []
+          : responseLlm?.usedKnowledgeEntryIds ?? knowledge.entryIds;
         const explainedKnowledge = responseSuppressed
-          ? previouslyExplainedKnowledge
+          ? storedPreviouslyExplainedKnowledge
           : [
               ...new Set([
-                ...previouslyExplainedKnowledge,
-                ...knowledge.entryIds,
+                ...storedPreviouslyExplainedKnowledge,
+                ...newlyExplainedKnowledge,
               ]),
             ];
         const managerSummary =
@@ -1048,7 +1064,7 @@ export function createIncomingEventProcessor({
               : transactionNextInformationNeed,
           awaitingUserReply: responseSuppressed
             ? storedConversation.awaitingUserReply
-            : shouldSendOutbound && transactionResponsePlan.asksUserQuestion,
+            : shouldSendOutbound && transactionNextInformationNeed !== null,
           qualificationCompleted,
           followUpEligibleAt: responseSuppressed
             ? storedConversation.followUpEligibleAt

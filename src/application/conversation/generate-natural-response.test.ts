@@ -15,41 +15,50 @@ describe("natural response generation", () => {
     nextInformationNeed: "AVAILABLE_CAPITAL", asksUserQuestion: true,
     knowledgeEntryIds: ["offer-overview"], unresolvedQuestions: [], useNaturalAdaptation: true,
   };
-  const validOffer = "Помогаем запустить бизнес на субаренде. Услуга запуска стоит 50 000 ₽; аренда, залог, подготовка и операционные расходы оплачиваются отдельно. При залоге за месяц старт считается как 80 000 ₽ плюс две аренды. Команда помогает с рекламой, бронированиями, гостями и координацией персонала. Смета зависит от объекта, доход не гарантируется. Это ваш общий капитал или бюджет только на услугу?";
+  const validOffer = "Помогаем запустить бизнес на субаренде. Услуга запуска стоит 50 000 ₽; аренда, залог, подготовка и операционные расходы оплачиваются отдельно. Для предварительного расчёта с залогом за месяц старт считается как 80 000 ₽ плюс две аренды, но фактический залог зависит от собственника. Команда помогает с рекламой, бронированиями, гостями и координацией персонала. Смета зависит от объекта, доход не гарантируется. Какой общий бюджет готовы вложить в запуск?";
 
   it.each([
     validOffer,
     validOffer.replace("50 000 ₽", "50 тыс. ₽").replace("80 000 ₽", "80 тыс. ₽"),
   ])("allows a natural paraphrase that keeps amounts, cost structure and restrictions", async (text) => {
-    const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([JSON.stringify({ text })]) });
+    const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
+      JSON.stringify({ text, nextInformationNeed: "AVAILABLE_CAPITAL" }),
+    ]) });
     await expect(generate({ lead: {} as Lead, plan: offerPlan, recentMessages: [] })).resolves.toMatchObject({ text });
   });
 
   it.each([
-    validOffer.replace(", доход не гарантируется", ""),
     validOffer.replace("80 000 ₽ плюс две аренды", "100 000 ₽ плюс две аренды"),
     validOffer.replace("50 000 ₽", "60 000 ₽"),
-    validOffer.replace("бюджет только на услугу?", "бюджет первого объекта?"),
-    validOffer.replace("Это ваш общий капитал или бюджет только на услугу?", "Это ваш общий капитал или бюджет только на услугу? В каком городе?"),
+    validOffer.replace("Смета зависит от объекта, доход не гарантируется.", "Доход гарантирован при любом объекте."),
+    validOffer.replace("Какой общий бюджет готовы вложить в запуск?", "Какой общий бюджет готовы вложить в запуск? В каком городе?"),
     validOffer.replace("Помогаем запустить бизнес на субаренде.", "Условия лучше уточнить у менеджера."),
   ])("rejects an adaptation that changes the approved response policy", async (text) => {
-    const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([JSON.stringify({ text })]) });
+    const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
+      JSON.stringify({ text, nextInformationNeed: "AVAILABLE_CAPITAL" }),
+    ]) });
     await expect(generate({ lead: {} as Lead, plan: offerPlan, recentMessages: [] })).rejects.toThrow("RESPONSE_POLICY_VIOLATION");
   });
 
-  it("rejects the observed live paraphrase that drops guests, cleaners and platforms", async () => {
+  it("allows progressive disclosure instead of forcing every draft detail", async () => {
     const plan: ConversationResponsePlan = { ...offerPlan,
       text: PARTNER_KNOWLEDGE_BASE.find((entry) => entry.id === "launch-process")!.answer,
       knowledgeEntryIds: ["launch-process"], nextInformationNeed: null, asksUserQuestion: false };
     const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
       JSON.stringify({ text: "Команда подбирает объект, консультирует по оснащению и поддерживает запуск. Бронирования принимает администратор, размещения видны в CRM, работает персональный менеджер." }),
     ]) });
-    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] })).rejects.toThrow("RESPONSE_POLICY_VIOLATION");
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({
+        text: "Команда подбирает объект, консультирует по оснащению и поддерживает запуск. Бронирования принимает администратор, размещения видны в CRM, работает персональный менеджер.",
+      });
   });
 
   it("uses one compact validated call only when the workflow requests adaptation", async () => {
     const llm = new FakeLLMProvider([
-      JSON.stringify({ text: "Понял ваше сомнение. Уточните, пожалуйста, бюджет на запуск?" }),
+      JSON.stringify({
+        text: "Понял ваше сомнение. Уточните, пожалуйста, бюджет на запуск?",
+        nextInformationNeed: "AVAILABLE_CAPITAL",
+      }),
     ]);
     const generate = createNaturalResponseGenerator({ llmProvider: llm });
     const lead = {
@@ -94,9 +103,9 @@ describe("natural response generation", () => {
     expect(sentContext.recentMessages).toHaveLength(4);
     expect(llm.requests[0]?.systemPrompt).toContain("SECURITY BOUNDARY");
     expect(llm.requests[0]?.systemPrompt).toContain("Не заменяй известный ответ");
-    expect(llm.requests[0]?.systemPrompt).toContain("только один следующий вопрос");
+    expect(llm.requests[0]?.systemPrompt).toContain("не более одного направления");
     expect(JSON.parse(llm.requests[0]!.userMessage)).toMatchObject({
-      asksNextQuestion: true, unresolvedQuestions: [],
+      qualificationMoveAvailable: true, unresolvedQuestions: [],
       currentFacts: {
         hasFreeTime: false,
         availableTimeDetails: "Только час вечером",
@@ -145,6 +154,111 @@ describe("natural response generation", () => {
       recentMessages: [],
     }))
       .resolves.toMatchObject({ text, nextInformationNeed: "LAUNCH_TIMING" });
+  });
+
+  it("allows a short confirmation response without forcing the next qualification question", async () => {
+    const text = "Понял, этот порядок вложений вам подходит.";
+    const llm = new FakeLLMProvider([JSON.stringify({
+      text,
+      nextInformationNeed: null,
+      conversationAction: "ACKNOWLEDGE",
+    })]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const plan: ConversationResponsePlan = {
+      text: "Какой бюджет в целом готовы выделить на запуск бизнеса?",
+      nextInformationNeed: "AVAILABLE_CAPITAL",
+      asksUserQuestion: true,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "CONFIRMATION",
+      allowedNextInformationNeeds: ["AVAILABLE_CAPITAL", "LAUNCH_TIMING"],
+      allowedQualificationMoves: [
+        { need: "AVAILABLE_CAPITAL", objective: "понять общий бюджет запуска" },
+        { need: "LAUNCH_TIMING", objective: "понять срок запуска" },
+      ],
+    };
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({
+        text,
+        nextInformationNeed: null,
+        conversationAction: "ACKNOWLEDGE",
+      });
+  });
+
+  it("requires conversation repair before qualification after a complaint", async () => {
+    const plan: ConversationResponsePlan = {
+      text: "Когда планируете запуск?",
+      nextInformationNeed: "LAUNCH_TIMING",
+      asksUserQuestion: true,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "COMPLAINT",
+      conversationRepairRequired: true,
+      allowedNextInformationNeeds: ["LAUNCH_TIMING"],
+    };
+    const repaired = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([JSON.stringify({
+        text: "Да, объяснил неудачно. Если коротко: мы обсуждаем запуск вашего бизнеса с поддержкой команды.",
+        nextInformationNeed: null,
+        conversationAction: "REPAIR",
+      })]),
+    });
+    await expect(repaired({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({ conversationAction: "REPAIR", nextInformationNeed: null });
+
+    const questionnaire = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([JSON.stringify({
+        text: "Когда планируете запуск?",
+        nextInformationNeed: "LAUNCH_TIMING",
+        conversationAction: "DISCOVER",
+      })]),
+    });
+    await expect(questionnaire({ lead: {} as Lead, plan, recentMessages: [] }))
+      .rejects.toThrow("RESPONSE_POLICY_VIOLATION");
+  });
+
+  it("passes covered topics and semantic move objectives without question templates", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({
+      text: "Понял.",
+      nextInformationNeed: null,
+      conversationAction: "ACKNOWLEDGE",
+    })]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const plan: ConversationResponsePlan = {
+      text: "Какой бюджет готовы выделить?",
+      nextInformationNeed: "AVAILABLE_CAPITAL",
+      asksUserQuestion: true,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "CONFIRMATION",
+      previouslyExplainedKnowledgeEntryIds: ["small-business-entry"],
+      allowedNextInformationNeeds: ["AVAILABLE_CAPITAL"],
+      allowedQualificationMoves: [{
+        need: "AVAILABLE_CAPITAL",
+        objective: "понять общий бюджет запуска",
+      }],
+    };
+
+    await generate({ lead: {} as Lead, plan, recentMessages: [] });
+    const context = JSON.parse(llm.requests[0]!.userMessage) as {
+      allowedQualificationMoves: Array<{ need: string; objective: string }>;
+      previouslyExplainedKnowledgeEntryIds: string[];
+      currentUserIntent: string;
+      allowedNextQuestions?: unknown;
+    };
+    expect(context).toMatchObject({
+      currentUserIntent: "CONFIRMATION",
+      previouslyExplainedKnowledgeEntryIds: ["small-business-entry"],
+    });
+    expect(context.allowedQualificationMoves).toEqual([{
+      need: "AVAILABLE_CAPITAL",
+      objective: "понять общий бюджет запуска",
+    }]);
+    expect(context.allowedNextQuestions).toBeUndefined();
   });
 
   it("passes deterministic economics capability and rejects invented values", async () => {

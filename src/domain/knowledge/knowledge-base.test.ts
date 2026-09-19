@@ -141,6 +141,14 @@ describe("contextual partner knowledge", () => {
     );
   });
 
+  it("keeps economics out of unrelated turns and exposes the approved time factor", () => {
+    const unrelated = answerFromKnowledgeBase(question("Кто будет общаться с гостями?"));
+    const time = answerFromKnowledgeBase(question("Сколько времени нужно уделять проекту?"));
+
+    expect(unrelated.economicsContext).toBeUndefined();
+    expect(time.answerFragments.join(" ")).toContain("3–4 часов в день");
+  });
+
   it.each([
     "Мне самому нужно отвечать гостям?",
     "А объявления кто размещает?",

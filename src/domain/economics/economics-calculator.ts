@@ -235,6 +235,7 @@ export interface ApprovedEconomicsContext {
   preparationPerObject: number;
   incomePerObject: number;
   depositMonths: number;
+  depositAssumption: string;
   availableCapital: number | null;
   requestedUnits: number | null;
   requestedUnitsIncome: EconomicsEstimate | null;
@@ -270,6 +271,8 @@ export function buildApprovedEconomicsContext(input: {
     preparationPerObject: PARTNER_PREPARATION_PER_UNIT_REFERENCE,
     incomePerObject: PARTNER_MONTHLY_INCOME_PER_UNIT_REFERENCE,
     depositMonths: 1,
+    depositAssumption:
+      "Один месяц аренды — только допущение для предварительного расчёта; фактический залог зависит от объекта и условий собственника.",
     availableCapital: input.availableCapital ?? null,
     requestedUnits,
     requestedUnitsIncome: calculateEconomicsEstimate(requestedUnits),
@@ -290,6 +293,7 @@ export function buildApprovedEconomicsContext(input: {
     limitations: [
       "Суммы являются утверждёнными ориентировочными сценариями, а не live-ценой конкретного объекта.",
       "Доход около 20 000 ₽ на объект в месяц не гарантируется.",
+      "Залог не является фиксированным: один месяц аренды используется только как расчётное допущение, а реальные условия определяет собственник конкретного объекта.",
       "Точная аренда, залог и подготовка зависят от выбранного объекта.",
     ],
   };

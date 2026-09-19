@@ -148,6 +148,8 @@ describe("partner economics calculator", () => {
     expect(context.launchFee).toBe(50_000);
     expect(context.preparationPerObject).toBe(30_000);
     expect(context.incomePerObject).toBe(20_000);
+    expect(context.depositMonths).toBe(1);
+    expect(context.depositAssumption).toMatch(/допущение|зависит/iu);
     expect(context.scenarios.map((scenario) => scenario.affordableObjectCount?.maxUnitsAtMinCost))
       .toEqual([2, 1]);
     expect(context.scenarios.map((scenario) => scenario.affordableObjectCount?.remainingReserveAtMinCost))

@@ -210,9 +210,22 @@ function selectAllowedInformationNeeds(
     missingCriticalFacts.length === 1 &&
     missingCriticalFacts[0] === "PHONE_NUMBER"
   ) {
-    return ["PHONE_NUMBER"];
+    return [
+      ...missingOptionalFacts,
+      "PHONE_NUMBER",
+    ];
   }
-  return [...missingCriticalFacts];
+  // Critical facts define qualification eligibility, not a questionnaire
+  // order.  The conversation brain may choose a softer missing discovery
+  // topic when it better fits the current user turn.  Phone remains absent
+  // until deterministic policy makes it a real critical need.
+  return [
+    ...new Set([
+      ...(lead.city === null ? ["CITY" as const] : []),
+      ...missingCriticalFacts,
+      ...missingOptionalFacts,
+    ]),
+  ];
 }
 
 function selectNextInformationNeed(

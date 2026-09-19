@@ -1,6 +1,9 @@
 import { assessInformationNeeds } from "@/domain/conversation/information-needs";
 import type { ConversationResponsePlan } from "@/domain/conversation/conversation-response";
-import { questionForInformationNeed } from "@/domain/conversation/conversation-response";
+import {
+  qualificationObjectiveForInformationNeed,
+  questionForInformationNeed,
+} from "@/domain/conversation/conversation-response";
 import type { Conversation } from "@/domain/conversation/conversation";
 import type { InformationNeed } from "@/domain/conversation/information-needs";
 import {
@@ -59,6 +62,10 @@ function buildFollowUpPlan(
     allowedNextQuestions: allowedNextInformationNeeds.map((need) => ({
       need,
       question: questionForInformationNeed(need, lead),
+    })),
+    allowedQualificationMoves: allowedNextInformationNeeds.map((need) => ({
+      need,
+      objective: qualificationObjectiveForInformationNeed(need),
     })),
     knownFacts: needs.knownFacts,
     missingCriticalFacts: needs.missingCriticalFacts,

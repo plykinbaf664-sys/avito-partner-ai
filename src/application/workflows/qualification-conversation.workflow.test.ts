@@ -175,7 +175,8 @@ describe("multi-turn qualification conversation", () => {
     expect(result.outboundMessage).not.toContain("Передам менеджеру");
     expect(result.outboundMessage!.length).toBeLessThanOrEqual(1_000);
     expect(result.outboundMessage!.match(/\?/gu)).toHaveLength(1);
-    expect(result.outboundMessage!.indexOf(fragments[0]!)).toBeLessThan(result.outboundMessage!.indexOf("Какую сумму"));
+    expect(result.outboundMessage).toMatch(/бюджет|сумм|капитал/iu);
+    expect(result.outboundMessage!.indexOf(fragments[0]!)).toBeLessThan(result.outboundMessage!.lastIndexOf("?"));
   });
 
   it("answers a question and asks only the next gap without repeating a known budget", async () => {
@@ -198,7 +199,7 @@ describe("multi-turn qualification conversation", () => {
     expect(result.outboundMessage).toContain("Подтверждённые города");
     expect(result.outboundMessage).toContain("50 000 ₽");
     expect(result.outboundMessage).toContain("юридическое сопровождение");
-    expect(result.outboundMessage).toContain("Какую сумму");
+    expect(result.outboundMessage).toMatch(/бюджет|сумм|капитал/iu);
     expect(result.outboundMessage).not.toContain("Оставьте, пожалуйста, номер");
     expect(result.shouldHandoffToManager).toBe(false);
   });
@@ -217,7 +218,7 @@ describe("multi-turn qualification conversation", () => {
     expect(result.outboundMessage).toContain(known);
     expect(result.outboundMessage).toContain(unknown);
     expect(result.outboundMessage!.indexOf(known)).toBeLessThan(result.outboundMessage!.indexOf("эту часть лучше уточнить"));
-    expect(result.outboundMessage).toContain("Какую сумму");
+    expect(result.outboundMessage).toMatch(/бюджет|сумм|капитал/iu);
   });
 
   it("still honors an explicit human request even when the KB answers the question", async () => {
@@ -245,8 +246,11 @@ describe("multi-turn qualification conversation", () => {
   });
 
   it("adapts even a single known answer through the LLM and persists the resulting reply", async () => {
-    const adapted = "Гостей ведёт администратор, он же координирует горничную. После запуска с вами работает персональный менеджер. Какую сумму готовы выделить — это общий капитал или бюджет только на первый этап?";
-    const llm = new FakeLLMProvider([JSON.stringify({ text: adapted })]);
+    const adapted = "Гостей ведёт администратор, он же координирует горничную. В каком городе хотите запускаться?";
+    const llm = new FakeLLMProvider([JSON.stringify({
+      text: adapted,
+      nextInformationNeed: "CITY",
+    })]);
     const extractMessage = createMessageExtractor({ llmProvider: new FakeLLMProvider([
       reply({ intent: "QUESTION", signals: { questions: ["Кто занимается гостями?"] } }),
     ]) });
@@ -301,7 +305,7 @@ describe("multi-turn qualification conversation", () => {
     expect(result.shouldHandoffToManager).toBe(false);
     expect(result.outboundMessage).toContain("субаренде");
     expect(result.outboundMessage).toContain("80 000 ₽");
-    expect(result.outboundMessage).toContain("Какую сумму");
+    expect(result.outboundMessage).toMatch(/бюджет|сумм|капитал/iu);
     expect(result.outboundMessage).not.toContain("уточнить у менеджера");
   });
 
@@ -647,7 +651,7 @@ describe("multi-turn qualification conversation", () => {
     ]);
     const result = await processEvent(input(1, question));
     expect(result.outboundMessage).toContain("администратор");
-    expect(result.outboundMessage).toContain("Какую сумму");
+    expect(result.outboundMessage).toMatch(/бюджет|сумм|капитал/iu);
   });
 
   it("explains economics without promising a guaranteed income", async () => {
@@ -1253,5 +1257,180 @@ describe("multi-turn qualification conversation", () => {
       },
     });
     expect(result.qualificationStatus).not.toBe("NO_FIT");
+  });
+
+  it("keeps a multi-turn sales conversation adaptive, repairs complaints, and hands off once", async () => {
+    const extractionProvider = new FakeLLMProvider([
+      reply({ intent: "GENERAL_INTEREST" }),
+      reply({ facts: {
+        primaryGoal: "ADDITIONAL_INCOME",
+        buyingIntent: "CONSIDERING",
+      } }),
+      reply({
+        intent: "QUESTION",
+        facts: { city: "Москва", calculationUnits: 1 },
+        signals: { questions: ["Сколько примерно стоит старт?"] },
+      }),
+      reply({
+        intent: "CONFIRMATION",
+        facts: {
+          availableCapital: 300_000,
+          availableCapitalConfirmed: true,
+          additionalExpensesReadiness: "READY",
+          buyingIntent: "CONDITIONS_ACCEPTED",
+        },
+      }),
+      reply({ facts: {
+        startingUnits: 1,
+        businessModelReadiness: "ACCEPTS",
+        managementReadiness: "READY",
+        buyingIntent: "READY_TO_START",
+      } }),
+      reply({ facts: { launchTiming: "WITHIN_MONTH" } }),
+      reply({ intent: "COMPLAINT" }),
+      reply({
+        intent: "CONFIRMATION",
+        facts: {
+          hasFreeTime: true,
+          availableTimeDetails: "Могу уделять 3–4 часа в день",
+        },
+      }),
+      reply({ facts: {
+        phoneNumber: "79629910514",
+        phoneConfirmed: true,
+      } }),
+      reply({
+        intent: "QUESTION",
+        signals: { questions: ["Кто будет общаться с гостями?"] },
+      }),
+    ]);
+    const responseProvider = new FakeLLMProvider([
+      JSON.stringify({
+        text: "Здравствуйте! Что вы хотите получить от этого бизнеса?",
+        nextInformationNeed: "GOAL",
+        conversationAction: "DISCOVER",
+      }),
+      JSON.stringify({
+        text: "Понял, рассматриваете это как дополнительный доход. В каком городе хотите запускаться?",
+        nextInformationNeed: "CITY",
+        conversationAction: "ACKNOWLEDGE",
+      }),
+      JSON.stringify({
+        text: "Для Москвы ориентир старта одного объекта — около 180 000 ₽, но точная сумма зависит от аренды и условий собственника. Какой бюджет в целом готовы вложить в запуск?",
+        nextInformationNeed: "AVAILABLE_CAPITAL",
+        conversationAction: "ANSWER",
+        usedKnowledgeEntryIds: ["small-business-entry"],
+      }),
+      JSON.stringify({
+        text: "Понял, 300 000 ₽ на запуск. Со скольких объектов хотите начать?",
+        nextInformationNeed: "STARTING_UNITS",
+        conversationAction: "ACKNOWLEDGE",
+      }),
+      JSON.stringify({
+        text: "Хорошо, начинаете с одного объекта вместе с нашей командой. Когда хотели бы запуститься?",
+        nextInformationNeed: "LAUNCH_TIMING",
+        conversationAction: "ACKNOWLEDGE",
+      }),
+      JSON.stringify({
+        text: "Понял, ориентируетесь на ближайший месяц. Сможете уделять проекту примерно 3–4 часа в день?",
+        nextInformationNeed: "FREE_TIME",
+        conversationAction: "DISCOVER",
+        usedKnowledgeEntryIds: ["partner-time"],
+      }),
+      JSON.stringify({
+        text: "Да, предыдущий вопрос прозвучал неудачно. Я хотел только понять, сколько времени вам будет комфортно уделять запуску.",
+        nextInformationNeed: null,
+        conversationAction: "REPAIR",
+      }),
+      JSON.stringify({
+        text: "Отлично, 3–4 часа в день достаточно для участия в запуске. Оставьте номер, чтобы менеджер мог связаться с вами?",
+        nextInformationNeed: "PHONE_NUMBER",
+        conversationAction: "ACKNOWLEDGE",
+        usedKnowledgeEntryIds: ["partner-time"],
+      }),
+      JSON.stringify({
+        text: "Спасибо, номер принял. Менеджер свяжется с вами.",
+        nextInformationNeed: null,
+        conversationAction: "HANDOFF",
+      }),
+      JSON.stringify({
+        text: "С гостями работает администратор, он же координирует необходимые операционные вопросы.",
+        nextInformationNeed: null,
+        conversationAction: "ANSWER",
+        usedKnowledgeEntryIds: ["operations-guests"],
+      }),
+    ]);
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: extractionProvider }),
+      generateNaturalResponse: createNaturalResponseGenerator({
+        llmProvider: responseProvider,
+      }),
+      generateId: () => `adaptive-${++nextId}`,
+      now: () => new Date(`2026-09-01T11:${String(nextId).padStart(2, "0")}:00Z`),
+    });
+
+    const turns = [
+      await processEvent(input(101, "Здравствуйте, мне интересно")),
+      await processEvent(input(102, "Хочу дополнительный доход")),
+      await processEvent(input(103, "Я из Москвы. Сколько примерно стоит старт?")),
+      await processEvent(input(104, "300 тысяч, готов")),
+      await processEvent(input(105, "Начну с одной, с вами буду запускаться")),
+      await processEvent(input(106, "В течение месяца")),
+      await processEvent(input(107, "Ты че несешь?")),
+    ];
+    const afterComplaint = await persistence.conversations.findById(
+      turns[6]!.conversationId!,
+    );
+    turns.push(
+      await processEvent(input(108, "Ладно, могу уделять 3–4 часа в день")),
+      await processEvent(input(109, "79629910514")),
+      await processEvent(input(110, "Кто будет общаться с гостями?")),
+    );
+
+    expect(turns[0]?.suggestedNextInformationNeed).not.toBe("AVAILABLE_CAPITAL");
+    expect(turns[3]?.outboundMessage).not.toContain("180 000 ₽");
+    expect(turns[4]?.suggestedNextInformationNeed).not.toBe("BUSINESS_MODEL");
+    expect(turns[6]?.conversationState).toBe("QUALIFYING");
+    expect(afterComplaint?.pendingInformationNeed).toBeNull();
+    expect(turns[6]?.outboundMessage).not.toContain("?");
+    expect(turns[8]).toMatchObject({
+      shouldHandoffToManager: true,
+      outboundMessage: "Спасибо, номер принял. Менеджер свяжется с вами.",
+    });
+    expect(turns[9]?.outboundMessage).toContain("администратор");
+    expect(turns[9]?.outboundMessage).not.toContain("номер");
+    expect(turns.every((turn) => (turn.outboundMessage?.length ?? 0) < 420)).toBe(true);
+
+    const confirmationContext = JSON.parse(
+      responseProvider.requests[3]!.userMessage,
+    ) as {
+      previouslyExplainedKnowledgeEntryIds: string[];
+      economicsContext: unknown;
+      recentMessages: Array<{ actor: string; content: string }>;
+    };
+    expect(confirmationContext.previouslyExplainedKnowledgeEntryIds)
+      .toContain("small-business-entry");
+    expect(confirmationContext.economicsContext).toBeNull();
+    expect(confirmationContext.recentMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ actor: "AI", content: expect.stringContaining("180 000 ₽") }),
+      expect.objectContaining({ actor: "USER", content: "300 тысяч, готов" }),
+    ]));
+
+    const lead = await persistence.leads.findById(turns[9]!.leadId!);
+    expect(lead).toMatchObject({
+      city: "Москва",
+      availableCapital: 300_000,
+      startingUnits: 1,
+      businessModelReadiness: "ACCEPTS",
+      managementReadiness: "READY",
+      hasFreeTime: true,
+      availableTimeDetails: "Могу уделять 3–4 часа в день",
+      phoneNumber: "+79629910514",
+    });
+    expect(await persistence.managerNotifications.findByIdempotencyKey(
+      `manager-handoff:${turns[8]!.leadId}`,
+    )).not.toBeNull();
+    expect(responseProvider.callCount).toBe(10);
   });
 });

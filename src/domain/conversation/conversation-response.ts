@@ -4,6 +4,7 @@ import {
   type InformationNeedsAssessment,
 } from "./information-needs";
 import type { ExtractedMessage } from "../extraction/extracted-message";
+import type { MessageIntent } from "../extraction/extracted-message";
 import type { Lead } from "../lead/lead";
 import type {
   QualificationDecision,
@@ -19,7 +20,7 @@ const qualificationQuestions: Record<InformationNeed, string> = {
   PHONE_NUMBER:
     "Оставьте, пожалуйста, номер телефона, чтобы менеджер мог с вами связаться.",
   AVAILABLE_CAPITAL:
-    "Какую сумму вы реально готовы выделить на проект: это бюджет только на первый этап или общий доступный капитал?",
+    "Какой бюджет в целом вы готовы выделить на запуск бизнеса?",
   ADDITIONAL_EXPENSES:
     "Готовы ли вы отдельно учитывать расходы по самому объекту — например залог, оснащение и обслуживание? Точную сумму сейчас называть не нужно.",
   BUSINESS_MODEL:
@@ -31,9 +32,25 @@ const qualificationQuestions: Record<InformationNeed, string> = {
   GOAL: "Какую главную цель хотите решить этим бизнесом?",
   MANAGEMENT_READINESS:
     "Готовы взаимодействовать с управляющей компанией и участвовать в ключевых решениях по запуску?",
-  FREE_TIME: "Сколько времени вы сможете уделять проекту?",
+  FREE_TIME: "Сможете уделять проекту примерно 3–4 часа в день?",
   EXPERIENCE: "Есть ли у вас опыт в бизнесе или посуточной аренде?",
   BARRIER: "Что сейчас больше всего останавливает или вызывает сомнения?",
+};
+
+const qualificationObjectives: Record<InformationNeed, string> = {
+  PHONE_NUMBER: "получить номер для связи только после достаточной квалификации",
+  AVAILABLE_CAPITAL: "понять общий бюджет, который человек готов вложить в запуск бизнеса",
+  ADDITIONAL_EXPENSES: "понять готовность нести расходы самого объекта сверх услуги запуска",
+  BUSINESS_MODEL: "понять готовность запускать бизнес в модели субаренды с управляющей компанией",
+  CITY: "узнать город предполагаемого запуска",
+  LAUNCH_TIMING: "понять реальный горизонт запуска",
+  FREE_TIME: "понять возможность уделять проекту ориентировочно 3–4 часа в день",
+  MANAGEMENT_READINESS: "понять готовность взаимодействовать с управляющей компанией по запуску",
+  STARTING_UNITS: "понять желаемое число объектов на старте",
+  SCALING_POTENTIAL_UNITS: "понять желаемый масштаб в перспективе",
+  GOAL: "понять цель и мотивацию человека",
+  EXPERIENCE: "узнать релевантный опыт без превращения разговора в анкету",
+  BARRIER: "понять главное сомнение или препятствие",
 };
 
 const rejectionMessages: Partial<Record<QualificationReasonCode, string>> = {
@@ -76,6 +93,16 @@ export interface ConversationResponsePlan {
   postHandoffContinuation?: boolean;
   economicsContext?: ApprovedEconomicsContext;
   approvedFacts?: ApprovedKnowledgeFact[];
+  currentUserIntent?: MessageIntent;
+  currentUserQuestions?: string[];
+  currentUserObjections?: string[];
+  currentUncertainty?: string[];
+  conversationRepairRequired?: boolean;
+  previouslyExplainedKnowledgeEntryIds?: string[];
+  allowedQualificationMoves?: Array<{
+    need: InformationNeed;
+    objective: string;
+  }>;
 }
 
 export function buildConversationResponse(params: {
@@ -85,11 +112,16 @@ export function buildConversationResponse(params: {
   nextInformationNeed: InformationNeed | null;
   knowledge: KnowledgeAnswer;
   informationNeeds?: InformationNeedsAssessment;
+  previouslyExplainedKnowledgeEntryIds?: readonly string[];
 }): ConversationResponsePlan {
   const { extraction, decision, nextInformationNeed, knowledge } = params;
-  const allowedNextInformationNeeds =
+  const conversationRepairRequired = extraction.intent === "COMPLAINT";
+  const candidateNextInformationNeeds =
     params.informationNeeds?.allowedNextInformationNeeds ??
     (nextInformationNeed === null ? [] : [nextInformationNeed]);
+  const allowedNextInformationNeeds = conversationRepairRequired
+    ? []
+    : candidateNextInformationNeeds;
   const preferDiscoveryContext = isFreshDiscoveryLead(params.lead);
   const postHandoffContinuation = params.lead.handoffAt !== null;
   const adaptiveContext = {
@@ -98,12 +130,24 @@ export function buildConversationResponse(params: {
       need,
       question: questionForInformationNeed(need, params.lead),
     })),
+    allowedQualificationMoves: allowedNextInformationNeeds.map((need) => ({
+      need,
+      objective: qualificationObjectiveForInformationNeed(need),
+    })),
     knownFacts: params.informationNeeds?.knownFacts ?? [],
     missingCriticalFacts: params.informationNeeds?.missingCriticalFacts ?? [],
     missingOptionalFacts: params.informationNeeds?.missingOptionalFacts ?? [],
     qualificationReasonCodes: decision.reasonCodes,
     preferDiscoveryContext,
     postHandoffContinuation,
+    currentUserIntent: extraction.intent,
+    currentUserQuestions: extraction.signals.questions,
+    currentUserObjections: extraction.signals.objections,
+    currentUncertainty: extraction.uncertainty,
+    conversationRepairRequired,
+    previouslyExplainedKnowledgeEntryIds: [
+      ...new Set(params.previouslyExplainedKnowledgeEntryIds ?? []),
+    ],
   };
 
   if (decision.nextAction === "REJECT_POLITELY") {
@@ -119,6 +163,21 @@ export function buildConversationResponse(params: {
       knowledgeEntryIds: knowledge.entryIds,
       unresolvedQuestions: [],
       useNaturalAdaptation: knowledge.answerFragments.length > 0,
+      contextualReference: knowledge.contextualReferenceResolved,
+      ...adaptiveContext,
+      economicsContext: knowledge.economicsContext,
+      approvedFacts: knowledge.approvedFacts,
+    };
+  }
+
+  if (conversationRepairRequired) {
+    return {
+      text: "Похоже, предыдущий ответ прозвучал неудачно. Объясню проще.",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: knowledge.entryIds,
+      unresolvedQuestions: knowledge.unresolvedQuestions,
+      useNaturalAdaptation: true,
       contextualReference: knowledge.contextualReferenceResolved,
       ...adaptiveContext,
       economicsContext: knowledge.economicsContext,
@@ -162,20 +221,18 @@ export function buildConversationResponse(params: {
       !decision.shouldHandoffToManager && nextInformationNeed !== null && !phoneDeclined,
     knowledgeEntryIds: knowledge.entryIds,
     unresolvedQuestions: knowledge.unresolvedQuestions,
-    useNaturalAdaptation:
-      allowedNextInformationNeeds.length > 1 ||
-      preferDiscoveryContext ||
-      postHandoffContinuation ||
-      nextInformationNeed === "PHONE_NUMBER" ||
-      knowledge.answerFragments.length > 0 ||
-      parts.length >= 3 ||
-      extraction.signals.questions.length > 0 ||
-      extraction.signals.objections.length > 0,
+    useNaturalAdaptation: true,
     contextualReference: knowledge.contextualReferenceResolved,
     ...adaptiveContext,
     economicsContext: knowledge.economicsContext,
     approvedFacts: knowledge.approvedFacts,
   };
+}
+
+export function qualificationObjectiveForInformationNeed(
+  need: InformationNeed,
+): string {
+  return qualificationObjectives[need];
 }
 
 export function questionForInformationNeed(

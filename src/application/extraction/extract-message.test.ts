@@ -416,5 +416,7 @@ describe("message extraction schema", () => {
     expect(envelope.RECENT_MESSAGES).toHaveLength(12);
     expect(envelope.RECENT_MESSAGES[0]?.content).toBe("message-3");
     expect(llm.requests[0]?.systemPrompt).toContain("«Понял», «ясно», «хорошо» сами по себе не подтверждают бюджет");
+    expect(llm.requests[0]?.systemPrompt).toContain("COMPLAINT — раздражение");
+    expect(llm.requests[0]?.systemPrompt).toContain("3–4 часов в день");
   });
 });
