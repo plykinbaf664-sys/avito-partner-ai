@@ -791,27 +791,34 @@ export function createIncomingEventProcessor({
       }
 
       const evaluatedAt = clock();
-      // Keep a requested callback slot visible in the existing CRM questions
-      // context after handoff, without adding a second scheduling workflow.
+      const history = await persistence.messages.listByConversationId(
+        currentConversation.id,
+      );
+      const latestOutbound = history.findLast(
+        (message) => message.direction === "OUTBOUND",
+      );
+      // Callback preference is optional conversational context, not a
+      // qualification field. Keep a concrete slot, or a semantic answer to
+      // the immediately preceding scheduling question, visible in CRM.
+      const explicitCallbackSlot =
+        /(?:\u0437\u0430\u0432\u0442\u0440\u0430|\u0441\u0435\u0433\u043e\u0434\u043d\u044f|\u0443\u0442\u0440\u043e\u043c|\u0432\u0435\u0447\u0435\u0440\u043e\u043c|\u0432\u00a0?\d{1,2}\s*(?:\u0447\u0430\u0441|:)|\d{1,2}\s*:\s*\d{2})/iu.test(input.text);
+      const answeredCallbackQuestion =
+        latestOutbound !== undefined &&
+        /(?:\u043a\u0430\u043a\u043e\u0439|\u0432\u00a0?\u043a\u0430\u043a\u043e\u0439).{0,30}(?:\u0434\u0435\u043d\u044c|\u0432\u0440\u0435\u043c\u044f)|(?:\u043a\u043e\u0433\u0434\u0430|\u0432\u043e\u00a0?\u0441\u043a\u043e\u043b\u044c\u043a\u043e|\u0443\u0434\u043e\u0431\u043d).{0,35}(?:\u0437\u0432\u043e\u043d|\u0441\u0432\u044f\u0437|\u043f\u0440\u0438\u043d\u044f\u0442\u044c)/iu.test(latestOutbound.content) &&
+        extracted.extraction.signals.previousQuestionResponse === "ANSWERED";
       if (
         currentLead.handoffAt !== null &&
-        /(?:\u0437\u0430\u0432\u0442\u0440\u0430|\u0441\u0435\u0433\u043e\u0434\u043d\u044f|\u0443\u0442\u0440\u043e\u043c|\u0432\u0435\u0447\u0435\u0440\u043e\u043c|\u0432\u00a0?\d{1,2}\s*(?:\u0447\u0430\u0441|:)|\d{1,2}\s*:\s*\d{2})/iu.test(input.text)
+        (explicitCallbackSlot || answeredCallbackQuestion)
       ) {
         extracted.extraction.signals.questions = [
           ...extracted.extraction.signals.questions,
-          `\u0412\u0440\u0435\u043c\u044f \u0441\u0432\u044f\u0437\u0438: ${input.text}`,
+          `\u0423\u0434\u043e\u0431\u043d\u043e\u0435 \u0432\u0440\u0435\u043c\u044f \u0441\u0432\u044f\u0437\u0438: ${input.text}`,
         ];
       }
       let evaluatedLead = mergeExtractedFacts(
         currentLead,
         extracted.extraction,
         evaluatedAt,
-      );
-      const history = await persistence.messages.listByConversationId(
-        currentConversation.id,
-      );
-      const latestOutbound = history.findLast(
-        (message) => message.direction === "OUTBOUND",
       );
       const greetingRequired = !history.some((message) => message.direction === "INBOUND");
       const phoneReceived =

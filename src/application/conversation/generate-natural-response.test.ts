@@ -324,6 +324,97 @@ describe("natural response generation", () => {
       .toContain("пропустил вопрос");
   });
 
+  it("answers a semantic request even when no literal KB fragment matched", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        text: "Какую цель хотите решить этим бизнесом?",
+        nextInformationNeed: "GOAL",
+        conversationAction: "DISCOVER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Продолжить квалификацию.",
+      }),
+      JSON.stringify({
+        text: "Это бизнес по посуточной сдаче квартир. Команда помогает подобрать и запустить объект, а после запуска ведёт рекламу, бронирования и работу с гостями. С вашей стороны — участие в запуске и расходы по объекту. Какую цель хотите решить этим бизнесом?",
+        nextInformationNeed: "GOAL",
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "Сначала объяснил суть бизнеса, затем продолжил квалификацию.",
+        usedKnowledgeEntryIds: ["offer-overview", "launch-process"],
+      }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const approvedFacts = PARTNER_KNOWLEDGE_BASE.map((entry) => ({
+      id: entry.id,
+      category: entry.category,
+      answer: entry.answer,
+    }));
+    const plan: ConversationResponsePlan = {
+      text: "Какую цель хотите решить этим бизнесом?",
+      nextInformationNeed: null,
+      asksUserQuestion: true,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "GENERAL_INTEREST",
+      currentUserQuestions: [],
+      currentTurnRequiresAnswer: true,
+      groundedAnswerRequired: true,
+      qualificationProgressExpected: true,
+      allowedNextInformationNeeds: ["GOAL"],
+      allowedQualificationMoves: [{
+        need: "GOAL",
+        objective: "понять цель человека",
+      }],
+      approvedFacts,
+    };
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({
+        text: expect.stringContaining("бизнес по посуточной сдаче квартир"),
+        nextInformationNeed: "GOAL",
+        conversationAction: "ANSWER",
+      });
+    expect(llm.callCount).toBe(2);
+    expect(JSON.parse(llm.requests[1]!.userMessage).validationFeedback)
+      .toContain("пропустил вопрос");
+  });
+
+  it("allows a useful optional scheduling question after a post-handoff answer", async () => {
+    const text = "Для запуска с вашей стороны нужны бюджет на расходы по объекту, участие в просмотрах и договорах, а также около 3–4 часов в день на ключевые решения. Объявления, бронирования, гостей и клининг ведёт команда. В какой день и примерно во сколько вам удобно принять звонок менеджера?";
+    const generate = createNaturalResponseGenerator({
+      llmProvider: new FakeLLMProvider([JSON.stringify({
+        text,
+        nextInformationNeed: null,
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "NOT_APPLICABLE",
+        qualificationMoveRationale: "Ответил на вопрос и необязательно уточнил время связи.",
+        usedKnowledgeEntryIds: ["company-responsibilities", "partner-time"],
+      })]),
+    });
+    const plan: ConversationResponsePlan = {
+      text: "Понял, учту.",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "QUESTION",
+      currentUserQuestions: ["Что от меня требуется для запуска?"],
+      currentTurnRequiresAnswer: true,
+      groundedAnswerRequired: true,
+      postHandoffContinuation: true,
+      qualificationProgressExpected: false,
+      approvedFacts: PARTNER_KNOWLEDGE_BASE.map((entry) => ({
+        id: entry.id,
+        category: entry.category,
+        answer: entry.answer,
+      })),
+    };
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({ text, nextInformationNeed: null });
+  });
+
   it("repairs a repeated question and continues with a different qualification topic", async () => {
     const plan: ConversationResponsePlan = {
       text: "Вы правы: срок уже обсуждали. Продолжу с учётом ответа.",

@@ -171,6 +171,53 @@ describe("multi-turn qualification conversation", () => {
     expect(result.qualificationReason).not.toBe("UNKNOWN_BUSINESS_QUESTION");
   });
 
+  it("requires an answer to a semantic request before any qualification move", async () => {
+    const extractMessage = createMessageExtractor({
+      llmProvider: new FakeLLMProvider([reply({
+        intent: "GENERAL_INTEREST",
+        facts: {
+          city: "Москва",
+          availableCapital: 400_000,
+          availableCapitalConfirmed: true,
+        },
+        signals: {
+          requiresSubstantiveAnswer: true,
+        },
+      })]),
+    });
+    const generateNaturalResponse = vi.fn(async ({ plan }) => {
+      expect(plan.currentTurnRequiresAnswer).toBe(true);
+      return {
+        text: "Здравствуйте! Это бизнес по посуточной сдаче квартир: команда помогает подобрать и запустить объект, затем ведёт рекламу, бронирования и работу с гостями. С вашей стороны нужны участие в запуске и расходы по объекту.",
+        model: "test-model",
+        inputTokens: 1,
+        outputTokens: 1,
+        nextInformationNeed: null,
+        conversationAction: "ANSWER" as const,
+        qualificationMoveDecision: "DEFER" as const,
+        qualificationMoveRationale: "Сначала подробно ответить на текущую просьбу.",
+        usedKnowledgeEntryIds: ["offer-overview", "launch-process"],
+      };
+    });
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage,
+      generateNaturalResponse,
+      generateId: () => `semantic-request-${++nextId}`,
+      now: () => new Date(`2026-09-19T15:${String(nextId).padStart(2, "0")}:00Z`),
+    });
+
+    const result = await processEvent(input(50, "А подробности можно"));
+    const plan = generateNaturalResponse.mock.calls[0]![0].plan;
+
+    expect(plan.knowledgeEntryIds).toHaveLength(0);
+    expect(plan.currentTurnRequiresAnswer).toBe(true);
+    expect(plan.groundedAnswerRequired).toBe(true);
+    expect(plan.approvedFacts?.length).toBeGreaterThan(0);
+    expect(result.outboundMessage).toContain("бизнес по посуточной сдаче квартир");
+    expect(result.outboundMessage).not.toBe("Какую главную цель хотите решить этим бизнесом?");
+  });
+
   it.each([
     ["Какие условия предлагаете?", ["субаренде", "50 000 ₽", "80 000 ₽", "доход не гарантируется"]],
     ["Как вообще проходит организация бизнеса?", ["подобрать объект", "комплектации", "площадках", "администратор", "горничную", "персональный менеджер", "CRM"]],
@@ -510,6 +557,47 @@ describe("multi-turn qualification conversation", () => {
       `manager-handoff:${beforePhone.leadId}`,
     );
     expect(afterHandoffNotification?.id).toBe(handoffNotification?.id);
+  });
+
+  it("asks for an optional callback slot after handoff and keeps it in CRM", async () => {
+    const { processEvent } = harness([
+      reply({
+        facts: {
+          city: "Химки",
+          availableCapital: 200_000,
+          availableCapitalConfirmed: true,
+          additionalExpensesReadiness: "READY",
+          businessModelReadiness: "ACCEPTS",
+          startingUnits: 1,
+          scalingPotentialUnits: 3,
+          hasFreeTime: true,
+          launchTiming: "READY_NOW",
+          primaryGoal: "ADDITIONAL_INCOME",
+          managementReadiness: "READY",
+        },
+      }),
+      reply({ facts: { phoneNumber: "+79991234567", phoneConfirmed: true } }),
+      reply({
+        signals: { previousQuestionResponse: "ANSWERED" },
+      }),
+    ]);
+
+    const qualified = await processEvent(input(30, "Готов начать в Химках, есть 200 тысяч"));
+    const handedOff = await processEvent(input(31, "+79991234567"));
+    const notification = await persistence.managerNotifications.findByIdempotencyKey(
+      `manager-handoff:${qualified.leadId}`,
+    );
+    expect(handedOff.outboundMessage).toContain("в какой день");
+    expect(handedOff.outboundMessage).toContain("согласовать уже с менеджером");
+
+    await processEvent(input(32, "Завтра в 16:00"));
+    const lead = await persistence.leads.findById(qualified.leadId!);
+    const crm = await createCrmService(persistence).getLead(qualified.leadId!);
+    expect(lead?.questions).toContain("Удобное время связи: Завтра в 16:00");
+    expect(crm?.preferredContactTime).toBe("Завтра в 16:00");
+    expect((await persistence.managerNotifications.findByIdempotencyKey(
+      `manager-handoff:${qualified.leadId}`,
+    ))?.id).toBe(notification?.id);
   });
 
   it("answers an economics question after handoff without creating another handoff", async () => {

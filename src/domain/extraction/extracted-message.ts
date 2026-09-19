@@ -152,6 +152,12 @@ export interface ExtractedSignals {
   contextualReference?: boolean;
   /** User asks the consultant to recommend/derive a sensible starting scale. */
   needsStartupScaleRecommendation?: boolean;
+  /**
+   * The current turn asks for a substantive reply (an explanation, advice,
+   * clarification or answer), even when it is phrased as an imperative rather
+   * than a literal question. This is conversational intent, not a KB topic.
+   */
+  requiresSubstantiveAnswer?: boolean;
 }
 
 export interface ExtractedMessage {

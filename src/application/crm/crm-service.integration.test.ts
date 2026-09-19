@@ -171,6 +171,17 @@ describe("local CRM read model", () => {
     expect(details?.phoneNumber).toBe("+79991234567");
   });
 
+  it("exposes the latest optional callback preference in the lead card", async () => {
+    await persistence.leads.insert(lead(1, {
+      questions: [
+        "Удобное время связи: Сегодня вечером",
+        "Удобное время связи: Завтра в 16:00",
+      ],
+    }));
+    const details = await createCrmService(persistence).getLead("lead-1");
+    expect(details?.preferredContactTime).toBe("Завтра в 16:00");
+  });
+
   it("does not expose a legacy transfer before business qualification", async () => {
     await persistence.leads.insert(lead(2, { source: "AVITO", city: "Химки", serviceability: "SUPPORTED", availableCapital: 150_000,
       availableCapitalConfirmed: true, qualificationStatus: "HANDOFF", qualificationReason: "USER_REQUESTED_HUMAN",

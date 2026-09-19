@@ -109,6 +109,7 @@ export const extractedMessageSchema = z
         resolvedQuestion: z.string().trim().max(MAX_EXTRACTED_TEXT_LENGTH).default(""),
         contextualReference: z.boolean().default(false),
         needsStartupScaleRecommendation: z.boolean().default(false),
+        requiresSubstantiveAnswer: z.boolean().default(false),
       })
       .strict(),
     // The extractor can always report its confidence, so null adds no meaning.
@@ -193,6 +194,7 @@ CAPITAL CONFIRMATION: when the user presents an amount as money they have, their
 - previousQuestionResponse описывает смысл CURRENT_MESSAGE относительно последнего вопроса AI/HUMAN: ANSWERED — содержательно ответил; UNSURE — прямо или по смыслу не знает ответа; DECLINED_TO_ANSWER — не хочет отвечать сейчас; CHANGED_TOPIC — переключил разговор; NOT_A_RESPONSE — предыдущего вопроса нет или сообщение к нему не относится. Не считай UNSURE заполненным qualification fact и не пытайся угадывать значение.
 - Если текущий вопрос использует эллипсис или ссылку на предыдущий контекст («а сколько примерно?», «а это входит?», «там сколько?»), установи contextualReference=true и запиши в resolvedQuestion его самостоятельный смысл с учётом ближайшего однозначного контекста. Не добавляй новых фактов и не усиливай требуемую точность: слова «конкретный», «точный», адрес или выбранный объект допустимы только когда их действительно указал пользователь. Для самостоятельного вопроса resolvedQuestion=null.
 - needsStartupScaleRecommendation=true, когда человек просит консультанта определить или посоветовать разумное количество объектов для старта, в том числе потому что сам не знает его. Это семантический сигнал запроса рекомендации, а не startingUnits: не записывай рекомендованное системой число как решение пользователя.
+- requiresSubstantiveAnswer=true, когда CURRENT_MESSAGE просит ответ, объяснение, подробности, совет, расчёт, уточнение или реакцию на возражение — даже если просьба сформулирована без вопросительного знака (например, человек просит рассказать, как устроен бизнес). Это общий conversational signal, а не классификатор темы. Не ставь его для простого ответа на предыдущий вопрос, подтверждения или нового факта без запроса к консультанту.
 - Короткий ответ интерпретируй в контексте непосредственно заданного вопроса. Если PENDING_INFORMATION_NEED=AVAILABLE_CAPITAL и ассистент спросил общий доступный капитал, названная пользователем сумма без прямого ограничения «только на услугу/первый этап» является availableCapital. Если сумма названа уверенно, без «возможно», «постараюсь найти», «наверное» и аналогичной оговорки, установи availableCapitalConfirmed=true. Формулировка «для начала» означает сумму, которую человек готов выделить на первоначальный запуск и сама по себе не является неопределённостью или оплатой только услуги команды.
 - capitalScope=ENTRY_ONLY и entryBudget используй только когда пользователь явно связал сумму с услугой команды, оплатой компании или первым этапом. Не превращай достаточно определённый ответ о капитале в дополнительный финансовый вопрос из-за одной лишь краткости формулировки.
 - «Понял», «ясно», «хорошо» сами по себе не подтверждают бюджет, финансовую готовность, модель бизнеса или иной qualification fact.
@@ -268,6 +270,7 @@ function withExtractionDefaults(value: unknown): unknown {
           resolvedQuestion: "",
           contextualReference: false,
           needsStartupScaleRecommendation: false,
+          requiresSubstantiveAnswer: false,
           ...signals,
         }
       : root.signals,

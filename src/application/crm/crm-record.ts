@@ -48,6 +48,7 @@ export interface CrmLeadRecord {
   scalingPotentialUnits: number | null;
   hasFreeTime: boolean | null;
   availableTimeDetails: string | null;
+  preferredContactTime: string | null;
   goal: Lead["primaryGoal"];
   desiredIncome: number | null;
   launchTiming: Lead["launchTiming"];

@@ -68,6 +68,7 @@ export default async function CrmLeadPage({
             <Field label="Цель" value={record.goal ? goalLabels[record.goal] ?? record.goal : ""} />
             <Field label="Желаемый доход" value={money(record.desiredIncome)} />
             <Field label="Свободное время" value={record.availableTimeDetails ?? (record.hasFreeTime === true ? "Есть несколько часов в день" : record.hasFreeTime === false ? "Ограничено" : "")} />
+            <Field label="Удобное время связи" value={record.preferredContactTime ?? ""} />
             <Field label="Финансовая готовность" value={financialLabels[record.financialReadiness] ?? record.financialReadiness} />
             <Field label="Намерение" value={record.buyingIntent ? buyingIntentLabels[record.buyingIntent] ?? record.buyingIntent : ""} />
             <Field label="Последняя активность" value={dateTime(record.lastActivityAt)} />

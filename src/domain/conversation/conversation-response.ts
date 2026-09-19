@@ -150,6 +150,7 @@ export interface ConversationResponsePlan {
   deferredInformationNeeds?: InformationNeed[];
   guidanceNeed?: InformationNeed | null;
   groundedAnswerRequired?: boolean;
+  currentTurnRequiresAnswer?: boolean;
 }
 
 const qualificationProgressIntents = new Set<MessageIntent>([
@@ -202,9 +203,15 @@ export function buildConversationResponse(params: {
     allowedNextInformationNeeds,
     postHandoffContinuation,
   });
-  const groundedAnswerRequired =
-    (extraction.signals.questions.length > 0 || params.guidanceNeed != null) &&
-    (knowledge.answerFragments.length > 0 || knowledge.economicsContext !== undefined);
+  const currentTurnRequiresAnswer =
+    extraction.intent === "QUESTION" ||
+    extraction.signals.questions.length > 0 ||
+    extraction.signals.requiresSubstantiveAnswer === true ||
+    params.guidanceNeed != null;
+  // Whether the user deserves an answer is determined by the semantic function
+  // of this turn. Literal KB matching only supplies convenient fragments; it
+  // must never decide whether Claude may answer from the full approved context.
+  const groundedAnswerRequired = currentTurnRequiresAnswer;
   const adaptiveContext = {
     allowedNextInformationNeeds,
     allowedNextQuestions: allowedNextInformationNeeds.map((need) => ({
@@ -235,6 +242,7 @@ export function buildConversationResponse(params: {
     deferredInformationNeeds: [...new Set(params.deferredInformationNeeds ?? [])],
     guidanceNeed: params.guidanceNeed ?? null,
     groundedAnswerRequired,
+    currentTurnRequiresAnswer,
   };
 
   if (decision.nextAction === "REJECT_POLITELY") {
@@ -303,7 +311,7 @@ export function buildConversationResponse(params: {
   if (decision.shouldHandoffToManager && !postHandoffContinuation) {
     parts.push(
       extraction.facts.phoneNumber && extraction.facts.phoneConfirmed
-        ? "Спасибо, передал номер менеджеру. Он свяжется с вами."
+        ? "Спасибо, передал номер менеджеру. Подскажите, в какой день и примерно во сколько вам удобно принять звонок? Если пока не знаете, время можно согласовать уже с менеджером."
         : extraction.signals.wantsHuman || knowledge.unresolvedQuestions.length > 0 ||
         ["USER_REQUESTED_HUMAN", "UNKNOWN_BUSINESS_QUESTION"].includes(decision.reason)
         ? "Передам менеджеру контекст разговора, чтобы он мог продолжить с вами предметно."
