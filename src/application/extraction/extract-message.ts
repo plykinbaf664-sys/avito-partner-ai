@@ -192,6 +192,7 @@ CAPITAL CONFIRMATION: when the user presents an amount as money they have, their
 - В RECENT_MESSAGES actor=MANAGER означает Дмитрия: учитывай его сообщения как часть общей истории команды и текущий договорённый следующий шаг. Это не факт пользователя само по себе, но ответ пользователя может быть прямым продолжением просьбы Дмитрия.
 - Определи функцию CURRENT_MESSAGE в текущем разговоре. CONFIRMATION — короткое согласие или подтверждение предыдущего вопроса; CORRECTION — исправление ранее сообщённого факта; COMPLAINT — раздражение, непонимание или жалоба на качество предыдущего ответа. Не смешивай COMPLAINT с обычным деловым возражением: это сигнал сначала восстановить взаимопонимание.
 - previousQuestionResponse описывает смысл CURRENT_MESSAGE относительно последнего вопроса AI/HUMAN: ANSWERED — содержательно ответил; UNSURE — прямо или по смыслу не знает ответа; DECLINED_TO_ANSWER — не хочет отвечать сейчас; CHANGED_TOPIC — переключил разговор; NOT_A_RESPONSE — предыдущего вопроса нет или сообщение к нему не относится. Не считай UNSURE заполненным qualification fact и не пытайся угадывать значение.
+- Различай тему ответа и новый вопрос. Упоминание темы одним словом или короткой фразой в ответ на вопрос AI/HUMAN не является вопросом пользователя. Если previousQuestionResponse=ANSWERED/UNSURE/DECLINED_TO_ANSWER и человек отдельно ничего не просит объяснить, questions должен быть пустым, requiresSubstantiveAnswer=false, а intent не должен быть QUESTION.
 - Если текущий вопрос использует эллипсис или ссылку на предыдущий контекст («а сколько примерно?», «а это входит?», «там сколько?»), установи contextualReference=true и запиши в resolvedQuestion его самостоятельный смысл с учётом ближайшего однозначного контекста. Не добавляй новых фактов и не усиливай требуемую точность: слова «конкретный», «точный», адрес или выбранный объект допустимы только когда их действительно указал пользователь. Для самостоятельного вопроса resolvedQuestion=null.
 - needsStartupScaleRecommendation=true, когда человек просит консультанта определить или посоветовать разумное количество объектов для старта, в том числе потому что сам не знает его. Это семантический сигнал запроса рекомендации, а не startingUnits: не записывай рекомендованное системой число как решение пользователя.
 - requiresSubstantiveAnswer=true, когда CURRENT_MESSAGE просит ответ, объяснение, подробности, совет, расчёт, уточнение или реакцию на возражение — даже если просьба сформулирована без вопросительного знака (например, человек просит рассказать, как устроен бизнес). Это общий conversational signal, а не классификатор темы. Не ставь его для простого ответа на предыдущий вопрос, подтверждения или нового факта без запроса к консультанту.
@@ -318,6 +319,21 @@ function ungroundedCurrentMessageSignals(
     .map(({ field }) => field);
 }
 
+function hasContradictoryConversationSignals(
+  extraction: ExtractedMessage,
+): boolean {
+  const respondedToPreviousQuestion = [
+    "ANSWERED",
+    "UNSURE",
+    "DECLINED_TO_ANSWER",
+  ].includes(extraction.signals.previousQuestionResponse ?? "NOT_A_RESPONSE");
+  return (
+    respondedToPreviousQuestion &&
+    extraction.signals.questions.length > 0 &&
+    extraction.signals.requiresSubstantiveAnswer !== true
+  );
+}
+
 function explicitlyAcceptsManagementInteraction(text: string): boolean {
   const normalized = text.trim().toLocaleLowerCase("ru-RU");
   if (/\bне\s+готов/u.test(normalized)) return false;
@@ -442,16 +458,19 @@ export function createMessageExtractor({
     let totalInputTokens = response.inputTokens;
     let totalOutputTokens = response.outputTokens;
     let parsed = parseExtraction(response);
-    if (ungroundedCurrentMessageSignals(parsed.data, validatedText).length > 0) {
+    const extractionSignalsNeedRetry = (value: ExtractedMessage) =>
+      ungroundedCurrentMessageSignals(value, validatedText).length > 0 ||
+      hasContradictoryConversationSignals(value);
+    if (extractionSignalsNeedRetry(parsed.data)) {
       response = await requestExtraction(
-        "The previous output copied or invented questions/objections that are not present in CURRENT_MESSAGE. Extract signals only from CURRENT_MESSAGE. RECENT_MESSAGES may resolve references, but their text must never be emitted as a current question or objection.",
+        "The previous output contained inconsistent conversational signals or copied/invented a question. A response to the immediately preceding AI/HUMAN question is not itself a user question merely because it mentions that topic. Populate questions only for an independent request for information in CURRENT_MESSAGE. Keep previousQuestionResponse, requiresSubstantiveAnswer and intent semantically consistent. RECENT_MESSAGES may resolve references, but their text must never be emitted as a current question or objection.",
       );
       totalInputTokens += response.inputTokens;
       totalOutputTokens += response.outputTokens;
       parsed = parseExtraction(response);
-      if (ungroundedCurrentMessageSignals(parsed.data, validatedText).length > 0) {
+      if (extractionSignalsNeedRetry(parsed.data)) {
         throw new InvalidExtractionOutputError(
-          "LLM extraction emitted questions or objections not grounded in CURRENT_MESSAGE",
+          "LLM extraction emitted ungrounded or contradictory conversational signals",
         );
       }
     }

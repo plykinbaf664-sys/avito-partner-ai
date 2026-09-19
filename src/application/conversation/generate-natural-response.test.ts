@@ -399,6 +399,60 @@ describe("natural response generation", () => {
       .toContain("пропустил вопрос");
   });
 
+  it("treats a topical phrase as an answer to the previous qualification question", async () => {
+    const text = "Понял, хотите зарабатывать на этом бизнесе, а точную цель пока не определили. Был ли у Вас опыт в недвижимости или посуточной аренде?";
+    const llm = new FakeLLMProvider([JSON.stringify({
+      text,
+      nextInformationNeed: "EXPERIENCE",
+      conversationAction: "ACKNOWLEDGE",
+      qualificationMoveDecision: "ADVANCE",
+      qualificationMoveRationale: "Признать ответ о мотивации и перейти к другой уместной теме.",
+      answerCoverage: "FULL",
+      usedKnowledgeEntryIds: [],
+    })]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const plan: ConversationResponsePlan = {
+      text: "Был ли у Вас опыт в недвижимости или посуточной аренде?",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "QUALIFICATION_INFORMATION",
+      previousQuestionResponse: "UNSURE",
+      qualificationProgressExpected: true,
+      allowedNextInformationNeeds: ["EXPERIENCE", "FREE_TIME"],
+      allowedQualificationMoves: [
+        { need: "EXPERIENCE", objective: "понять релевантный опыт" },
+        { need: "FREE_TIME", objective: "понять доступное для проекта время" },
+      ],
+      approvedFacts: PARTNER_KNOWLEDGE_BASE.map((entry) => ({
+        id: entry.id,
+        category: entry.category,
+        answer: entry.answer,
+      })),
+    };
+
+    await expect(generate({
+      lead: { city: "Москва", availableCapital: 200_000 } as Lead,
+      plan,
+      recentMessages: [{
+        direction: "OUTBOUND",
+        content: "Какую главную цель хотите решить этим бизнесом?",
+      }, {
+        direction: "INBOUND",
+        content: "Да я не знаю даже, деньги",
+      }],
+    })).resolves.toMatchObject({
+      text,
+      nextInformationNeed: "EXPERIENCE",
+      conversationAction: "ACKNOWLEDGE",
+    });
+    const request = JSON.parse(llm.requests[0]!.userMessage);
+    expect(request.currentKnowledgeEntryIds).toEqual([]);
+    expect(request.economicsContext).toBeNull();
+  });
+
   it("answers a semantic request even when no literal KB fragment matched", async () => {
     const llm = new FakeLLMProvider([
       JSON.stringify({

@@ -337,16 +337,26 @@ export function answerFromKnowledgeBase(
 ): KnowledgeAnswer {
   const previousQuestionResponse = extraction.signals.previousQuestionResponse ?? "NOT_A_RESPONSE";
   const answeredPreviousQuestion = ["ANSWERED", "UNSURE", "DECLINED_TO_ANSWER"].includes(previousQuestionResponse);
-  const hasNewQuestion = extraction.signals.questions.length > 0;
+  const canContainIndependentQuestion =
+    extraction.signals.requiresSubstantiveAnswer === true ||
+    ["NOT_A_RESPONSE", "CHANGED_TOPIC"].includes(previousQuestionResponse);
+  // A topical phrase used as an answer (for example a motive named after the
+  // assistant asked about goals) is conversation evidence, not a KB query.
+  // The extractor retries this inconsistent shape; this guard also prevents a
+  // stale or imported extraction from triggering an unrelated knowledge dump.
+  const currentQuestions = canContainIndependentQuestion
+    ? extraction.signals.questions
+    : [];
+  const hasNewQuestion = currentQuestions.length > 0;
   const userStatements = [
-    ...extraction.signals.questions,
+    ...currentQuestions,
     ...extraction.signals.objections,
     ...(extraction.signals.resolvedQuestion && (!answeredPreviousQuestion || hasNewQuestion)
       ? [extraction.signals.resolvedQuestion]
       : []),
   ].flatMap(questionParts);
   const surfaceStatements = [
-    ...extraction.signals.questions,
+    ...currentQuestions,
     ...extraction.signals.objections,
   ].flatMap(questionParts);
   const surfaceCandidates = PARTNER_KNOWLEDGE_BASE.filter((entry) =>
@@ -466,7 +476,7 @@ export function answerFromKnowledgeBase(
       rentReference: effectiveRentReference ?? GENERAL_RENT_RANGE_REFERENCE,
     })
     : null;
-  const unresolvedQuestions = extraction.signals.questions.flatMap(questionParts).filter((question) => {
+  const unresolvedQuestions = currentQuestions.flatMap(questionParts).filter((question) => {
     // Missing literal wording is not an information gap. Claude receives the
     // complete approved fact set and decides semantic coverage. This list is
     // reserved for policy-level gaps such as concrete object/legal details.

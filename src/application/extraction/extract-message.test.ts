@@ -420,11 +420,11 @@ describe("message extraction schema", () => {
     expect(llm.requests[0]?.systemPrompt).toContain("3–4 часов в день");
   });
 
-  it("retries when extraction copies a previous user question into the current turn", async () => {
+  it("retries ungrounded or contradictory conversation signals", async () => {
     const reply = (overrides: {
       city: string | null;
       questions: string[];
-      previousQuestionResponse: "ANSWERED" | "DECLINED_TO_ANSWER";
+      previousQuestionResponse: "ANSWERED" | "UNSURE" | "DECLINED_TO_ANSWER";
       requiresSubstantiveAnswer: boolean;
       intent: "QUESTION" | "QUALIFICATION_INFORMATION";
     }) => JSON.stringify({
@@ -491,6 +491,45 @@ describe("message extraction schema", () => {
       signals: {
         questions: [],
         previousQuestionResponse: "ANSWERED",
+        requiresSubstantiveAnswer: false,
+      },
+    });
+
+    const semanticLlm = new FakeLLMProvider([
+      reply({
+        city: null,
+        questions: ["не знаю даже, деньги"],
+        previousQuestionResponse: "UNSURE",
+        requiresSubstantiveAnswer: false,
+        intent: "QUESTION",
+      }),
+      reply({
+        city: null,
+        questions: [],
+        previousQuestionResponse: "UNSURE",
+        requiresSubstantiveAnswer: false,
+        intent: "QUALIFICATION_INFORMATION",
+      }),
+    ]);
+    const semanticResult = await createMessageExtractor({
+      llmProvider: semanticLlm,
+    })({
+      text: "Да я не знаю даже, деньги",
+      pendingInformationNeed: "GOAL",
+      recentMessages: [{
+        direction: "OUTBOUND",
+        content: "Какую главную цель хотите решить этим бизнесом?",
+      }],
+    });
+
+    expect(semanticLlm.callCount).toBe(2);
+    expect(semanticLlm.requests[1]?.systemPrompt)
+      .toContain("not itself a user question");
+    expect(semanticResult.extraction).toMatchObject({
+      intent: "QUALIFICATION_INFORMATION",
+      signals: {
+        questions: [],
+        previousQuestionResponse: "UNSURE",
         requiresSubstantiveAnswer: false,
       },
     });

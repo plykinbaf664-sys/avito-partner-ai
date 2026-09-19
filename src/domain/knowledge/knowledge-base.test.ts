@@ -193,6 +193,30 @@ describe("contextual partner knowledge", () => {
     expect(answer.contextualReferenceResolved).toBe(false);
   });
 
+  it("does not turn a topical answer to a qualification question into a KB query", () => {
+    const extraction = question("не знаю даже, деньги", {
+      city: "Москва",
+      availableCapital: 200_000,
+      availableCapitalConfirmed: true,
+    });
+    extraction.signals.previousQuestionResponse = "UNSURE";
+    extraction.signals.requiresSubstantiveAnswer = false;
+
+    const answer = answerFromKnowledgeBase(extraction, {
+      previousEntryIds: ["small-business-entry"],
+      recentMessages: [{
+        direction: "OUTBOUND",
+        content: "Какую главную цель хотите решить этим бизнесом?",
+      }],
+      leadFacts: { city: "Москва", availableCapital: 200_000 },
+    });
+
+    expect(answer.entryIds).toEqual([]);
+    expect(answer.answerFragments).toEqual([]);
+    expect(answer.economicsContext).toBeUndefined();
+    expect(answer.unresolvedQuestions).toEqual([]);
+  });
+
   it.each([
     "Мне самому нужно отвечать гостям?",
     "А объявления кто размещает?",
