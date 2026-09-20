@@ -1021,6 +1021,30 @@ describe("multi-turn qualification conversation", () => {
     expect(result.qualificationStatus).not.toBe("NO_FIT");
   });
 
+  it("does not reject a 200,000 total Moscow budget as unwilling to fund launch costs", async () => {
+    const { processEvent } = harness([
+      reply({
+        facts: {
+          city: "Москва",
+          availableCapital: 200_000,
+          availableCapitalConfirmed: true,
+          additionalLaunchCapital: 0,
+          capitalScope: "TOTAL_LIMIT",
+          additionalExpensesReadiness: "NOT_READY",
+        },
+      }),
+    ]);
+
+    const result = await processEvent(
+      input(1, "Москва, 200 тысяч — это весь бюджет на запуск"),
+    );
+
+    expect(result.qualificationStatus).not.toBe("NO_FIT");
+    expect(result.qualificationReason).not.toBe("UNWILLING_TO_FUND_REQUIRED_EXPENSES");
+    expect(result.knownFacts).toContain("ADDITIONAL_EXPENSES");
+    expect(result.suggestedNextInformationNeed).not.toBe("ADDITIONAL_EXPENSES");
+  });
+
   it("answers transparently how much a small-business launch can require", async () => {
     const question = "Сколько вообще надо денег на старт?";
     const { processEvent } = harness([

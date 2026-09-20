@@ -96,4 +96,41 @@ describe("small-business financial readiness", () => {
       financialBarrier: null,
     });
   });
+
+  it("accepts 200,000 as sufficient for one Moscow object despite a contradictory expense flag", () => {
+    expect(assessFinancialReadiness(facts({
+      city: "Москва",
+      availableCapital: 200_000,
+      availableCapitalConfirmed: true,
+      additionalLaunchCapital: 0,
+      capitalScope: "TOTAL_LIMIT",
+      additionalExpensesReadiness: "NOT_READY",
+      startingUnits: 1,
+    }))).toMatchObject({
+      launchCostAwareness: "CONFIRMED",
+      financialReadiness: "HIGH",
+      financialBarrier: null,
+      usesCitySpecificRent: true,
+      launchBudgetRange: {
+        totalMin: 180_000,
+        totalMax: 180_000,
+      },
+    });
+  });
+
+  it("keeps an explicit refusal to fund required expenses incompatible", () => {
+    expect(assessFinancialReadiness(facts({
+      city: "Москва",
+      availableCapital: 200_000,
+      availableCapitalConfirmed: true,
+      capitalScope: "TOTAL_LIMIT",
+      additionalExpensesReadiness: "NOT_READY",
+      objections: ["Не готов оплачивать аренду, залог и подготовку"],
+      startingUnits: 1,
+    }))).toMatchObject({
+      launchCostAwareness: "REJECTED",
+      financialReadiness: "INCOMPATIBLE",
+      financialBarrier: "UNWILLING_TO_FUND_REQUIRED_EXPENSES",
+    });
+  });
 });

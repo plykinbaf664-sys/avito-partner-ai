@@ -39,6 +39,7 @@ function facts(overrides: Partial<QualificationFacts> = {}): QualificationFacts 
     shortTermRentalExperience: null,
     primaryFear: null,
     primaryGoal: null,
+    objections: [],
     ...overrides,
   };
 }

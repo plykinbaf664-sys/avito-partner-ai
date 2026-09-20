@@ -1,6 +1,6 @@
 import {
   calculateLaunchBudgetRange,
-  findRegionalRentReference,
+  findApprovedRentReference,
   GENERAL_RENT_RANGE_REFERENCE,
   type LaunchBudgetRange,
 } from "../economics/economics-calculator";
@@ -48,7 +48,10 @@ export type FinancialReadinessFacts = Pick<
   | "additionalLaunchCapital"
   | "capitalScope"
   | "additionalExpensesReadiness"
-> & Partial<Pick<Lead, "city" | "budget" | "budgetConfirmed" | "startingUnits">>;
+> & Partial<Pick<
+  Lead,
+  "city" | "budget" | "budgetConfirmed" | "startingUnits" | "objections"
+>>;
 
 function confirmedTotalCapital(facts: FinancialReadinessFacts): number | null {
   if (
@@ -74,14 +77,22 @@ function confirmedTotalCapital(facts: FinancialReadinessFacts): number | null {
 export function assessFinancialReadiness(
   facts: FinancialReadinessFacts,
 ): FinancialReadinessAssessment {
-  const cityReference = findRegionalRentReference(facts.city ?? null);
+  const cityReference = findApprovedRentReference(facts.city ?? null);
   const launchBudgetRange = calculateLaunchBudgetRange({
     units: facts.startingUnits ?? 1,
     rentReference: cityReference ?? GENERAL_RENT_RANGE_REFERENCE,
   })!;
+  const totalCapital = confirmedTotalCapital(facts);
+  const confirmedCapitalCoversFullRange =
+    totalCapital !== null && totalCapital >= launchBudgetRange.totalMax;
+  const explicitExpenseRefusal =
+    facts.additionalExpensesReadiness === "NOT_READY" &&
+    (facts.objections?.length ?? 0) > 0;
   const launchCostAwareness: LaunchCostAwareness =
     facts.additionalExpensesReadiness === "NOT_READY"
-      ? "REJECTED"
+      ? confirmedCapitalCoversFullRange && !explicitExpenseRefusal
+        ? "CONFIRMED"
+        : "REJECTED"
       : facts.additionalExpensesReadiness === "READY" ||
           facts.additionalLaunchCapital !== null ||
           facts.capitalScope === "ADDITIONAL_AVAILABLE"
@@ -89,9 +100,15 @@ export function assessFinancialReadiness(
         : facts.additionalExpensesReadiness === "LIMITED"
           ? "PARTIAL"
           : "UNKNOWN";
-  const totalCapital = confirmedTotalCapital(facts);
 
-  if (facts.additionalExpensesReadiness === "NOT_READY") {
+  // A confirmed TOTAL_LIMIT is the complete amount available for the launch,
+  // including rent, deposit and preparation. If it covers the full approved
+  // range, an inconsistent NOT_READY extraction must not create a false
+  // rejection. Explicitly insufficient totals remain blocked below.
+  if (
+    facts.additionalExpensesReadiness === "NOT_READY" &&
+    (!confirmedCapitalCoversFullRange || explicitExpenseRefusal)
+  ) {
     return {
       launchCostAwareness,
       financialReadiness: "INCOMPATIBLE",
@@ -111,7 +128,7 @@ export function assessFinancialReadiness(
     };
   }
 
-  if (totalCapital !== null && totalCapital >= launchBudgetRange.totalMax) {
+  if (confirmedCapitalCoversFullRange) {
     return {
       launchCostAwareness,
       financialReadiness: "HIGH",

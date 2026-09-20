@@ -98,7 +98,7 @@ export type QualificationFacts = Pick<
   | "shortTermRentalExperience"
   | "primaryFear"
   | "primaryGoal"
->;
+> & Partial<Pick<Lead, "objections">>;
 
 export interface QualificationDecision {
   status: QualificationStatus;
