@@ -1,3 +1,5 @@
+import { canonicalApprovedCity } from "../lead/approved-geography";
+
 export const PARTNER_MONTHLY_INCOME_PER_UNIT_REFERENCE = 20_000;
 export const PARTNER_SERVICE_FEE_REFERENCE = 50_000;
 export const PARTNER_PREPARATION_PER_UNIT_REFERENCE = 30_000;
@@ -111,8 +113,7 @@ export function findRegionalRentReference(
 export function findApprovedRentReference(
   city: string | null,
 ): RentRangeReference | null {
-  const normalized = city?.trim().toLocaleLowerCase("ru-RU").replaceAll("ё", "е");
-  if (normalized === "москва" || normalized === "москве" || normalized === "московская область") {
+  if (city !== null && canonicalApprovedCity(city) === "Москва") {
     return APPROVED_MOSCOW_RENT_REFERENCE;
   }
   return findRegionalRentReference(city);

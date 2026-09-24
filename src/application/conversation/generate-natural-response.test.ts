@@ -72,6 +72,8 @@ describe("natural response generation", () => {
       primaryGoal: null,
       buyingIntent: "CONSIDERING",
       desiredIncome: 100_000,
+      qualificationStatus: "NO_FIT",
+      qualificationReason: "INSUFFICIENT_LAUNCH_CAPITAL",
       questions: ["Сколько стоит запуск?"],
       objections: ["Мало времени"],
     } as Lead;
@@ -85,6 +87,8 @@ describe("natural response generation", () => {
         knowledgeEntryIds: [],
         unresolvedQuestions: [],
         useNaturalAdaptation: true,
+        qualificationReasonCodes: ["INSUFFICIENT_LAUNCH_CAPITAL"],
+        customerFacingDecision: "REJECT",
       },
       recentMessages: [
         { direction: "INBOUND", content: "Первое" },
@@ -99,6 +103,7 @@ describe("natural response generation", () => {
     expect(llm.requests[0]?.maxTokens).toBe(480);
     const sentContext = JSON.parse(llm.requests[0]!.userMessage) as {
       recentMessages: { content: string }[];
+      currentFacts: Record<string, unknown>;
     };
     expect(sentContext.recentMessages).toHaveLength(4);
     expect(llm.requests[0]?.systemPrompt).toContain("SECURITY BOUNDARY");
@@ -115,6 +120,9 @@ describe("natural response generation", () => {
         objections: ["Мало времени"],
       },
     });
+    expect(sentContext).not.toHaveProperty("qualificationReasonCodes");
+    expect(sentContext.currentFacts).not.toHaveProperty("qualificationStatus");
+    expect(sentContext.currentFacts).not.toHaveProperty("qualificationReason");
     expect(llm.requests[0]?.userMessage).toContain("Первое");
   });
 
@@ -154,6 +162,17 @@ describe("natural response generation", () => {
       recentMessages: [],
     }))
       .resolves.toMatchObject({ text, nextInformationNeed: "LAUNCH_TIMING" });
+  });
+
+  it("rejects internal qualification identifiers in customer-facing model output", async () => {
+    const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
+      JSON.stringify({
+        text: "Статус NO_FIT: INSUFFICIENT_LAUNCH_CAPITAL",
+        nextInformationNeed: null,
+      }),
+    ]) });
+    await expect(generate({ lead: {} as Lead, plan: offerPlan, recentMessages: [] }))
+      .rejects.toThrow("RESPONSE_POLICY_INTERNAL_IDENTIFIER_LEAK");
   });
 
   it("allows a short confirmation response without forcing the next qualification question", async () => {

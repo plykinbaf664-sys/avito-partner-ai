@@ -5,6 +5,7 @@ import {
   calculateLaunchBudgetRange,
   calculateEconomicsEstimate,
   buildApprovedEconomicsContext,
+  findApprovedRentReference,
   GENERAL_RENT_RANGE_REFERENCE,
   LAUNCH_COST_REFERENCE,
 } from "./economics-calculator";
@@ -59,6 +60,14 @@ describe("partner economics calculator", () => {
       rentMax: 50_000,
       source: expect.any(String),
       updatedAt: expect.any(String),
+    });
+  });
+
+  it("resolves the canonical Moscow geography for economics aliases", () => {
+    expect(findApprovedRentReference("Московская область")).toMatchObject({
+      city: "Москва",
+      rentMin: 50_000,
+      rentMax: 50_000,
     });
   });
 

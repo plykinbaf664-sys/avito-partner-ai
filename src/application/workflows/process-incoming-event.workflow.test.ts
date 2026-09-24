@@ -231,6 +231,36 @@ describe("incoming partner event workflow", () => {
     });
   });
 
+  it("keeps the deterministic capital verdict while explaining Moscow economics naturally", async () => {
+    const { processEvent } = createHarness([
+      extractionReply({
+        facts: {
+          city: "Москва",
+          availableCapital: 150_000,
+          availableCapitalConfirmed: true,
+          capitalScope: "TOTAL_LIMIT",
+          startingUnits: 1,
+        },
+      }),
+    ]);
+
+    const result = await processEvent(
+      input("event-moscow-capital", "Москва, на запуск есть 150 тысяч"),
+    );
+
+    expect(result).toMatchObject({
+      serviceability: "SUPPORTED",
+      qualificationStatus: "NO_FIT",
+      qualificationReason: "INSUFFICIENT_LAUNCH_CAPITAL",
+      nextAction: "REJECT_POLITELY",
+    });
+    expect(result.outboundMessage).toContain("180 000 ₽");
+    expect(result.outboundMessage).toContain("услуга запуска");
+    expect(result.outboundMessage).not.toMatch(
+      /NO_FIT|INSUFFICIENT_LAUNCH_CAPITAL|CAPITAL_BELOW_LAUNCH_RANGE|подтверждённый капитал ниже рассчитанного ориентира/iu,
+    );
+  });
+
   it("keeps a 50,000-ruble one-unit lead eligible without owned property", async () => {
     const question = "Своей квартиры нет, это проблема?";
     const { processEvent } = createHarness([

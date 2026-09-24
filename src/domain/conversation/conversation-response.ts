@@ -18,7 +18,10 @@ import type {
   ApprovedKnowledgeFact,
   KnowledgeAnswer,
 } from "../knowledge/knowledge-base";
-import type { ApprovedEconomicsContext } from "../economics/economics-calculator";
+import {
+  buildApprovedEconomicsContext,
+  type ApprovedEconomicsContext,
+} from "../economics/economics-calculator";
 
 const qualificationQuestions: Record<InformationNeed, string> = {
   PHONE_NUMBER:
@@ -57,13 +60,13 @@ const qualificationObjectives: Record<InformationNeed, string> = {
   BARRIER: "понять главное сомнение или препятствие",
 };
 
-const rejectionMessages: Partial<Record<QualificationReasonCode, string>> = {
+// These are customer-facing drafts. Qualification reason codes select the
+// policy branch, but are deliberately never used as customer copy.
+const customerFacingRejectionDrafts: Partial<Record<QualificationReasonCode, string>> = {
   NO_LAUNCH_CAPITAL:
     "Для запуска в этой модели нужен собственный капитал на услугу команды, аренду, залог и подготовку объекта. Без доступных средств начать сейчас не получится. Если финансовая ситуация изменится, можно вернуться к разговору.",
-  INSUFFICIENT_LAUNCH_CAPITAL:
-    "Названный подтверждённый капитал ниже рассчитанного ориентира для выбранного стартового объёма. Поэтому сейчас формат не подходит; если доступный бюджет изменится, можно вернуться к разговору.",
   NO_LAUNCH_INTENT:
-    "Понял. Раз запуск вы сейчас не рассматриваете, не буду продолжать квалификацию. Если планы изменятся, можно вернуться к разговору.",
+    "Понял. Раз запуск вы сейчас не рассматриваете, не буду продолжать разговор. Если планы изменятся, можно вернуться к нему.",
   NO_MANAGEMENT_INTERACTION:
     "Понял. Для запуска партнёру всё же нужно участвовать в просмотрах, заключении договоров и ключевых решениях, поэтому сейчас формат вам не подойдёт.",
   DECLINED_BY_LEAD:
@@ -71,10 +74,32 @@ const rejectionMessages: Partial<Record<QualificationReasonCode, string>> = {
   REQUIRES_INCOME_GUARANTEE:
     "Компания не гарантирует доход или прибыль. Если гарантия является обязательным условием, текущий формат вам не подойдёт.",
   INCOMPATIBLE_BUSINESS_MODEL:
-    "Понял. Судя по вашему условию, текущая модель бизнеса вам не подходит, поэтому не буду продолжать квалификацию.",
+    "Понял. Судя по вашему условию, текущая модель бизнеса вам не подходит, поэтому не буду продолжать разговор по этому формату.",
   UNWILLING_TO_FUND_REQUIRED_EXPENSES:
     "Помимо услуги команды, для запуска нужно самостоятельно оплатить аренду, залог и базовую комплектацию объекта. Вы указали, что не готовы финансировать эти обязательные расходы, поэтому в текущем формате запуск не получится.",
 };
+
+function formatMoney(value: number): string {
+  return `${value.toLocaleString("ru-RU").replaceAll("\u00a0", " ")} ₽`;
+}
+
+function customerFacingInsufficientCapitalDraft(
+  economics: ApprovedEconomicsContext | undefined,
+): string {
+  const scenario = economics?.scenarios.find((candidate) =>
+    candidate.requestedUnitsLaunch !== null || candidate.oneObjectLaunch !== null,
+  );
+  const launch = scenario?.requestedUnitsLaunch ?? scenario?.oneObjectLaunch;
+  const capital = economics?.availableCapital;
+  if (!scenario || !launch || capital === null || capital === undefined) {
+    return "По текущему расчётному ориентиру бюджета может не хватить для запуска выбранного объёма. В расчёт входят услуга запуска, аренда, залог и подготовка объекта; точная смета зависит от квартиры и условий собственника.";
+  }
+  const total = launch.totalMin === launch.totalMax
+    ? formatMoney(launch.totalMin)
+    : `примерно ${formatMoney(launch.totalMin)}–${formatMoney(launch.totalMax)}`;
+  const units = launch.units === 1 ? "одного объекта" : `${launch.units} объектов`;
+  return `По текущему расчётному ориентиру запуск ${units} в сценарии «${scenario.label}» — ${total}. В сумму входят услуга запуска, аренда, расчётный залог и подготовка; точная смета зависит от квартиры и условий собственника. При бюджете ${formatMoney(capital)} этого недостаточно для старта по этому ориентиру.`;
+}
 
 function compactGuidanceDraft(
   guidanceNeed: InformationNeed | null | undefined,
@@ -155,6 +180,7 @@ export interface ConversationResponsePlan {
   guidanceNeed?: InformationNeed | null;
   groundedAnswerRequired?: boolean;
   currentTurnRequiresAnswer?: boolean;
+  customerFacingDecision?: "CONTINUE" | "REJECT" | "HANDOFF";
   preferredContactTime?: string | null;
   callbackPreferenceCaptured?: boolean;
   /** Reliability of the auxiliary extractor for the current inbound turn. */
@@ -200,6 +226,14 @@ export function buildConversationResponse(params: {
   extractionQuality?: "VALID" | "RECOVERED" | "DEGRADED";
 }): ConversationResponsePlan {
   const { extraction, decision, nextInformationNeed, knowledge } = params;
+  const responseEconomics = knowledge.economicsContext ??
+    (decision.reason === "INSUFFICIENT_LAUNCH_CAPITAL"
+      ? buildApprovedEconomicsContext({
+          availableCapital: params.lead.availableCapital,
+          city: params.lead.city,
+          requestedUnits: params.lead.startingUnits,
+        })
+      : undefined);
   const conversationRepairRequired = extraction.intent === "COMPLAINT";
   const candidateNextInformationNeeds =
     params.informationNeeds?.allowedNextInformationNeeds ??
@@ -225,6 +259,12 @@ export function buildConversationResponse(params: {
   // of this turn. Literal KB matching only supplies convenient fragments; it
   // must never decide whether Claude may answer from the full approved context.
   const groundedAnswerRequired = currentTurnRequiresAnswer;
+  const customerFacingDecision: ConversationResponsePlan["customerFacingDecision"] =
+    decision.nextAction === "REJECT_POLITELY"
+      ? "REJECT"
+      : decision.shouldHandoffToManager
+        ? "HANDOFF"
+        : "CONTINUE";
   const previouslyExplainedKnowledgeEntryIds = new Set(
     params.previouslyExplainedKnowledgeEntryIds ?? [],
   );
@@ -276,23 +316,27 @@ export function buildConversationResponse(params: {
     preferredContactTime,
     callbackPreferenceCaptured: params.callbackPreferenceCaptured === true,
     extractionQuality: params.extractionQuality ?? "VALID",
+    customerFacingDecision,
   };
 
   if (decision.nextAction === "REJECT_POLITELY") {
     const compactRejectedAnswer = compactGuidanceDraft(
       params.guidanceNeed,
-      knowledge.economicsContext,
+      responseEconomics,
     ) ?? compactContextualEconomicsDraft(
       extraction,
-      knowledge.economicsContext,
+      responseEconomics,
       knowledge.contextualReferenceResolved,
     );
+    const customerFacingDecisionDraft = decision.reason === "INSUFFICIENT_LAUNCH_CAPITAL"
+      ? customerFacingInsufficientCapitalDraft(responseEconomics)
+      : customerFacingRejectionDrafts[decision.reason] ??
+        "К сожалению, текущий формат вам не подойдёт. Спасибо за разговор.";
     const answeredThenRejected = [
       ...(compactRejectedAnswer
         ? [compactRejectedAnswer]
         : answerFragmentsForCurrentTurn.slice(0, 2)),
-      rejectionMessages[decision.reason] ??
-        "К сожалению, текущий формат вам не подойдёт. Спасибо за разговор.",
+      customerFacingDecisionDraft,
     ];
     return {
       text: answeredThenRejected.join(" "),
@@ -303,18 +347,18 @@ export function buildConversationResponse(params: {
       useNaturalAdaptation: answerFragmentsForCurrentTurn.length > 0,
       contextualReference: knowledge.contextualReferenceResolved,
       ...adaptiveContext,
-      economicsContext: knowledge.economicsContext,
+      economicsContext: responseEconomics,
       approvedFacts: knowledge.approvedFacts,
     };
   }
 
   const guidanceDraft = compactGuidanceDraft(
     params.guidanceNeed,
-    knowledge.economicsContext,
+    responseEconomics,
   );
   const contextualEconomicsDraft = compactContextualEconomicsDraft(
     extraction,
-    knowledge.economicsContext,
+    responseEconomics,
     knowledge.contextualReferenceResolved,
   );
   const parts = conversationRepairRequired
@@ -379,7 +423,7 @@ export function buildConversationResponse(params: {
     useNaturalAdaptation: true,
     contextualReference: knowledge.contextualReferenceResolved,
     ...adaptiveContext,
-    economicsContext: knowledge.economicsContext,
+    economicsContext: responseEconomics,
     approvedFacts: knowledge.approvedFacts,
   };
 }

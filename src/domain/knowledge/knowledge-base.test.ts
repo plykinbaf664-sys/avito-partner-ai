@@ -36,6 +36,7 @@ describe("contextual partner knowledge", () => {
 
     expect(answer.entryIds).toEqual(expect.arrayContaining(["supported-cities", "pricing"]));
     expect(answer.answerFragments.join(" ")).toContain("Подтверждённые города");
+    expect(answer.answerFragments.join(" ")).toContain("Москва");
     expect(answer.answerFragments.join(" ")).toContain("50 000 ₽");
     expect(answer.answerFragments.join(" ")).toContain("юридическое сопровождение");
   });

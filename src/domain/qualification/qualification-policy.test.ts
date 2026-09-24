@@ -346,6 +346,12 @@ describe("serviceability policy", () => {
     expect(evaluateServiceability(" г. пОдОлЬсК ")).toBe("SUPPORTED");
   });
 
+  it("keeps Moscow in the canonical approved geography, including its aliases", () => {
+    expect(evaluateServiceability("Москва")).toBe("SUPPORTED");
+    expect(evaluateServiceability("г. Москве")).toBe("SUPPORTED");
+    expect(evaluateServiceability("Московская область")).toBe("SUPPORTED");
+  });
+
   it("sends an unknown city to review rather than rejecting the lead", () => {
     expect(evaluateServiceability("Казань")).toBe("NEEDS_REVIEW");
     expect(evaluateServiceability(null)).toBe("NEEDS_REVIEW");
