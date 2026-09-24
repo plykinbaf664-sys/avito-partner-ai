@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { RetryableInfrastructureError } from "../errors/infrastructure-error";
 import { createOutboundMessageDelivery } from "../delivery/deliver-outbound-message";
@@ -410,13 +410,35 @@ describe("incoming partner event workflow", () => {
     ]);
   });
 
-  it("does not mutate lead facts when the LLM output is invalid", async () => {
-    const { llm, processEvent } = createHarness(["not-json"]);
+  it("does not mutate lead facts or lose the turn when extraction output is invalid", async () => {
+    const logger = { info: vi.fn(), error: vi.fn() };
+    const llm = new FakeLLMProvider(["not-json", "still-not-json"]);
+    const generateNaturalResponse = vi.fn(async ({ recentMessages, plan }) => {
+      expect(recentMessages.at(-1)).toMatchObject({
+        direction: "INBOUND",
+        content: "Есть 500 тысяч",
+      });
+      expect(plan.extractionQuality).toBe("DEGRADED");
+      return {
+        text: "Принял сообщение и продолжу с учётом контекста.",
+        model: "fake-response",
+        inputTokens: 10,
+        outputTokens: 10,
+        nextInformationNeed: null,
+        conversationAction: "ACKNOWLEDGE" as const,
+      };
+    });
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse,
+      logger,
+      generateId: () => `generated-${++nextId}`,
+      now: () => new Date("2026-09-03T12:00:00.000Z"),
+    });
     const eventInput = input("event-invalid", "Есть 500 тысяч");
 
-    await expect(processEvent(eventInput)).rejects.toThrow(
-      "malformed extraction JSON",
-    );
+    const result = await processEvent(eventInput);
     const lead = await persistence.leads.findByExternalIdentity(
       "local-test",
       "lead-1",
@@ -432,19 +454,106 @@ describe("incoming partner event workflow", () => {
       "event-invalid",
     );
 
-    expect(lead).toMatchObject({ budget: null, qualificationStatus: "QUALIFYING" });
-    expect(messages).toHaveLength(1);
+    expect(lead).toMatchObject({
+      budget: null,
+      availableCapital: null,
+      city: null,
+      qualificationStatus: "NEEDS_MORE_INFO",
+    });
+    expect(messages.filter(({ direction }) => direction === "INBOUND")).toHaveLength(1);
+    expect(messages.filter(({ direction }) => direction === "OUTBOUND")).toHaveLength(1);
     expect(event).toMatchObject({
-      status: "FAILED",
-      extraction: null,
+      status: "PROCESSED",
       processingAttempts: 1,
-      processingRetryable: false,
     });
-    await expect(processEvent(eventInput)).rejects.toMatchObject({
-      name: "EventProcessingRejectedError",
-      retryable: false,
+    expect(result).toMatchObject({
+      eventStatus: "PROCESSED",
+      outboundMessage: expect.any(String),
+      metrics: { extractionLlmCalls: 2 },
     });
-    expect(llm.callCount).toBe(1);
+    expect(llm.callCount).toBe(2);
+    expect(generateNaturalResponse).toHaveBeenCalledTimes(1);
+    expect(logger.info).toHaveBeenCalledWith(
+      "extraction.degraded",
+      expect.objectContaining({
+        failureReasons: ["MALFORMED_JSON", "MALFORMED_JSON"],
+        attempts: 2,
+      }),
+    );
+    expect(logger.error).not.toHaveBeenCalledWith(
+      "extraction.failed",
+      expect.anything(),
+    );
+
+    const duplicate = await processEvent(eventInput);
+    expect(duplicate.duplicate).toBe(true);
+    expect(llm.callCount).toBe(2);
+    expect(generateNaturalResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers the newest turn once when a burst ends with degraded extraction", async () => {
+    let releaseOlder!: (result: ExtractMessageResult) => void;
+    let olderStarted!: () => void;
+    const olderReady = new Promise<void>((resolve) => {
+      olderStarted = resolve;
+    });
+    const olderResult = new Promise<ExtractMessageResult>((resolve) => {
+      releaseOlder = resolve;
+    });
+    const invalidProvider = new FakeLLMProvider([
+      "not-json",
+      JSON.stringify({ intent: "QUESTION", facts: {}, signals: {} }),
+    ]);
+    const degradedExtractor = createMessageExtractor({
+      llmProvider: invalidProvider,
+    });
+    const generateNaturalResponse = vi.fn(async ({ recentMessages, plan }) => {
+      expect(recentMessages.at(-1)?.content).toBe("Меня интересует доход?");
+      expect(plan.extractionQuality).toBe("DEGRADED");
+      return {
+        text: "Доход оценивается ориентировочно, без гарантии результата.",
+        model: "fake-response",
+        inputTokens: 10,
+        outputTokens: 10,
+        nextInformationNeed: null,
+        conversationAction: "ANSWER" as const,
+      };
+    });
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: async (request) => {
+        if (request.text === "older") {
+          olderStarted();
+          return olderResult;
+        }
+        return degradedExtractor(request);
+      },
+      generateNaturalResponse,
+      generateId: () => `generated-${++nextId}`,
+      now: () => new Date("2026-09-03T12:00:00.000Z"),
+    });
+
+    const older = processEvent(input("burst-older", "older"));
+    await olderReady;
+    const newest = await processEvent(
+      input("burst-newest", "Меня интересует доход?"),
+    );
+    releaseOlder(extractionResult({}));
+    const stale = await older;
+
+    expect(stale.outOfOrderIgnored).toBe(true);
+    expect(newest).toMatchObject({
+      eventStatus: "PROCESSED",
+      outboundMessage: expect.stringMatching(/доход|результат/iu),
+      metrics: { extractionLlmCalls: 2 },
+    });
+    const messages = await persistence.messages.listByConversationId(
+      newest.conversationId!,
+    );
+    expect(messages.filter(({ direction }) => direction === "INBOUND")).toHaveLength(2);
+    expect(messages.filter(({ direction }) => direction === "OUTBOUND")).toHaveLength(1);
+    expect(generateNaturalResponse).toHaveBeenCalledTimes(1);
+    expect(invalidProvider.callCount).toBe(2);
   });
 
   it("does not lose the event or message when Anthropic is unavailable", async () => {

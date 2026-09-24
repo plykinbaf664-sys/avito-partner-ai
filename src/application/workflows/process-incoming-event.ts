@@ -71,7 +71,7 @@ export interface ProcessIncomingEventMetrics {
   totalProcessingLatencyMs: number;
   llmSuccess: boolean | null;
   duplicateEventCount: 0 | 1;
-  extractionLlmCalls: 0 | 1;
+  extractionLlmCalls: number;
   responseLlmCalls: 0 | 1;
   totalInputTokens: number | null;
   totalOutputTokens: number | null;
@@ -364,6 +364,7 @@ function buildResult({
   outboundMessage = null,
   managerSummary = null,
   responseLlm = null,
+  extractionLlmCalls,
   outOfOrderIgnored = false,
 }: {
   event: IncomingEvent;
@@ -379,6 +380,7 @@ function buildResult({
     inputTokens: number;
     outputTokens: number;
   } | null;
+  extractionLlmCalls?: number;
   outOfOrderIgnored?: boolean;
 }): ProcessIncomingEventResult {
   const decision = suppliedDecision ?? (lead
@@ -420,7 +422,8 @@ function buildResult({
       totalProcessingLatencyMs,
       llmSuccess: duplicate ? null : event.status === "PROCESSED",
       duplicateEventCount: duplicate ? 1 : 0,
-      extractionLlmCalls: duplicate ? 0 : 1,
+      extractionLlmCalls:
+        extractionLlmCalls ?? (duplicate ? 0 : extraction === null ? 0 : 1),
       responseLlmCalls: responseLlm ? 1 : 0,
       totalInputTokens:
         event.llmInputTokens === null
@@ -711,6 +714,27 @@ export function createIncomingEventProcessor({
     }
 
     const llmLatencyMs = elapsedMilliseconds(llmStartedAt, timer);
+    if (extracted.diagnostics?.status === "DEGRADED") {
+      logger.info("extraction.degraded", {
+        eventId: registration.event.id,
+        leadId: prepared.lead!.id,
+        conversationId: prepared.conversation!.id,
+        source: input.source,
+        attempts: extracted.diagnostics.attempts,
+        failureReasons: extracted.diagnostics.failureReasons,
+        discardedSignalFields:
+          extracted.diagnostics.discardedSignalFields,
+      });
+    } else if (extracted.diagnostics?.status === "RECOVERED") {
+      logger.info("extraction.recovered", {
+        eventId: registration.event.id,
+        leadId: prepared.lead!.id,
+        conversationId: prepared.conversation!.id,
+        source: input.source,
+        attempts: extracted.diagnostics.attempts,
+        failureReasons: extracted.diagnostics.failureReasons,
+      });
+    }
     logger.info("extraction.success", {
       eventId: registration.event.id,
       leadId: prepared.lead!.id,
@@ -720,6 +744,7 @@ export function createIncomingEventProcessor({
       model: extracted.llm.model,
       inputTokens: extracted.llm.inputTokens,
       outputTokens: extracted.llm.outputTokens,
+      extractionQuality: extracted.diagnostics?.status ?? "VALID",
     });
     logger.info("facts.extracted", {
       eventId: registration.event.id,
@@ -787,6 +812,7 @@ export function createIncomingEventProcessor({
           duplicate: false,
           outOfOrderIgnored: true,
           extraction: extracted.extraction,
+          extractionLlmCalls: extracted.diagnostics?.attempts ?? 1,
           totalProcessingLatencyMs,
         });
       }
@@ -911,6 +937,7 @@ export function createIncomingEventProcessor({
         guidanceNeed,
         greetingRequired,
         callbackPreferenceCaptured: callbackPreference !== null,
+        extractionQuality: extracted.diagnostics?.status ?? "VALID",
       });
       const responseGenerationPlan = phoneFulfillsRecentStep
         ? {
@@ -1045,6 +1072,7 @@ export function createIncomingEventProcessor({
             conversationMemory.deferredInformationNeeds.map((item) => item.need),
           guidanceNeed,
           callbackPreferenceCaptured: callbackPreference !== null,
+          extractionQuality: extracted.diagnostics?.status ?? "VALID",
         });
         // If the conversation model is unavailable or rejected by policy, keep
         // the sales workflow alive with the existing deterministic safe draft.
@@ -1068,6 +1096,7 @@ export function createIncomingEventProcessor({
               conversationMemory.deferredInformationNeeds.map((item) => item.need),
             guidanceNeed,
             callbackPreferenceCaptured: callbackPreference !== null,
+            extractionQuality: extracted.diagnostics?.status ?? "VALID",
           });
         }
         const canUseAdaptiveResponse =
@@ -1357,6 +1386,7 @@ export function createIncomingEventProcessor({
           duplicate: false,
           outOfOrderIgnored: true,
           extraction: extracted.extraction,
+          extractionLlmCalls: extracted.diagnostics?.attempts ?? 1,
           totalProcessingLatencyMs: completed.totalProcessingLatencyMs,
           decision: completed.decision,
         });
@@ -1512,6 +1542,7 @@ export function createIncomingEventProcessor({
         conversation: finalConversation,
         duplicate: false,
         extraction: extracted.extraction,
+        extractionLlmCalls: extracted.diagnostics?.attempts ?? 1,
         totalProcessingLatencyMs: completed.totalProcessingLatencyMs,
         decision: completed.decision,
         outboundMessage: completed.outboundText,

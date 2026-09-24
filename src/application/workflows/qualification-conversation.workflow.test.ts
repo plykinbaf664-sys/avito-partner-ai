@@ -218,6 +218,78 @@ describe("multi-turn qualification conversation", () => {
     expect(result.outboundMessage).not.toBe("Какую главную цель хотите решить этим бизнесом?");
   });
 
+  it("keeps a short contextual question in the trajectory when extraction signals stay ungrounded", async () => {
+    const ungrounded = reply({
+      intent: "QUESTION",
+      signals: {
+        questions: ["Какие юридические гарантии дохода указаны в договоре?"],
+        objections: ["Клиент отказывается участвовать в запуске"],
+        requiresSubstantiveAnswer: true,
+      },
+    });
+    const extractionProvider = new FakeLLMProvider([
+      reply({ intent: "GENERAL_INTEREST" }),
+      ungrounded,
+      ungrounded,
+    ]);
+    const generateNaturalResponse = vi.fn(async ({ recentMessages, plan }) => {
+      const latest = recentMessages.at(-1)?.content;
+      if (latest === "А сколько нужно?") {
+        expect(plan.extractionQuality).toBe("DEGRADED");
+        expect(plan.currentUserQuestions).toEqual([]);
+        expect(plan.currentUserObjections).toEqual([]);
+        return {
+          text: "Ориентир участия — около 3–4 часов в день.",
+          model: "fake-response",
+          inputTokens: 10,
+          outputTokens: 10,
+          nextInformationNeed: null,
+          conversationAction: "ANSWER" as const,
+        };
+      }
+      return {
+        text: "Сколько времени в день сможете уделять проекту?",
+        model: "fake-response",
+        inputTokens: 10,
+        outputTokens: 10,
+        nextInformationNeed: null,
+        conversationAction: "DISCOVER" as const,
+      };
+    });
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({
+        llmProvider: extractionProvider,
+      }),
+      generateNaturalResponse,
+      generateId: () => `degraded-context-${++nextId}`,
+      now: () => new Date(`2026-09-01T10:${String(nextId).padStart(2, "0")}:00Z`),
+    });
+
+    const first = await processEvent(input(40, "Хочу узнать подробнее"));
+    const second = await processEvent(input(41, "А сколько нужно?"));
+
+    expect(first.outboundMessage).toMatch(/времени/iu);
+    expect(second).toMatchObject({
+      eventStatus: "PROCESSED",
+      outboundMessage: expect.stringMatching(/3.?4 час/iu),
+    });
+    const lead = await persistence.leads.findById(second.leadId!);
+    expect(lead?.questions).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/гарант|договор/iu)]),
+    );
+    expect(lead?.objections).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/отказывается/iu)]),
+    );
+    const messages = await persistence.messages.listByConversationId(
+      second.conversationId!,
+    );
+    expect(messages.filter(({ direction }) => direction === "INBOUND")).toHaveLength(2);
+    expect(messages.filter(({ direction }) => direction === "OUTBOUND")).toHaveLength(2);
+    expect(extractionProvider.callCount).toBe(3);
+    expect(generateNaturalResponse).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ["Какие условия предлагаете?", ["субаренде", "50 000 ₽", "80 000 ₽", "доход не гарантируется"]],
     ["Как вообще проходит организация бизнеса?", ["подобрать объект", "комплектации", "площадках", "администратор", "горничную", "персональный менеджер", "CRM"]],

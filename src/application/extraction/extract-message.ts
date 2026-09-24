@@ -144,15 +144,36 @@ export const extractedMessageSchema = z
     }
   });
 
+export type ExtractionFailureReason =
+  | "MALFORMED_JSON"
+  | "SCHEMA_INVALID"
+  | "UNGROUNDED_SIGNALS"
+  | "CONTRADICTORY_SIGNALS";
+
+export interface ExtractionDiagnostics {
+  status: "VALID" | "RECOVERED" | "DEGRADED";
+  attempts: number;
+  failureReasons: ExtractionFailureReason[];
+  discardedSignalFields: string[];
+}
+
 export class InvalidExtractionOutputError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  readonly reason: ExtractionFailureReason;
+
+  constructor(
+    message: string,
+    reason: ExtractionFailureReason,
+    options?: ErrorOptions,
+  ) {
     super(message, options);
     this.name = "InvalidExtractionOutputError";
+    this.reason = reason;
   }
 }
 
 export interface ExtractMessageResult {
   extraction: ExtractedMessage;
+  diagnostics?: ExtractionDiagnostics;
   llm: Pick<
     LlmTextResponse,
     "model" | "inputTokens" | "outputTokens"
@@ -246,6 +267,7 @@ function parseJson(text: string): unknown {
   } catch (error) {
     throw new InvalidExtractionOutputError(
       "LLM returned malformed extraction JSON",
+      "MALFORMED_JSON",
       { cause: error },
     );
   }
@@ -334,6 +356,124 @@ function hasContradictoryConversationSignals(
     extraction.signals.questions.length > 0 &&
     extraction.signals.requiresSubstantiveAnswer !== true
   );
+}
+
+function invalidConversationSignalReasons(
+  extraction: ExtractedMessage,
+  currentMessage: string,
+): ExtractionFailureReason[] {
+  return [
+    ...(ungroundedCurrentMessageSignals(extraction, currentMessage).length > 0
+      ? ["UNGROUNDED_SIGNALS" as const]
+      : []),
+    ...(hasContradictoryConversationSignals(extraction)
+      ? ["CONTRADICTORY_SIGNALS" as const]
+      : []),
+  ];
+}
+
+function sanitizeUntrustedConversationSignals(
+  extraction: ExtractedMessage,
+  currentMessage: string,
+): { extraction: ExtractedMessage; discardedSignalFields: string[] } {
+  const groundedQuestions = extraction.signals.questions.filter((value) =>
+    isGroundedInCurrentMessage(value, currentMessage)
+  );
+  const groundedObjections = extraction.signals.objections.filter((value) =>
+    isGroundedInCurrentMessage(value, currentMessage)
+  );
+  const discarded = new Set<string>();
+  if (groundedQuestions.length !== extraction.signals.questions.length) {
+    discarded.add("questions");
+  }
+  if (groundedObjections.length !== extraction.signals.objections.length) {
+    discarded.add("objections");
+  }
+  if (extraction.signals.resolvedQuestion) discarded.add("resolvedQuestion");
+  if (extraction.signals.contextualReference) discarded.add("contextualReference");
+  if (extraction.signals.needsStartupScaleRecommendation) {
+    discarded.add("needsStartupScaleRecommendation");
+  }
+  if (extraction.signals.wantsHuman) discarded.add("wantsHuman");
+  if (extraction.signals.possiblePrimaryFear) {
+    discarded.add("possiblePrimaryFear");
+  }
+  if (extraction.signals.possibleSecondaryFear) {
+    discarded.add("possibleSecondaryFear");
+  }
+
+  const contradictory = hasContradictoryConversationSignals(extraction);
+  if (contradictory && groundedQuestions.length > 0) {
+    discarded.add("questions");
+  }
+  return {
+    extraction: {
+      ...extraction,
+      signals: {
+        ...extraction.signals,
+        questions: contradictory ? [] : groundedQuestions,
+        objections: groundedObjections,
+        possiblePrimaryFear: null,
+        possibleSecondaryFear: null,
+        wantsHuman: false,
+        resolvedQuestion: "",
+        contextualReference: false,
+        needsStartupScaleRecommendation: false,
+      },
+      uncertainty: [],
+    },
+    discardedSignalFields: [...discarded],
+  };
+}
+
+function conservativeExtraction(currentMessage: string): ExtractedMessage {
+  const phoneNumber = extractPhoneNumberFromText(currentMessage);
+  return {
+    intent: "GENERAL_INTEREST",
+    facts: {
+      phoneNumber,
+      phoneConfirmed: phoneNumber !== null,
+      city: null,
+      budget: null,
+      budgetConfirmed: false,
+      availableCapital: null,
+      availableCapitalConfirmed: false,
+      entryBudget: null,
+      additionalLaunchCapital: null,
+      capitalScope: "UNKNOWN",
+      additionalExpensesReadiness: "UNKNOWN",
+      businessModelReadiness: "UNKNOWN",
+      calculationUnits: null,
+      startingUnits: null,
+      scalingPotentialUnits: null,
+      hasFreeTime: null,
+      availableTimeDetails: null,
+      businessExperience: null,
+      shortTermRentalExperience: null,
+      ownsProperty: null,
+      desiredIncome: null,
+      primaryGoal: "UNKNOWN",
+      buyingIntent: "UNKNOWN",
+      launchTiming: null,
+      managementReadiness: null,
+      requiresGuaranteedIncome: null,
+      rejectsBusinessModel: null,
+    },
+    signals: {
+      questions: [],
+      objections: [],
+      possiblePrimaryFear: null,
+      possibleSecondaryFear: null,
+      wantsHuman: false,
+      previousQuestionResponse: "NOT_A_RESPONSE",
+      resolvedQuestion: "",
+      contextualReference: false,
+      needsStartupScaleRecommendation: false,
+      requiresSubstantiveAnswer: false,
+    },
+    confidence: null,
+    uncertainty: [],
+  };
 }
 
 function explicitlyAcceptsManagementInteraction(text: string): boolean {
@@ -443,109 +583,157 @@ export function createMessageExtractor({
         maxTokens,
         jsonSchema,
       });
-    const parseExtraction = (response: LlmTextResponse) => {
+    const parseExtraction = (response: LlmTextResponse): ExtractedMessage => {
       const parsed = extractedMessageSchema.safeParse(
         withExtractionDefaults(parseJson(response.text)),
       );
       if (!parsed.success) {
         throw new InvalidExtractionOutputError(
           `LLM extraction failed validation: ${z.prettifyError(parsed.error)}`,
+          "SCHEMA_INVALID",
           { cause: parsed.error },
         );
       }
-      return parsed;
+      return parsed.data;
     };
 
-    let response = await requestExtraction();
-    let totalInputTokens = response.inputTokens;
-    let totalOutputTokens = response.outputTokens;
-    let parsed = parseExtraction(response);
-    const extractionSignalsNeedRetry = (value: ExtractedMessage) =>
-      ungroundedCurrentMessageSignals(value, validatedText).length > 0 ||
-      hasContradictoryConversationSignals(value);
-    if (extractionSignalsNeedRetry(parsed.data)) {
-      response = await requestExtraction(
-        "The previous output contained inconsistent conversational signals or copied/invented a question. A response to the immediately preceding AI/HUMAN question is not itself a user question merely because it mentions that topic. Populate questions only for an independent request for information in CURRENT_MESSAGE. Keep previousQuestionResponse, requiresSubstantiveAnswer and intent semantically consistent. RECENT_MESSAGES may resolve references, but their text must never be emitted as a current question or objection.",
-      );
+    const failureReasons: ExtractionFailureReason[] = [];
+    let discardedSignalFields: string[] = [];
+    let response: LlmTextResponse | null = null;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let attempts = 0;
+    let parsedData: ExtractedMessage | null = null;
+    let lastStructurallyValid: ExtractedMessage | null = null;
+    let degraded = false;
+    let validationFeedback: string | undefined;
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      attempts = attempt;
+      response = await requestExtraction(validationFeedback);
       totalInputTokens += response.inputTokens;
       totalOutputTokens += response.outputTokens;
-      parsed = parseExtraction(response);
-      if (extractionSignalsNeedRetry(parsed.data)) {
-        throw new InvalidExtractionOutputError(
-          "LLM extraction emitted ungrounded or contradictory conversational signals",
+      try {
+        const candidate = parseExtraction(response);
+        lastStructurallyValid = candidate;
+        const signalReasons = invalidConversationSignalReasons(
+          candidate,
+          validatedText,
         );
+        if (signalReasons.length === 0) {
+          parsedData = candidate;
+          break;
+        }
+        failureReasons.push(...signalReasons);
+        validationFeedback =
+          "The previous output contained inconsistent conversational signals or copied/invented a question. A response to the immediately preceding AI/HUMAN question is not itself a user question merely because it mentions that topic. Populate questions only for an independent request for information in CURRENT_MESSAGE. Keep previousQuestionResponse, requiresSubstantiveAnswer and intent semantically consistent. RECENT_MESSAGES may resolve references, but their text must never be emitted as a current question or objection.";
+      } catch (error) {
+        if (!(error instanceof InvalidExtractionOutputError)) throw error;
+        failureReasons.push(error.reason);
+        validationFeedback =
+          "The previous output was not valid structured extraction JSON. Return one complete JSON object matching the provided schema exactly. Do not omit required fields and do not include markdown or prose.";
       }
     }
 
+    if (parsedData === null) {
+      degraded = true;
+      if (lastStructurallyValid !== null) {
+        const sanitized = sanitizeUntrustedConversationSignals(
+          lastStructurallyValid,
+          validatedText,
+        );
+        parsedData = sanitized.extraction;
+        discardedSignalFields = sanitized.discardedSignalFields;
+      } else {
+        parsedData = conservativeExtraction(validatedText);
+      }
+    }
+
+    if (response === null) {
+      throw new Error("Extraction provider returned no response");
+    }
+
     const ambiguousServiceFeeOnly =
-      parsed.data.facts.availableCapital ===
+      parsedData.facts.availableCapital ===
         LAUNCH_COST_REFERENCE.serviceFeeReference &&
-      (parsed.data.facts.entryBudget < 0 ||
-        parsed.data.facts.entryBudget ===
+      (parsedData.facts.entryBudget !== null && parsedData.facts.entryBudget < 0 ||
+        parsedData.facts.entryBudget ===
           LAUNCH_COST_REFERENCE.serviceFeeReference) &&
-      parsed.data.facts.additionalLaunchCapital < 0 &&
-      (parsed.data.facts.capitalScope === "UNKNOWN" ||
-        parsed.data.facts.capitalScope === "ENTRY_ONLY");
+      parsedData.facts.additionalLaunchCapital !== null &&
+      parsedData.facts.additionalLaunchCapital < 0 &&
+      (parsedData.facts.capitalScope === "UNKNOWN" ||
+        parsedData.facts.capitalScope === "ENTRY_ONLY");
+    const hasStructurallyValidExtraction = lastStructurallyValid !== null;
     const acceptsManagementInteraction =
+      hasStructurallyValidExtraction &&
       explicitlyAcceptsManagementInteraction(validatedText);
-    const hasNoLaunchCapital = explicitlyHasNoLaunchCapital(validatedText);
+    const hasNoLaunchCapital =
+      hasStructurallyValidExtraction &&
+      explicitlyHasNoLaunchCapital(validatedText);
     const deterministicPhone = extractPhoneNumberFromText(validatedText);
-    const llmPhone = normalizePhoneNumber(parsed.data.facts.phoneNumber);
+    const llmPhone = parsedData.facts.phoneNumber === null
+      ? null
+      : normalizePhoneNumber(parsedData.facts.phoneNumber);
     const extraction: ExtractedMessage = {
-      ...parsed.data,
+      ...parsedData,
       facts: {
-        ...parsed.data.facts,
-        budget: hasNoLaunchCapital ? 0 : parsed.data.facts.budget,
+        ...parsedData.facts,
+        budget: hasNoLaunchCapital ? 0 : parsedData.facts.budget,
         budgetConfirmed: hasNoLaunchCapital
           ? true
-          : parsed.data.facts.budgetConfirmed,
+          : parsedData.facts.budgetConfirmed,
         phoneNumber: deterministicPhone ?? llmPhone,
         phoneConfirmed:
-          deterministicPhone !== null || (llmPhone !== null && parsed.data.facts.phoneConfirmed),
+          deterministicPhone !== null || (llmPhone !== null && parsedData.facts.phoneConfirmed),
         availableCapital: hasNoLaunchCapital
           ? 0
-          : ambiguousServiceFeeOnly || parsed.data.facts.availableCapital < 0
+          : ambiguousServiceFeeOnly ||
+              (parsedData.facts.availableCapital !== null &&
+                parsedData.facts.availableCapital < 0)
             ? null
-            : parsed.data.facts.availableCapital,
+            : parsedData.facts.availableCapital,
         availableCapitalConfirmed: hasNoLaunchCapital
           ? true
           : ambiguousServiceFeeOnly
             ? false
-            : parsed.data.facts.availableCapitalConfirmed,
+            : parsedData.facts.availableCapitalConfirmed,
         entryBudget:
           ambiguousServiceFeeOnly
             ? LAUNCH_COST_REFERENCE.serviceFeeReference
-            : parsed.data.facts.entryBudget < 0
+            : parsedData.facts.entryBudget !== null &&
+                parsedData.facts.entryBudget < 0
               ? null
-              : parsed.data.facts.entryBudget,
+              : parsedData.facts.entryBudget,
         additionalLaunchCapital:
-          parsed.data.facts.additionalLaunchCapital < 0
+          parsedData.facts.additionalLaunchCapital !== null &&
+          parsedData.facts.additionalLaunchCapital < 0
             ? null
-            : parsed.data.facts.additionalLaunchCapital,
+            : parsedData.facts.additionalLaunchCapital,
         calculationUnits:
-          parsed.data.facts.calculationUnits < 0
+          parsedData.facts.calculationUnits !== null &&
+          parsedData.facts.calculationUnits < 0
             ? null
-            : parsed.data.facts.calculationUnits,
+            : parsedData.facts.calculationUnits,
         capitalScope: hasNoLaunchCapital
           ? "TOTAL_LIMIT"
           : ambiguousServiceFeeOnly
             ? "ENTRY_ONLY"
-            : parsed.data.facts.capitalScope,
+            : parsedData.facts.capitalScope,
         startingUnits:
-          parsed.data.facts.startingUnits === 0
+          parsedData.facts.startingUnits === 0
             ? null
-            : parsed.data.facts.startingUnits,
+            : parsedData.facts.startingUnits,
         scalingPotentialUnits:
-          parsed.data.facts.scalingPotentialUnits === 0
+          parsedData.facts.scalingPotentialUnits === 0
             ? null
-            : parsed.data.facts.scalingPotentialUnits,
+            : parsedData.facts.scalingPotentialUnits,
         managementReadiness: acceptsManagementInteraction
           ? "READY"
-          : parsed.data.facts.managementReadiness,
+          : parsedData.facts.managementReadiness,
       },
       signals: {
-        ...parsed.data.signals,
-        objections: parsed.data.signals.objections.filter(
+        ...parsedData.signals,
+        objections: parsedData.signals.objections.filter(
           (objection) => !isPureManagementAcceptance(objection),
         ),
       },
@@ -553,6 +741,16 @@ export function createMessageExtractor({
 
     return {
       extraction,
+      diagnostics: {
+        status: degraded
+          ? "DEGRADED"
+          : failureReasons.length > 0
+            ? "RECOVERED"
+            : "VALID",
+        attempts,
+        failureReasons,
+        discardedSignalFields,
+      },
       llm: {
         model: response.model,
         inputTokens: totalInputTokens,

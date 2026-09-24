@@ -157,6 +157,8 @@ export interface ConversationResponsePlan {
   currentTurnRequiresAnswer?: boolean;
   preferredContactTime?: string | null;
   callbackPreferenceCaptured?: boolean;
+  /** Reliability of the auxiliary extractor for the current inbound turn. */
+  extractionQuality?: "VALID" | "RECOVERED" | "DEGRADED";
 }
 
 const qualificationProgressIntents = new Set<MessageIntent>([
@@ -195,6 +197,7 @@ export function buildConversationResponse(params: {
   guidanceNeed?: InformationNeed | null;
   greetingRequired?: boolean;
   callbackPreferenceCaptured?: boolean;
+  extractionQuality?: "VALID" | "RECOVERED" | "DEGRADED";
 }): ConversationResponsePlan {
   const { extraction, decision, nextInformationNeed, knowledge } = params;
   const conversationRepairRequired = extraction.intent === "COMPLAINT";
@@ -272,6 +275,7 @@ export function buildConversationResponse(params: {
     currentTurnRequiresAnswer,
     preferredContactTime,
     callbackPreferenceCaptured: params.callbackPreferenceCaptured === true,
+    extractionQuality: params.extractionQuality ?? "VALID",
   };
 
   if (decision.nextAction === "REJECT_POLITELY") {

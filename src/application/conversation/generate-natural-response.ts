@@ -459,11 +459,13 @@ IMPORTANT CONVERSATION RULES:
 - If the user asks a concrete question, answer it first; never return a generic acknowledgement when a grounded answer or scheduling question is possible.
 - After handoff the conversation remains active. For a manager-call question, ask for the preferred day and approximate time.
 - Use approved calculations briefly and do not print the whole economics context unless requested.
+- If extractionQuality=DEGRADED, auxiliary extracted facts and signals were deliberately made conservative after invalid model output. Infer the current conversational intent directly from the latest USER message and recent history. Do not invent or persist missing facts; answer only from approvedFacts, economicsContext and known currentFacts.
 `.trim(),
       userMessage: JSON.stringify({
         triggerType,
         silenceMs: silenceMs ?? null,
         validationFeedback: validationFeedback ?? null,
+        extractionQuality: plan.extractionQuality ?? "VALID",
         fallbackDraft: plan.text,
         qualificationMoveAvailable:
           plan.allowedQualificationMoves !== undefined

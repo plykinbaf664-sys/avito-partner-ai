@@ -29,6 +29,62 @@ function countUnionParameters(value: unknown): number {
   );
 }
 
+function structuredExtractionReply(overrides: {
+  intent?: "QUESTION" | "QUALIFICATION_INFORMATION";
+  city?: string | null;
+  questions?: string[];
+  objections?: string[];
+  requiresSubstantiveAnswer?: boolean;
+} = {}): string {
+  return JSON.stringify({
+    intent: overrides.intent ?? "QUALIFICATION_INFORMATION",
+    facts: {
+      phoneNumber: "",
+      phoneConfirmed: false,
+      city: overrides.city ?? null,
+      budget: null,
+      budgetConfirmed: false,
+      availableCapital: -1,
+      availableCapitalConfirmed: false,
+      entryBudget: -1,
+      additionalLaunchCapital: -1,
+      capitalScope: "UNKNOWN",
+      additionalExpensesReadiness: "UNKNOWN",
+      businessModelReadiness: "UNKNOWN",
+      calculationUnits: -1,
+      startingUnits: null,
+      scalingPotentialUnits: null,
+      hasFreeTime: null,
+      availableTimeDetails: null,
+      businessExperience: null,
+      shortTermRentalExperience: null,
+      ownsProperty: null,
+      desiredIncome: null,
+      primaryGoal: "UNKNOWN",
+      buyingIntent: "UNKNOWN",
+      launchTiming: null,
+      managementReadiness: null,
+      requiresGuaranteedIncome: null,
+      rejectsBusinessModel: null,
+    },
+    signals: {
+      questions: overrides.questions ?? [],
+      objections: overrides.objections ?? [],
+      possiblePrimaryFear: null,
+      possibleSecondaryFear: null,
+      wantsHuman: false,
+      previousQuestionResponse: "NOT_A_RESPONSE",
+      resolvedQuestion: "",
+      contextualReference: false,
+      needsStartupScaleRecommendation: false,
+      requiresSubstantiveAnswer:
+        overrides.requiresSubstantiveAnswer ?? false,
+    },
+    confidence: 0.9,
+    uncertainty: [],
+  });
+}
+
 it("normalizes obvious Russian phone formats deterministically", () => {
   expect(extractPhoneNumberFromText("89049163020")).toBe("+79049163020");
   expect(extractPhoneNumberFromText("+79049163020")).toBe("+79049163020");
@@ -38,6 +94,88 @@ it("normalizes obvious Russian phone formats deterministically", () => {
 });
 
 describe("message extraction schema", () => {
+  it("degrades safely after bounded malformed JSON repair attempts", async () => {
+    const llm = new FakeLLMProvider(["not-json", "still-not-json"]);
+
+    const result = await createMessageExtractor({ llmProvider: llm })(
+      "Меня интересует доход?",
+    );
+
+    expect(llm.callCount).toBe(2);
+    expect(result.diagnostics).toEqual({
+      status: "DEGRADED",
+      attempts: 2,
+      failureReasons: ["MALFORMED_JSON", "MALFORMED_JSON"],
+      discardedSignalFields: [],
+    });
+    expect(result.extraction.facts).toMatchObject({
+      city: null,
+      availableCapital: null,
+      desiredIncome: null,
+    });
+    expect(result.extraction.signals).toMatchObject({
+      questions: [],
+      objections: [],
+      wantsHuman: false,
+    });
+  });
+
+  it("degrades safely after bounded schema-invalid repair attempts", async () => {
+    const invalid = JSON.stringify({
+      intent: "QUESTION",
+      facts: { city: "Москва" },
+      signals: { questions: ["Меня интересует доход?"] },
+    });
+    const llm = new FakeLLMProvider([invalid, invalid]);
+
+    const result = await createMessageExtractor({ llmProvider: llm })(
+      "Меня интересует доход?",
+    );
+
+    expect(llm.callCount).toBe(2);
+    expect(result.diagnostics).toMatchObject({
+      status: "DEGRADED",
+      attempts: 2,
+      failureReasons: ["SCHEMA_INVALID", "SCHEMA_INVALID"],
+    });
+    expect(result.extraction.facts.city).toBeNull();
+    expect(result.extraction.signals.questions).toEqual([]);
+  });
+
+  it("keeps valid facts but discards ungrounded semantic signals after repair", async () => {
+    const ungrounded = structuredExtractionReply({
+      intent: "QUESTION",
+      city: "Москва",
+      questions: ["Какая юридическая гарантия прибыли закреплена договором?"],
+      objections: ["Пользователь отказывается оплачивать услугу"],
+      requiresSubstantiveAnswer: true,
+    });
+    const llm = new FakeLLMProvider([ungrounded, ungrounded]);
+
+    const result = await createMessageExtractor({ llmProvider: llm })({
+      text: "А сколько нужно?",
+      recentMessages: [{
+        direction: "OUTBOUND",
+        actor: "AI",
+        content: "Сколько времени в день сможете уделять проекту?",
+      }],
+    });
+
+    expect(llm.callCount).toBe(2);
+    expect(result.diagnostics).toMatchObject({
+      status: "DEGRADED",
+      attempts: 2,
+      failureReasons: ["UNGROUNDED_SIGNALS", "UNGROUNDED_SIGNALS"],
+      discardedSignalFields: expect.arrayContaining(["questions", "objections"]),
+    });
+    expect(result.extraction.facts.city).toBe("Москва");
+    expect(result.extraction.signals).toMatchObject({
+      questions: [],
+      objections: [],
+      requiresSubstantiveAnswer: true,
+    });
+  });
+
   it("stays within Anthropic's structured-output union limit", async () => {
     const llm = new FakeLLMProvider([
       JSON.stringify({
