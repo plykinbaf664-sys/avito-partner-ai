@@ -137,6 +137,68 @@ describe("multi-turn qualification conversation", () => {
     expect(naturalResponse.mock.calls[0]?.[0]?.lead).toBeTruthy();
   });
 
+  it("answers an elliptical budget question from approved economics even when response generation falls back", async () => {
+    const { processEvent } = harness([
+      reply({ intent: "GREETING" }),
+      reply({ intent: "CONFIRMATION", facts: { city: "Москва" }, signals: {
+        previousQuestionResponse: "ANSWERED",
+      } }),
+      reply({ intent: "QUESTION", signals: {
+        questions: ["какой размер капитала требуется для запуска бизнеса в Москве?"],
+        previousQuestionResponse: "UNSURE",
+        resolvedQuestion: "какой размер капитала требуется для запуска бизнеса в Москве?",
+        contextualReference: true,
+        requiresSubstantiveAnswer: true,
+      } }),
+    ]);
+
+    await processEvent(input(90, "Привет, еще актуально?"));
+    await processEvent(input(91, "Москва"));
+    const result = await processEvent(input(92, "Не знаю, а какой надо?"));
+
+    expect(result.outboundMessage).toContain("180 000 ₽");
+    expect(result.outboundMessage).not.toContain("Подтверждённые города работы");
+    expect(result.outboundMessage).not.toContain("Бронирования и гостей ведёт администратор");
+    expect(result.outboundMessage).not.toBe("Спасибо, понял.");
+    expect(result.metrics.responseGenerationSource).toBe("FALLBACK_DRAFT");
+  });
+
+  it("does not acknowledge away a substantive question when auxiliary extraction degrades", async () => {
+    const { processEvent } = harness([
+      reply({ intent: "GREETING" }),
+      reply({ intent: "CONFIRMATION", facts: { city: "Москва" }, signals: {
+        previousQuestionResponse: "ANSWERED",
+      } }),
+      reply({ intent: "QUESTION", signals: {
+        questions: [],
+        previousQuestionResponse: "UNSURE",
+        requiresSubstantiveAnswer: true,
+      } }),
+    ]);
+
+    await processEvent(input(93, "Здравствуйте"));
+    await processEvent(input(94, "Москва"));
+    const result = await processEvent(input(95, "Не знаю, а какой надо?"));
+
+    expect(result.outboundMessage).not.toBe("Спасибо, понял.");
+    expect(result.outboundMessage).toContain("?");
+  });
+
+  it("keeps a first-contact fallback useful when natural generation is unavailable", async () => {
+    const { processEvent } = harness([reply({
+      intent: "GREETING",
+      signals: {
+        questions: ["Ещё актуально?"],
+        requiresSubstantiveAnswer: true,
+      },
+    })]);
+    const result = await processEvent(input(96, "Привет, ещё актуально?"));
+    expect(result.outboundMessage).toMatch(/^Здравствуйте!/u);
+    expect(result.outboundMessage).toMatch(/посут|запуск/iu);
+    expect(result.outboundMessage).not.toContain("не уверен, к чему относится Ваш вопрос");
+    expect(result.outboundMessage).toContain("?");
+  });
+
   it("keeps insufficient-capital verdict deterministic but lets the conversation brain explain it", async () => {
     const naturalResponse = vi.fn().mockResolvedValue({
       text: "Для запуска одного объекта по предварительному расчёту понадобится около 150 000 ₽, поэтому 100 000 ₽ сейчас не хватит. Если возможности изменятся, можно вернуться к разговору.",
@@ -2068,5 +2130,98 @@ describe("multi-turn qualification conversation", () => {
       startingUnits: null,
       primaryGoal: "MAIN_BUSINESS",
     });
+  });
+
+  it("keeps a previously answered goal out of discovery after unrelated turns", async () => {
+    const extractionProvider = new FakeLLMProvider([
+      reply({ facts: { city: "Балашиха", availableCapital: 300_000, availableCapitalConfirmed: true, launchTiming: "READY_NOW" } }),
+      reply({ signals: { previousQuestionResponse: "ANSWERED" } }),
+      reply({ intent: "QUESTION", signals: { questions: ["Можно ли участвовать дистанционно?"], questionKind: "BUSINESS_INFORMATION", requiresSubstantiveAnswer: true } }),
+      reply({ signals: { previousQuestionResponse: "ANSWERED" } }),
+      reply({ intent: "CONFIRMATION", signals: { previousQuestionResponse: "ANSWERED" } }),
+    ]);
+    const plans: Array<{ allowedNextInformationNeeds: string[] }> = [];
+    const generateNaturalResponse = vi.fn(async ({ plan }: { plan: { allowedNextInformationNeeds?: string[] } }) => {
+      plans.push({ allowedNextInformationNeeds: plan.allowedNextInformationNeeds ?? [] });
+      const askingGoal = plans.length === 1;
+      return {
+        replyAction: "SEND_REPLY" as const,
+        text: askingGoal
+          ? "Какую цель Вы хотите решить с помощью этого бизнеса?"
+          : "Понимаю. Расскажите, пожалуйста, какой формат участия Вам удобен?",
+        nextInformationNeed: askingGoal ? "GOAL" as const : "MANAGEMENT_READINESS" as const,
+        conversationAction: "DISCOVER" as const,
+        qualificationMoveDecision: "ADVANCE" as const,
+        qualificationMoveRationale: "Уточнить удобный формат участия.",
+        answerCoverage: "FULL" as const,
+        unresolvedTopics: [],
+        usedKnowledgeEntryIds: [],
+        conversationMemory: "Цель заработка уже обсуждалась; клиент ответил на вопрос о ней.",
+        model: "fake",
+        inputTokens: 0,
+        outputTokens: 0,
+      };
+    });
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: extractionProvider }),
+      generateNaturalResponse,
+      generateId: () => `answered-goal-${++nextId}`,
+      now: () => new Date(`2026-09-25T10:${String(nextId).padStart(2, "0")}:00Z`),
+    });
+
+    await processEvent(input(501, "Здравствуйте, я из Балашихи, есть 300 000, начать хочу скоро"));
+    await processEvent(input(502, "Хочу зарабатывать"));
+    await processEvent(input(503, "А можно участвовать дистанционно?"));
+    await processEvent(input(504, "Да, время найду"));
+    const last = await processEvent(input(505, "Да, такой подход подходит"));
+
+    expect(plans[4]?.allowedNextInformationNeeds).not.toContain("GOAL");
+    expect(last.outboundMessage).not.toMatch(/главн.*цел/iu);
+    const conversation = await persistence.conversations.findById(last.conversationId!);
+    expect(conversation?.summary).toContain("GOAL");
+  });
+
+  it("keeps a broad income goal without inventing a narrower motivation", async () => {
+    const extractionProvider = new FakeLLMProvider([
+      reply({ facts: { city: "Балашиха", availableCapital: 300_000, availableCapitalConfirmed: true, launchTiming: "READY_NOW" } }),
+      reply({ facts: { primaryGoal: "EARN_INCOME" }, signals: { previousQuestionResponse: "ANSWERED" } }),
+    ]);
+    const plans: Array<{ allowedNextInformationNeeds: string[] }> = [];
+    const generateNaturalResponse = vi.fn(async ({ plan }: { plan: { allowedNextInformationNeeds?: string[] } }) => {
+      plans.push({ allowedNextInformationNeeds: plan.allowedNextInformationNeeds ?? [] });
+      const askingGoal = plans.length === 1;
+      return {
+        replyAction: "SEND_REPLY" as const,
+        text: askingGoal
+          ? "Какую задачу Вы хотели бы решить с помощью бизнеса?"
+          : "Понимаю, Вы рассматриваете это как способ заработка. Сколько времени сможете уделять запуску?",
+        nextInformationNeed: askingGoal ? "GOAL" as const : "FREE_TIME" as const,
+        conversationAction: "DISCOVER" as const,
+        qualificationMoveDecision: "ADVANCE" as const,
+        qualificationMoveRationale: "Продолжить естественное знакомство с ситуацией.",
+        answerCoverage: "FULL" as const,
+        unresolvedTopics: [],
+        usedKnowledgeEntryIds: [],
+        model: "fake",
+        inputTokens: 0,
+        outputTokens: 0,
+      };
+    });
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: extractionProvider }),
+      generateNaturalResponse,
+      generateId: () => `income-goal-${++nextId}`,
+      now: () => new Date(`2026-09-25T11:${String(nextId).padStart(2, "0")}:00Z`),
+    });
+
+    await processEvent(input(511, "Я из Балашихи, есть 300 000, начать хочу скоро"));
+    const second = await processEvent(input(512, "Деньги"));
+
+    expect((await persistence.leads.findById(second.leadId!))?.primaryGoal).toBe("EARN_INCOME");
+    expect(plans[1]?.allowedNextInformationNeeds).not.toContain("GOAL");
+    expect(second.outboundMessage).toContain("заработка");
+    expect(second.outboundMessage).not.toMatch(/главн.*цел/iu);
   });
 });

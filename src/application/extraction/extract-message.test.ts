@@ -144,6 +144,32 @@ describe("message extraction schema", () => {
     });
   });
 
+  it("keeps the raw surface of a contextual question separate from its expanded referent", async () => {
+    const expanded = JSON.parse(structuredExtractionReply({
+      intent: "QUESTION",
+      questions: ["какой размер капитала требуется для запуска бизнеса в Москве?"],
+      requiresSubstantiveAnswer: true,
+    }));
+    expanded.signals.contextualReference = true;
+    expanded.signals.resolvedQuestion =
+      "какой размер капитала требуется для запуска бизнеса в Москве?";
+    expanded.signals.previousQuestionResponse = "UNSURE";
+    const llm = new FakeLLMProvider([JSON.stringify(expanded)]);
+    const result = await createMessageExtractor({ llmProvider: llm })({
+      text: "Не знаю, а какой надо?",
+      pendingInformationNeed: "AVAILABLE_CAPITAL",
+      recentMessages: [{
+        direction: "OUTBOUND",
+        content: "Какой бюджет Вы готовы вложить в запуск?",
+      }],
+      currentLead: { city: "Москва" } as Lead,
+    });
+    expect(result.diagnostics?.status).toBe("VALID");
+    expect(result.extraction.signals.questions).toEqual(["Не знаю, а какой надо?"]);
+    expect(result.extraction.signals.resolvedQuestion).toContain("капитала");
+    expect(llm.callCount).toBe(1);
+  });
+
   it("degrades safely after bounded malformed JSON repair attempts", async () => {
     const llm = new FakeLLMProvider(["not-json", "still-not-json"]);
 

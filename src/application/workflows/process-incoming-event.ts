@@ -464,6 +464,7 @@ interface StoredConversationMemory {
   knowledgeEntryIds: string[];
   mostRecentKnowledgeEntryIds: string[];
   deferredInformationNeeds: DeferredInformationNeedMemory[];
+  addressedInformationNeeds: InformationNeed[];
   conversationalNotes: string;
 }
 
@@ -474,6 +475,7 @@ function parseStoredConversationMemory(summary: string | null): StoredConversati
     knowledgeEntryIds: [],
     mostRecentKnowledgeEntryIds: [],
     deferredInformationNeeds: [],
+    addressedInformationNeeds: [],
     conversationalNotes: "",
   };
   if (!summary) return empty;
@@ -517,6 +519,12 @@ function parseStoredConversationMemory(summary: string | null): StoredConversati
           )
         : [],
       deferredInformationNeeds: deferred,
+      addressedInformationNeeds: Array.isArray(record.addressedInformationNeeds)
+        ? [...new Set(record.addressedInformationNeeds.filter(
+            (value): value is InformationNeed =>
+              typeof value === "string" && knownNeeds.has(value),
+          ))]
+        : [],
       conversationalNotes: typeof record.conversationalNotes === "string"
         ? record.conversationalNotes.slice(0, 700)
         : "",
@@ -550,8 +558,20 @@ function rememberDeferredInformationNeed(params: {
   if (needsToDefer.length === 0) {
     return params.memory;
   }
+  const answeredPendingTopic =
+    respondedToPendingTopic &&
+    params.previousQuestionResponse === "ANSWERED" &&
+    params.pendingInformationNeed !== null
+      ? params.pendingInformationNeed
+      : null;
   return {
     ...params.memory,
+    addressedInformationNeeds: answeredPendingTopic === null
+      ? params.memory.addressedInformationNeeds
+      : [...new Set([
+          ...params.memory.addressedInformationNeeds,
+          answeredPendingTopic,
+        ])],
     deferredInformationNeeds: [
       ...params.memory.deferredInformationNeeds.filter(
         (item) => !needsToDefer.includes(item.need),
@@ -573,7 +593,9 @@ function activeDeferredInformationNeeds(
       inboundSequence - item.deferredAtInboundSequence <=
         DEFERRED_NEED_COOLDOWN_TURNS,
     )
-    .map((item) => item.need);
+    .map((item) => item.need)
+    .concat(memory.addressedInformationNeeds)
+    .filter((need, index, all) => all.indexOf(need) === index);
 }
 
 function elapsedMilliseconds(startedAt: number, timer: () => number): number {
@@ -905,7 +927,11 @@ export function createIncomingEventProcessor({
           : null);
       const conversationMemory = rememberDeferredInformationNeed({
         memory: storedConversationMemory,
-        pendingInformationNeed: currentConversation.pendingInformationNeed,
+        // A manager's newer message supersedes the AI's pending question.
+        // Its answer must not permanently mark that older AI topic as covered.
+        pendingInformationNeed: latestOutbound?.actor === "MANAGER"
+          ? null
+          : currentConversation.pendingInformationNeed,
         previousQuestionResponse:
           extracted.extraction.signals.previousQuestionResponse,
         currentIntent: extracted.extraction.intent,
@@ -922,6 +948,7 @@ export function createIncomingEventProcessor({
       const knowledge = answerFromKnowledgeBase(extracted.extraction, {
         previousEntryIds: previouslyExplainedKnowledge,
         recentEntryIds: conversationMemory.mostRecentKnowledgeEntryIds,
+        pendingInformationNeed: currentConversation.pendingInformationNeed,
         guidanceNeed,
         recentMessages: history.map(({ direction, actor, content }) => ({ direction, actor, content })),
         leadFacts: {
@@ -958,7 +985,7 @@ export function createIncomingEventProcessor({
         informationNeeds: needs,
         previouslyExplainedKnowledgeEntryIds: previouslyExplainedKnowledge,
         deferredInformationNeeds:
-          conversationMemory.deferredInformationNeeds.map((item) => item.need),
+          deferredInformationNeeds,
         guidanceNeed,
         greetingRequired,
         callbackPreferenceCaptured: callbackPreference !== null,
@@ -1098,7 +1125,7 @@ export function createIncomingEventProcessor({
           informationNeeds: transactionNeeds,
           previouslyExplainedKnowledgeEntryIds: previouslyExplainedKnowledge,
           deferredInformationNeeds:
-            conversationMemory.deferredInformationNeeds.map((item) => item.need),
+            deferredInformationNeeds,
           guidanceNeed,
           callbackPreferenceCaptured: callbackPreference !== null,
           extractionQuality: extracted.diagnostics?.status ?? "VALID",
@@ -1123,7 +1150,7 @@ export function createIncomingEventProcessor({
             informationNeeds: transactionNeeds,
             previouslyExplainedKnowledgeEntryIds: previouslyExplainedKnowledge,
             deferredInformationNeeds:
-              conversationMemory.deferredInformationNeeds.map((item) => item.need),
+              deferredInformationNeeds,
             guidanceNeed,
             callbackPreferenceCaptured: callbackPreference !== null,
             extractionQuality: extracted.diagnostics?.status ?? "VALID",
@@ -1225,6 +1252,11 @@ export function createIncomingEventProcessor({
           deferredInformationNeeds: responseSuppressed
             ? storedMemory.deferredInformationNeeds
             : unresolvedDeferredInformationNeeds,
+          addressedInformationNeeds: responseSuppressed
+            ? storedMemory.addressedInformationNeeds
+            : conversationMemory.addressedInformationNeeds.filter(
+                (need) => !transactionNeeds.knownFacts.includes(need),
+              ),
           conversationalNotes: responseSuppressed
             ? storedMemory.conversationalNotes
             : responseLlm?.conversationMemory?.slice(0, 700) ??

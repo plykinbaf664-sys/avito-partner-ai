@@ -268,7 +268,7 @@ CAPITAL CONFIRMATION: when the user presents an amount as money they have, their
 - requiresGuaranteedIncome=true только когда гарантия дохода является явно обязательным условием. Страх, сомнение или вопрос о доходности не являются таким условием.
 - rejectsBusinessModel=true только при прямом принципиальном отказе от самой модели продукта, а не при вопросе или возражении.
 - possiblePrimaryFear и possibleSecondaryFear — только деловые сигналы для sales-сценария, не психологический диагноз.
-- Если цель не выражена, верни primaryGoal=UNKNOWN.
+- Извлекай primaryGoal с учётом непосредственно предшествующего вопроса AI/HUMAN. Краткий ответ о желании получать доход является ответом о цели, даже если без истории он выглядел бы неоднозначно. Когда доход как цель ясен, но не сказано, дополнительный это доход или основной бизнес, верни EARN_INCOME; не додумывай более узкую категорию. UNKNOWN используй только когда сама цель не выражена. Более позднее уточнение цели может заменить EARN_INCOME более точной категорией.
 - confidence всегда оцени числом от 0 до 1 для extraction целиком; uncertainty кратко перечисляет существенные неоднозначности без догадок.
 - Верни только JSON, без markdown.
 `.trim();
@@ -387,6 +387,33 @@ function invalidConversationSignalReasons(
       ? ["UNRESOLVED_CONTEXTUAL_REFERENCE" as const]
       : []),
   ];
+}
+
+function keepContextualSurfaceSeparateFromReferent(
+  extraction: ExtractedMessage,
+  currentMessage: string,
+  pendingInformationNeed: InformationNeed | null,
+): ExtractedMessage {
+  if (
+    pendingInformationNeed === null ||
+    extraction.intent !== "QUESTION" ||
+    extraction.signals.contextualReference !== true ||
+    extraction.signals.requiresSubstantiveAnswer !== true ||
+    !extraction.signals.resolvedQuestion?.trim() ||
+    extraction.signals.questions.length !== 1 ||
+    isGroundedInCurrentMessage(extraction.signals.questions[0]!, currentMessage)
+  ) return extraction;
+  // The model sometimes writes its semantic expansion into `questions` as
+  // well as `resolvedQuestion`. The former is surface evidence and the latter
+  // is interpretation. Preserve both roles instead of discarding a valid
+  // contextual turn after two lexical-overlap retries.
+  return {
+    ...extraction,
+    signals: {
+      ...extraction.signals,
+      questions: [currentMessage.trim().slice(0, MAX_EXTRACTED_TEXT_LENGTH)],
+    },
+  };
 }
 
 function sanitizeUntrustedConversationSignals(
@@ -632,7 +659,11 @@ export function createMessageExtractor({
       totalInputTokens += response.inputTokens;
       totalOutputTokens += response.outputTokens;
       try {
-        const candidate = parseExtraction(response);
+        const candidate = keepContextualSurfaceSeparateFromReferent(
+          parseExtraction(response),
+          validatedText,
+          typeof input === "string" ? null : input.pendingInformationNeed ?? null,
+        );
         lastStructurallyValid = candidate;
         const signalReasons = invalidConversationSignalReasons(
           candidate,

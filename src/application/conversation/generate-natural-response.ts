@@ -143,7 +143,10 @@ function allowedContextualMoneyValues(
   const values = sources.flatMap(moneyOccurrences)
     .filter((value) => Number.isSafeInteger(value) && value >= 0)
     .slice(-8);
-  const allowed = new Set(values);
+  // A contextual question may introduce an approved calculation that was not
+  // spoken in the preceding turn. Do not treat those calculator outputs as
+  // hallucinations merely because the prior question contained no numbers.
+  const allowed = new Set([...values, ...approvedEconomicsMoneyValues(plan)]);
   for (const value of values) {
     for (const units of referencedUnitCounts(latestInbound)) {
       const total = value * units;
@@ -762,7 +765,8 @@ IMPORTANT CONVERSATION RULES:
       if (
         !(error instanceof Error) ||
         (diagnosticCode === "RESPONSE_POLICY_UNAVAILABLE_NEXT_NEED" &&
-          plan.customerFacingDecision !== "REJECT") ||
+          plan.customerFacingDecision !== "REJECT" &&
+          plan.currentTurnRequiresAnswer !== true) ||
         !(error instanceof SyntaxError || error instanceof z.ZodError) && ![
           "RESPONSE_POLICY_VIOLATION",
           "RESPONSE_POLICY_REJECTION_MISSING_ECONOMICS",
@@ -790,6 +794,8 @@ IMPORTANT CONVERSATION RULES:
         : diagnosticCode === "RESPONSE_POLICY_UNAVAILABLE_NEXT_NEED" &&
           plan.customerFacingDecision === "REJECT"
         ? "Детерминированная политика уже вынесла отказ по текущим подтверждённым данным. Не задавай новый квалификационный вопрос и верни nextInformationNeed=null. Кратко и естественно объясни утверждённую экономику без внутренних статусов."
+        : diagnosticCode === "RESPONSE_POLICY_UNAVAILABLE_NEXT_NEED"
+        ? "Выбранный nextInformationNeed недоступен в allowedQualificationMoves. Не задавай этот вопрос и не подменяй им ответ на текущую просьбу человека. Сначала ответь по approvedFacts и availableEconomics; затем либо выбери одну разрешённую тему, либо верни nextInformationNeed=null и DEFER с краткой внутренней причиной."
         : diagnosticCode === "RESPONSE_POLICY_UNLINKED_QUESTION" &&
           plan.customerFacingDecision === "REJECT"
         ? "При уже установленном детерминированном отказе не добавляй в конце новый вопрос анкеты. Заверши коротким человеческим объяснением фактической причины с утверждёнными числами; nextInformationNeed=null."

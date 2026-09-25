@@ -36,6 +36,7 @@ const enumLabels: Record<string, string> = {
   HANDOFF: "Передача менеджеру",
   CLOSED: "Закрыт",
   NEW: "Новый",
+  EARN_INCOME: "Зарабатывать (формат дохода не уточнён)",
   ADDITIONAL_INCOME: "Дополнительный доход",
   MAIN_BUSINESS: "Основной бизнес",
   LEAVE_EMPLOYMENT: "Уйти из найма",

@@ -88,6 +88,15 @@ export const testChatLabScenarios = [
     ],
   },
   {
+    id: "contextual-startup-budget",
+    title: "Короткий встречный вопрос о нужном капитале",
+    steps: [
+      { actor: "USER", text: "Здравствуйте, я в Москве." },
+      { actor: "MANAGER", text: "Какой бюджет Вы готовы вложить в запуск?" },
+      { actor: "USER", text: "Не знаю, а какой надо?" },
+    ],
+  },
+  {
     id: "city-and-insufficient-capital",
     title: "Три коротких сообщения о городе и капитале",
     burst: true,

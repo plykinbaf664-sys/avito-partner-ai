@@ -29,6 +29,7 @@ export const buyingIntentValues = [
 export type BuyingIntent = (typeof buyingIntentValues)[number];
 
 export const primaryGoals = [
+  "EARN_INCOME",
   "ADDITIONAL_INCOME",
   "MAIN_BUSINESS",
   "LEAVE_EMPLOYMENT",

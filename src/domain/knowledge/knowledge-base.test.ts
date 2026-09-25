@@ -103,6 +103,44 @@ describe("contextual partner knowledge", () => {
     expect(answer.economicsContext).toBeUndefined();
   });
 
+  it("grounds a contextual startup-budget question in the preceding topic, not incidental city or process matches", () => {
+    const extraction = question("Не знаю, а какой надо?");
+    extraction.signals.contextualReference = true;
+    extraction.signals.resolvedQuestion =
+      "какой размер капитала требуется для запуска бизнеса в Москве?";
+    extraction.signals.previousQuestionResponse = "UNSURE";
+    extraction.signals.requiresSubstantiveAnswer = true;
+    const answer = answerFromKnowledgeBase(extraction, {
+      pendingInformationNeed: "AVAILABLE_CAPITAL",
+      recentMessages: [{
+        direction: "OUTBOUND",
+        content: "Москва — хороший город. Какой бюджет Вы готовы вложить в запуск?",
+      }],
+      leadFacts: { city: "Москва" },
+    });
+
+    expect(answer.entryIds).toContain("small-business-entry");
+    expect(answer.entryIds).not.toContain("supported-cities");
+    expect(answer.entryIds).not.toContain("launch-process");
+    expect(answer.economicsContext?.scenarios[0]?.oneObjectLaunch?.totalMin).toBe(180_000);
+  });
+
+  it("uses the previous question only for a true contextual reference, not an explicit topic switch", () => {
+    const extraction = question("Сколько времени нужно уделять проекту?");
+    extraction.signals.contextualReference = false;
+    extraction.signals.questionKind = "BUSINESS_INFORMATION";
+    const answer = answerFromKnowledgeBase(extraction, {
+      pendingInformationNeed: "AVAILABLE_CAPITAL",
+      recentMessages: [{
+        direction: "OUTBOUND",
+        content: "Какой бюджет Вы готовы вложить в запуск?",
+      }],
+      leadFacts: { city: "Москва" },
+    });
+    expect(answer.entryIds).toContain("partner-time");
+    expect(answer.entryIds).not.toContain("small-business-entry");
+  });
+
   it("uses the preceding one-object economics context for two objects", () => {
     const answer = answerFromKnowledgeBase(
       question("А если два объекта?", { calculationUnits: 2 }),

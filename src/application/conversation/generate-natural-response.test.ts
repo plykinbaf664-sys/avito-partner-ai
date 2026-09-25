@@ -1486,6 +1486,81 @@ describe("natural response generation", () => {
       .rejects.toThrow("RESPONSE_POLICY_VIOLATION");
   });
 
+  it("retries an unavailable qualification move while preserving a contextual cost answer", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        text: "Для одного объекта ориентир около 180 000 ₽. Оставьте номер телефона?",
+        nextInformationNeed: "PHONE_NUMBER",
+        conversationAction: "ANSWER",
+      }),
+      JSON.stringify({
+        text: "Для старта одного объекта в Москве предварительный ориентир — 180 000 ₽, включая помощь с запуском, аренду, расчётный залог и подготовку. Фактическая смета зависит от квартиры и собственника.",
+        nextInformationNeed: null,
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "DEFER",
+        qualificationMoveRationale: "Сначала отвечаю на вопрос о необходимой сумме.",
+      }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const result = await generate({
+      lead: { city: "Москва" } as Lead,
+      plan: {
+        text: "Ориентир — 180 000 ₽.",
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: [],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true,
+        groundedAnswerRequired: true,
+        qualificationProgressExpected: true,
+        allowedNextInformationNeeds: ["GOAL"],
+        economicsContext: buildApprovedEconomicsContext({ city: "Москва" }),
+      },
+      recentMessages: [
+        { direction: "OUTBOUND", content: "Какой бюджет Вы готовы вложить в запуск?" },
+        { direction: "INBOUND", content: "Не знаю, а какой надо?" },
+      ],
+    });
+    expect(result.text).toContain("180 000 ₽");
+    expect(result.text).not.toContain("телефона");
+    expect(result.nextInformationNeed).toBeNull();
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("accepts approved fee and startup total in a contextual budget answer", async () => {
+    const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
+      JSON.stringify({
+        text: "Для старта одного объекта в Москве ориентир около 180 000 ₽. В нём уже учтены разовая услуга запуска 50 000 ₽, аренда, залог и подготовка; точная смета зависит от объекта.",
+        nextInformationNeed: null,
+        conversationAction: "ANSWER",
+        usedKnowledgeEntryIds: ["small-business-entry"],
+      }),
+    ]) });
+    const result = await generate({
+      lead: { city: "Москва" } as Lead,
+      plan: {
+        text: "По этому ориентиру запуск одного объекта — 180 000 ₽; услуга запуска включена.",
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: ["small-business-entry"],
+        approvedFacts: [{ id: "small-business-entry", category: "BUSINESS_MODEL", answer: "Услуга запуска стоит 50 000 ₽." }],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true,
+        groundedAnswerRequired: true,
+        contextualReference: true,
+        economicsContext: buildApprovedEconomicsContext({ city: "Москва" }),
+      },
+      recentMessages: [
+        { direction: "OUTBOUND", content: "Какой бюджет Вы готовы вложить в запуск?" },
+        { direction: "INBOUND", content: "Не знаю, а какой надо?" },
+      ],
+    });
+    expect(result.text).toContain("180 000 ₽");
+    expect(result.text).toContain("50 000 ₽");
+  });
+
   it.each([
     [
       "Получается всего 150 тысяч?",

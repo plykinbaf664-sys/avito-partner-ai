@@ -297,6 +297,8 @@ export interface KnowledgeAnswer {
 export interface KnowledgeConversationContext {
   previousEntryIds?: readonly string[];
   recentEntryIds?: readonly string[];
+  /** The topic of the immediately preceding assistant question, not an order to ask it again. */
+  pendingInformationNeed?: InformationNeed | null;
   recentMessages?: readonly { direction: "INBOUND" | "OUTBOUND"; content: string }[];
   rentReference?: RentRangeReference;
   guidanceNeed?: InformationNeed | null;
@@ -351,6 +353,20 @@ export function answerFromKnowledgeBase(
     ? extraction.signals.questions
     : [];
   const hasNewQuestion = currentQuestions.length > 0;
+  // For an elliptical counter-question, the preceding question is a stronger
+  // referent than overlapping words in the LLM's explanatory paraphrase.
+  // This only selects approved grounding; it never selects the next move.
+  const contextualGroundingByNeed: Partial<Record<InformationNeed, readonly string[]>> = {
+    AVAILABLE_CAPITAL: ["small-business-entry"],
+    ADDITIONAL_EXPENSES: ["small-business-entry"],
+    FREE_TIME: ["partner-time"],
+    STARTING_UNITS: ["single-unit-start", "small-business-scale"],
+    SCALING_POTENTIAL_UNITS: ["small-business-scale"],
+  };
+  const referentEntryIds = extraction.signals.contextualReference === true && hasNewQuestion &&
+    context.pendingInformationNeed !== null && context.pendingInformationNeed !== undefined
+    ? contextualGroundingByNeed[context.pendingInformationNeed] ?? []
+    : [];
   const resolvedContextualQuestion = extraction.signals.contextualReference === true &&
     extraction.signals.resolvedQuestion?.trim()
     ? extraction.signals.resolvedQuestion.trim()
@@ -421,7 +437,9 @@ export function answerFromKnowledgeBase(
         ? allPreviousCandidates.slice(-1)
         : [])
     : [];
-  const candidates = [...new Map([...directCandidates, ...previousCandidates]
+  const candidates = [...new Map((referentEntryIds.length > 0
+    ? PARTNER_KNOWLEDGE_BASE.filter((entry) => referentEntryIds.includes(entry.id))
+    : [...directCandidates, ...previousCandidates])
     .map((entry) => [entry.id, entry])).values()];
   // Overviews already contain these facts; avoid repeating entire KB paragraphs.
   const hasOffer = candidates.some((entry) => entry.id === "offer-overview");
@@ -568,7 +586,8 @@ export function answerFromKnowledgeBase(
     unresolvedQuestions,
     contextualReferenceResolved:
       contextualReference && unresolvedQuestions.length === 0 && (
-        previousCandidates.length > 0 ||
+      referentEntryIds.length > 0 ||
+      previousCandidates.length > 0 ||
         (surfaceCandidates.length === 0 && directCandidates.length > 0)
       ),
     economicsContext,

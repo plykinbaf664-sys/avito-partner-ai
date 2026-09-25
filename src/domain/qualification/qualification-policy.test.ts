@@ -108,6 +108,14 @@ describe("segment-aware partner qualification", () => {
     });
   });
 
+  it("treats a broad income goal as known without claiming a specific income format", () => {
+    const decision = evaluateQualification(readySmallBusiness({ primaryGoal: "EARN_INCOME" }));
+
+    expect(decision.reasonCodes).not.toContain("GOAL_UNKNOWN");
+    expect(decision.shouldHandoffToManager).toBe(true);
+    expect(decision.status).toBe("HOT");
+  });
+
   it("accepts explicit first-stage and additional capital", () => {
     expect(evaluateQualification(readySmallBusiness())).toMatchObject({
       status: "HOT",

@@ -57,6 +57,7 @@ export const buyingIntentLabels: Record<string, string> = {
 };
 
 export const goalLabels: Record<string, string> = {
+  EARN_INCOME: "Зарабатывать (формат дохода не уточнён)",
   ADDITIONAL_INCOME: "Дополнительный доход",
   MAIN_BUSINESS: "Основной бизнес",
   LEAVE_EMPLOYMENT: "Уйти из найма",

@@ -394,7 +394,10 @@ export function buildConversationResponse(params: {
       ? [guidanceDraft]
       : contextualEconomicsDraft
         ? [contextualEconomicsDraft]
-        : answerFragmentsForCurrentTurn.slice(0, 2);
+        : extraction.signals.contextualReference === true &&
+            !knowledge.contextualReferenceResolved
+          ? []
+          : answerFragmentsForCurrentTurn.slice(0, 2);
   const asksCallTime =
     preferredContactTime === null &&
     params.lead.handoffAt !== null &&
@@ -436,7 +439,11 @@ export function buildConversationResponse(params: {
   }
 
   if (parts.length === 0) {
-    parts.push(postHandoffContinuation ? "Понял, учту." : "Спасибо, понял.");
+    parts.push(currentTurnRequiresAnswer
+      ? extraction.intent === "GREETING"
+        ? "Я на связи и помогу разобраться с запуском бизнеса на посуточной аренде. Что Вы хотели бы узнать в первую очередь?"
+        : "Хочу ответить по существу, но не уверен, к чему относится Ваш вопрос. Уточните, пожалуйста, что Вы имеете в виду?"
+      : postHandoffContinuation ? "Понял, учту." : "Спасибо, понял.");
   }
 
   const prefix = extraction.intent === "GREETING" ? "Здравствуйте! " : "";

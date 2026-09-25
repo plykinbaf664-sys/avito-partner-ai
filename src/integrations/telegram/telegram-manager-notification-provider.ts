@@ -51,7 +51,7 @@ const timingLabels: Record<string, string> = {
   NO_PLANS: "запуск не планирует", UNKNOWN: "Не указано",
 };
 const goalLabels: Record<string, string> = {
-  ADDITIONAL_INCOME: "дополнительный доход", MAIN_BUSINESS: "основной бизнес",
+  EARN_INCOME: "зарабатывать (формат дохода не уточнён)", ADDITIONAL_INCOME: "дополнительный доход", MAIN_BUSINESS: "основной бизнес",
   LEAVE_EMPLOYMENT: "уйти из найма", INVESTMENT: "инвестиции",
   SCALE_EXISTING_BUSINESS: "масштабирование бизнеса", USE_OWN_PROPERTY: "использовать свою недвижимость",
   RECOVER_PREVIOUS_FAILURE: "новый запуск после неудачного опыта", UNKNOWN: "Не указано",
