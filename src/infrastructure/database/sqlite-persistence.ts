@@ -227,6 +227,14 @@ class DrizzleMessageRepository implements MessageRepository {
       .orderBy(schema.messages.createdAt);
   }
 
+  async listByLeadId(leadId: string): Promise<Message[]> {
+    return this.database
+      .select()
+      .from(schema.messages)
+      .where(eq(schema.messages.leadId, leadId))
+      .orderBy(asc(schema.messages.createdAt), asc(sql<number>`rowid`));
+  }
+
   async listRecentByConversationId(
     conversationId: string,
     limit: number,
@@ -236,6 +244,16 @@ class DrizzleMessageRepository implements MessageRepository {
       .from(schema.messages)
       .where(eq(schema.messages.conversationId, conversationId))
       .orderBy(desc(schema.messages.createdAt))
+      .limit(Math.max(1, Math.min(100, limit)));
+    return rows.reverse();
+  }
+
+  async listRecentByLeadId(leadId: string, limit: number): Promise<Message[]> {
+    const rows = await this.database
+      .select()
+      .from(schema.messages)
+      .where(eq(schema.messages.leadId, leadId))
+      .orderBy(desc(schema.messages.createdAt), desc(sql<number>`rowid`))
       .limit(Math.max(1, Math.min(100, limit)));
     return rows.reverse();
   }
@@ -285,7 +303,14 @@ class DrizzleCrmReadRepository implements CrmReadRepository {
         .select()
         .from(schema.conversations)
         .where(inArray(schema.conversations.leadId, leadIds))
-        .orderBy(desc(schema.conversations.updatedAt)),
+        // A recoverable rejection can leave an older CLOSED conversation for
+        // the same lead. Prefer the live one even when Lab virtual timestamps
+        // tie, then choose the latest inserted row deterministically.
+        .orderBy(
+          asc(schema.conversations.closedAt),
+          desc(schema.conversations.updatedAt),
+          desc(sql<number>`rowid`),
+        ),
       this.database
         .select()
         .from(schema.managerNotifications)

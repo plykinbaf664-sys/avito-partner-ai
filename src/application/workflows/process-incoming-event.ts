@@ -470,6 +470,22 @@ interface StoredConversationMemory {
 
 const DEFERRED_NEED_COOLDOWN_TURNS = 2;
 
+// These topics have a concrete persisted answer. A generic ANSWERED label
+// alone cannot close them: the extraction model may have understood a reply
+// to a different topic. Conversational goals and softer discovery remain
+// semantic, and the model still chooses whether to ask any allowed question.
+const FACT_BACKED_ANSWER_NEEDS = new Set<InformationNeed>([
+  "PHONE_NUMBER",
+  "AVAILABLE_CAPITAL",
+  "ADDITIONAL_EXPENSES",
+  "BUSINESS_MODEL",
+  "CITY",
+  "LAUNCH_TIMING",
+  "MANAGEMENT_READINESS",
+  "STARTING_UNITS",
+  "SCALING_POTENTIAL_UNITS",
+]);
+
 function parseStoredConversationMemory(summary: string | null): StoredConversationMemory {
   const empty: StoredConversationMemory = {
     knowledgeEntryIds: [],
@@ -541,10 +557,17 @@ function rememberDeferredInformationNeed(params: {
   currentIntent: ExtractedMessage["intent"];
   currentQuestionKind?: ExtractedMessage["signals"]["questionKind"];
   guidanceNeed?: InformationNeed | null;
+  pendingTopicFactKnown: boolean;
   inboundSequence: number;
 }): StoredConversationMemory {
+  const ungroundedAnswerToFactNeed =
+    params.pendingInformationNeed !== null &&
+    FACT_BACKED_ANSWER_NEEDS.has(params.pendingInformationNeed) &&
+    params.previousQuestionResponse === "ANSWERED" &&
+    !params.pendingTopicFactKnown;
   const respondedToPendingTopic =
     params.pendingInformationNeed !== null &&
+    !ungroundedAnswerToFactNeed &&
     params.currentQuestionKind !== "CONVERSATION_META" &&
     params.currentQuestionKind !== "AGENT_IDENTITY" &&
     ((params.previousQuestionResponse ?? "NOT_A_RESPONSE") !== "NOT_A_RESPONSE" ||
@@ -594,7 +617,11 @@ function activeDeferredInformationNeeds(
         DEFERRED_NEED_COOLDOWN_TURNS,
     )
     .map((item) => item.need)
-    .concat(memory.addressedInformationNeeds)
+    // Fact-backed topics must never stay suppressed by a legacy ANSWERED
+    // classification when the corresponding fact was never established.
+    .concat(memory.addressedInformationNeeds.filter(
+      (need) => !FACT_BACKED_ANSWER_NEEDS.has(need),
+    ))
     .filter((need, index, all) => all.indexOf(need) === index);
 }
 
@@ -724,8 +751,8 @@ export function createIncomingEventProcessor({
 
     let extracted: ExtractMessageResult;
     try {
-      const extractionHistory = await persistence.messages.listRecentByConversationId(
-        prepared.conversation!.id,
+      const extractionHistory = await persistence.messages.listRecentByLeadId(
+        prepared.lead!.id,
         MAX_RECENT_LLM_MESSAGES,
       );
       extracted = await extractMessage({
@@ -860,8 +887,9 @@ export function createIncomingEventProcessor({
       }
 
       const evaluatedAt = clock();
-      const history = await persistence.messages.listByConversationId(
-        currentConversation.id,
+      const history = await persistence.messages.listRecentByLeadId(
+        currentLead.id,
+        100,
       );
       const latestOutbound = history.findLast(
         (message) => message.direction === "OUTBOUND",
@@ -937,6 +965,10 @@ export function createIncomingEventProcessor({
         currentIntent: extracted.extraction.intent,
         currentQuestionKind: extracted.extraction.signals.questionKind,
         guidanceNeed,
+        pendingTopicFactKnown: currentConversation.pendingInformationNeed !== null &&
+          assessInformationNeeds(evaluatedLead).knownFacts.includes(
+            currentConversation.pendingInformationNeed,
+          ),
         inboundSequence,
       });
       const deferredInformationNeeds = activeDeferredInformationNeeds(
@@ -1255,7 +1287,9 @@ export function createIncomingEventProcessor({
           addressedInformationNeeds: responseSuppressed
             ? storedMemory.addressedInformationNeeds
             : conversationMemory.addressedInformationNeeds.filter(
-                (need) => !transactionNeeds.knownFacts.includes(need),
+                (need) =>
+                  !FACT_BACKED_ANSWER_NEEDS.has(need) &&
+                  !transactionNeeds.knownFacts.includes(need),
               ),
           conversationalNotes: responseSuppressed
             ? storedMemory.conversationalNotes

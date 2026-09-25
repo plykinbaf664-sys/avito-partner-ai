@@ -62,10 +62,12 @@ export interface MessageRepository {
   update(message: Message): Promise<void>;
   findByIncomingEventId(incomingEventId: string): Promise<Message | null>;
   listByConversationId(conversationId: string): Promise<Message[]>;
+  listByLeadId(leadId: string): Promise<Message[]>;
   listRecentByConversationId(
     conversationId: string,
     limit: number,
   ): Promise<Message[]>;
+  listRecentByLeadId(leadId: string, limit: number): Promise<Message[]>;
 }
 
 export interface ManagerNotificationRepository {

@@ -2224,4 +2224,136 @@ describe("multi-turn qualification conversation", () => {
     expect(second.outboundMessage).toContain("заработка");
     expect(second.outboundMessage).not.toMatch(/главн.*цел/iu);
   });
+
+  it("does not close a pending topic when the client repeats a different known fact", async () => {
+    const extractionProvider = new FakeLLMProvider([
+      reply({ facts: { city: "Балашиха", availableCapital: 300_000, availableCapitalConfirmed: true } }),
+      reply({ facts: { availableCapital: 300_000, availableCapitalConfirmed: true }, signals: { previousQuestionResponse: "ANSWERED" } }),
+    ]);
+    const plans: Array<{ allowedNextInformationNeeds?: string[] }> = [];
+    const generateNaturalResponse = vi.fn(async ({ plan }: { plan: { allowedNextInformationNeeds?: string[] } }) => {
+      plans.push(plan);
+      const first = plans.length === 1;
+      return {
+        replyAction: "SEND_REPLY" as const,
+        text: first
+          ? "Когда Вы хотели бы запустить первый объект?"
+          : "Спасибо, бюджет 300 000 ₽ уже учтён. Какую задачу Вы хотите решить этим бизнесом?",
+        nextInformationNeed: first ? "LAUNCH_TIMING" as const : "GOAL" as const,
+        conversationAction: "DISCOVER" as const,
+        qualificationMoveDecision: "ADVANCE" as const,
+        qualificationMoveRationale: "Продолжаем discovery без повторения известного бюджета.",
+        answerCoverage: "FULL" as const,
+        unresolvedTopics: [],
+        usedKnowledgeEntryIds: [],
+        model: "fake",
+        inputTokens: 0,
+        outputTokens: 0,
+      };
+    });
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: extractionProvider }),
+      generateNaturalResponse,
+      generateId: () => `topic-evidence-${++nextId}`,
+      now: () => new Date("2026-09-25T15:41:01.032Z"),
+    });
+
+    await processEvent(input(521, "Балашиха, на запуск есть 300 000 ₽"));
+    const second = await processEvent(input(522, "300 000 рублей есть"));
+
+    expect(plans[1]?.allowedNextInformationNeeds).toContain("LAUNCH_TIMING");
+    const conversation = await persistence.conversations.findById(second.conversationId!);
+    const memory = JSON.parse(conversation!.summary!) as { addressedInformationNeeds: string[] };
+    expect(memory.addressedInformationNeeds).not.toContain("LAUNCH_TIMING");
+    expect((await persistence.leads.findById(second.leadId!))?.launchTiming).toBeNull();
+  });
+
+  it("keeps one conversation when a budget question carries invented zero components", async () => {
+    const { processEvent } = harness([
+      reply({ facts: { city: "Балашиха" } }),
+      reply({
+        intent: "QUESTION",
+        facts: { entryBudget: 0, additionalLaunchCapital: 0 },
+        signals: {
+          questions: ["А какой нужен?"],
+          contextualReference: true,
+          resolvedQuestion: "Какой бюджет нужен для запуска?",
+          questionKind: "CLARIFICATION",
+          requiresSubstantiveAnswer: true,
+        },
+      }),
+      reply({ facts: { availableCapital: 300_000, availableCapitalConfirmed: true } }),
+    ]);
+
+    const city = await processEvent(input(531, "Балашиха"));
+    const question = await processEvent(input(532, "А какой нужен?"));
+    const capital = await processEvent(input(533, "У меня есть 300 000 рублей"));
+
+    expect(question.qualificationStatus).not.toBe("NO_FIT");
+    expect(question.conversationId).toBe(city.conversationId);
+    expect(capital.conversationId).toBe(city.conversationId);
+    expect((await persistence.leads.findById(capital.leadId!))?.entryBudget).toBeNull();
+    expect((await persistence.conversations.findById(city.conversationId!))?.closedAt).toBeNull();
+  });
+
+  it("recovers legacy zero placeholders and a falsely addressed concrete topic on the next inbound", async () => {
+    const { processEvent } = harness([
+      reply({ facts: { city: "Балашиха", availableCapital: 300_000, availableCapitalConfirmed: true } }),
+      reply(),
+    ]);
+    const first = await processEvent(input(541, "Балашиха, у меня есть 300 000 ₽"));
+    const lead = (await persistence.leads.findById(first.leadId!))!;
+    const conversation = (await persistence.conversations.findById(first.conversationId!))!;
+    await persistence.leads.update({
+      ...lead,
+      entryBudget: 0,
+      additionalLaunchCapital: 0,
+      capitalScope: "UNKNOWN",
+    });
+    await persistence.conversations.update({
+      ...conversation,
+      summary: JSON.stringify({
+        knowledgeEntryIds: [],
+        mostRecentKnowledgeEntryIds: [],
+        deferredInformationNeeds: [],
+        addressedInformationNeeds: ["LAUNCH_TIMING"],
+        conversationalNotes: "Капитал уже известен.",
+      }),
+    });
+
+    const second = await processEvent(input(542, "Хотел бы продолжить обсуждение"));
+    const recoveredLead = await persistence.leads.findById(second.leadId!);
+    const recoveredConversation = await persistence.conversations.findById(second.conversationId!);
+    const memory = JSON.parse(recoveredConversation!.summary!) as { addressedInformationNeeds: string[] };
+
+    expect(second.conversationId).toBe(first.conversationId);
+    expect(recoveredLead).toMatchObject({
+      availableCapital: 300_000,
+      entryBudget: null,
+      additionalLaunchCapital: null,
+    });
+    expect(memory.addressedInformationNeeds).not.toContain("LAUNCH_TIMING");
+    expect(second.qualificationStatus).not.toBe("NO_FIT");
+  });
+
+  it("retains lead-wide dialogue context when a corrected no-fit lead resumes in a new conversation", async () => {
+    const { llm, processEvent } = harness([
+      reply({ facts: { availableCapital: 0, availableCapitalConfirmed: true, capitalScope: "TOTAL_LIMIT" } }),
+      reply({ facts: { availableCapital: 300_000, availableCapitalConfirmed: true, capitalScope: "TOTAL_LIMIT" } }),
+    ]);
+
+    const rejected = await processEvent(input(551, "Денег нет"));
+    const recovered = await processEvent(input(552, "Уточню: сейчас есть 300 000 ₽ на запуск"));
+    const extractionContext = JSON.parse(llm.requests[1]!.userMessage) as {
+      RECENT_MESSAGES: Array<{ actor: string; content: string }>;
+    };
+
+    expect(rejected.qualificationStatus).toBe("NO_FIT");
+    expect(recovered.qualificationStatus).not.toBe("NO_FIT");
+    expect(recovered.conversationId).not.toBe(rejected.conversationId);
+    expect(extractionContext.RECENT_MESSAGES).toEqual(expect.arrayContaining([
+      expect.objectContaining({ actor: "USER", content: "Денег нет" }),
+    ]));
+  });
 });

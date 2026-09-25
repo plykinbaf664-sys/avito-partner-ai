@@ -11,6 +11,7 @@ import { SqlitePersistence } from "@/infrastructure/database/sqlite-persistence"
 import { FakeLLMProvider } from "@/integrations/fake/fake-llm-provider";
 import { FakeManagerNotificationProvider } from "@/integrations/fake/fake-manager-notification-provider";
 import { FakeOutboundProvider } from "@/integrations/fake/fake-outbound-provider";
+import { createInitialLead } from "../workflows/process-incoming-event";
 import {
   createTestChatLabService,
   TEST_CHAT_LAB_SOURCE,
@@ -88,6 +89,82 @@ describe("isolated Test Chat Lab workflow", () => {
     persistence = await SqlitePersistence.createMigrated("file::memory:", resolve(process.cwd(), "drizzle"));
   });
   afterEach(() => persistence.close());
+
+  it("shows the open conversation when an older one closed at the same virtual time", async () => {
+    const lead = createInitialLead("lead-snapshot", TEST_CHAT_LAB_SOURCE, "session-snapshot", at(0));
+    await persistence.leads.insert(lead);
+    const base = {
+      leadId: lead.id,
+      summary: null,
+      pendingInformationNeed: null,
+      lastInboundAt: at(0),
+      lastOutboundAt: null,
+      awaitingUserReply: false,
+      qualificationCompleted: false,
+      followUpEligibleAt: null,
+      followUpCount: 0,
+      lastFollowUpAt: null,
+      nextInboundSequence: 0,
+      lastAppliedInboundSequence: 0,
+      createdAt: at(0),
+      updatedAt: at(0),
+    } as const;
+    await persistence.conversations.insert({
+      ...base,
+      id: "closed-snapshot",
+      state: "CLOSED",
+      closedAt: at(0),
+    });
+    await persistence.conversations.insert({
+      ...base,
+      id: "open-snapshot",
+      state: "WAITING_GOAL",
+      pendingInformationNeed: "GOAL",
+      closedAt: null,
+    });
+    const message = {
+      leadId: lead.id,
+      incomingEventId: null,
+      externalMessageId: null,
+      deduplicationKey: null,
+      direction: "OUTBOUND" as const,
+      actor: "AI" as const,
+      deliveryStatus: "SENT" as const,
+      deliveryAttempts: 1,
+      deliveryRetryable: false,
+      lastDeliveryErrorCode: null,
+      sentAt: at(0),
+      createdAt: at(0),
+      sequence: null,
+    };
+    await persistence.messages.insert({
+      ...message,
+      id: "old-snapshot-message",
+      conversationId: "closed-snapshot",
+      content: "Первый эпизод разговора",
+    });
+    await persistence.messages.insert({
+      ...message,
+      id: "new-snapshot-message",
+      conversationId: "open-snapshot",
+      content: "Продолжение разговора",
+    });
+    const lab = createTestChatLabService({
+      persistence,
+      llmProvider: new FakeLLMProvider([]),
+      outboundProvider: new FakeOutboundProvider(),
+      managerNotificationProvider: new FakeManagerNotificationProvider(),
+    });
+
+    const snapshot = await lab.snapshot("session-snapshot");
+
+    expect(snapshot.conversation).toMatchObject({ id: "open-snapshot", state: "WAITING_GOAL" });
+    expect(snapshot.currentNextStep).toBe("GOAL");
+    expect(snapshot.messages.map((entry) => entry.content)).toEqual([
+      "Первый эпизод разговора",
+      "Продолжение разговора",
+    ]);
+  });
 
   it("treats a rapid greeting, city and capital as one turn with one reply", async () => {
     const llm = new FakeLLMProvider([

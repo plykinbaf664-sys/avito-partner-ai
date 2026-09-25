@@ -123,12 +123,10 @@ export function createCrmService(persistence: Persistence) {
       if (!snapshot) return null;
       const record = toRecord(snapshot);
       if (!isCrmQualifiedStatus(record.qualificationStatus)) return null;
-      const messages = snapshot.conversation
-        ? await persistence.messages.listRecentByConversationId(
-            snapshot.conversation.id,
-            100,
-          )
-        : [];
+      const messages = await persistence.messages.listRecentByLeadId(
+        leadId,
+        100,
+      );
       return {
         ...record,
         lead: snapshot.lead,

@@ -123,7 +123,7 @@ export function createTestChatLabService({
     }
     const relation = await persistence.crm.findLeadSnapshot(lead.id);
     const conversation = relation?.conversation ?? await persistence.conversations.findOpenByLeadId(lead.id);
-    const messages = conversation ? await persistence.messages.listByConversationId(conversation.id) : [];
+    const messages = await persistence.messages.listByLeadId(lead.id);
     const decision = evaluateQualification(lead, qualificationContextForLead(lead, {}));
     const needs = assessInformationNeeds(lead);
     const latestInbound = latest(messages, (message) => message.direction === "INBOUND");

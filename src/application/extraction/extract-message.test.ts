@@ -96,6 +96,56 @@ it("normalizes obvious Russian phone formats deterministically", () => {
 });
 
 describe("message extraction schema", () => {
+  it("does not persist zero component budgets invented for a question with no capital claim", async () => {
+    const output = JSON.parse(structuredExtractionReply({
+      intent: "QUESTION",
+      questions: ["А какой нужен?"],
+      requiresSubstantiveAnswer: true,
+    }));
+    output.facts.entryBudget = 0;
+    output.facts.additionalLaunchCapital = 0;
+    output.facts.capitalScope = "UNKNOWN";
+    const result = await createMessageExtractor({
+      llmProvider: new FakeLLMProvider([JSON.stringify(output)]),
+    })("А какой нужен?");
+
+    expect(result.extraction.facts.entryBudget).toBeNull();
+    expect(result.extraction.facts.additionalLaunchCapital).toBeNull();
+  });
+
+  it("keeps a zero additional component only with a confirmed total limit", async () => {
+    const output = JSON.parse(structuredExtractionReply());
+    output.facts.entryBudget = 0;
+    output.facts.additionalLaunchCapital = 0;
+    output.facts.capitalScope = "TOTAL_LIMIT";
+    const extractor = createMessageExtractor({
+      llmProvider: new FakeLLMProvider([
+        JSON.stringify(output),
+        JSON.stringify({
+          ...output,
+          facts: {
+            ...output.facts,
+            availableCapital: 50_000,
+            availableCapitalConfirmed: true,
+          },
+        }),
+      ]),
+    });
+
+    const unsupportedZero = await extractor("Хочу узнать условия запуска");
+    const confirmedLimit = await extractor("50 000 ₽ — весь бюджет на запуск");
+
+    expect(unsupportedZero.extraction.facts).toMatchObject({
+      entryBudget: null,
+      additionalLaunchCapital: null,
+    });
+    expect(confirmedLimit.extraction.facts).toMatchObject({
+      entryBudget: null,
+      additionalLaunchCapital: 0,
+      availableCapital: 50_000,
+    });
+  });
+
   it("does not turn an unspecified amount or scale into a confirmed zero", async () => {
     const output = JSON.parse(structuredExtractionReply({ intent: "QUESTION" }));
     output.facts.budget = 0;

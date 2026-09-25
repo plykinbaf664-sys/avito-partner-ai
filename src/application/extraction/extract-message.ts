@@ -222,6 +222,7 @@ CAPITAL CONFIRMATION: when the user presents an amount as money they have, their
 - В RECENT_MESSAGES actor=MANAGER означает Дмитрия: учитывай его сообщения как часть общей истории команды и текущий договорённый следующий шаг. Это не факт пользователя само по себе, но ответ пользователя может быть прямым продолжением просьбы Дмитрия.
 - Определи функцию CURRENT_MESSAGE в текущем разговоре. CONFIRMATION — короткое согласие или подтверждение предыдущего вопроса; CORRECTION — исправление ранее сообщённого факта; COMPLAINT — раздражение, непонимание или жалоба на качество предыдущего ответа. Не смешивай COMPLAINT с обычным деловым возражением: это сигнал сначала восстановить взаимопонимание.
 - previousQuestionResponse описывает смысл CURRENT_MESSAGE относительно последнего вопроса AI/HUMAN: ANSWERED — содержательно ответил; UNSURE — прямо или по смыслу не знает ответа; DECLINED_TO_ANSWER — не хочет отвечать сейчас; CHANGED_TOPIC — переключил разговор; NOT_A_RESPONSE — предыдущего вопроса нет или сообщение к нему не относится. Не считай UNSURE заполненным qualification fact и не пытайся угадывать значение.
+- Для ANSWERED проверь, что именно CURRENT_MESSAGE отвечает на предмет последнего вопроса, а не просто сообщает или повторяет другой известный факт. Не выводи ответ из CURRENT_LEAD_FACTS и не помечай тему закрытой из-за общего согласия продолжить разговор.
 - Различай тему ответа и новый вопрос. Упоминание темы одним словом или короткой фразой в ответ на вопрос AI/HUMAN не является вопросом пользователя. Если previousQuestionResponse=ANSWERED/UNSURE/DECLINED_TO_ANSWER и человек отдельно ничего не просит объяснить, questions должен быть пустым, requiresSubstantiveAnswer=false, а intent не должен быть QUESTION.
 - Если текущий вопрос использует эллипсис или ссылку на предыдущий контекст («а сколько примерно?», «а это входит?», «там сколько?»), установи contextualReference=true и запиши в resolvedQuestion его самостоятельный смысл с учётом ближайшего однозначного контекста. Не добавляй новых фактов и не усиливай требуемую точность: слова «конкретный», «точный», адрес или выбранный объект допустимы только когда их действительно указал пользователь. Для самостоятельного вопроса resolvedQuestion=null.
 - Если contextualReference=true, resolvedQuestion обязателен: укажи тему и единицу измерения, унаследованные от ближайшего однозначного хода собеседника. Не заменяй время деньгами, масштаб доходом или наоборот из-за доступных справочных данных. Если референт неоднозначен, оставь contextualReference=false и сохрани исходный вопрос для уточнения в conversation brain.
@@ -242,6 +243,7 @@ CAPITAL CONFIRMATION: when the user presents an amount as money they have, their
 - Явные «денег нет», «вложений нет», «капитала нет» означают budget=0, budgetConfirmed=true, availableCapital=0, availableCapitalConfirmed=true и capitalScope=TOTAL_LIMIT. Если бюджет просто не упомянут, верни budget=null и budgetConfirmed=false.
 - budgetConfirmed=true только для достаточно определённого утверждения о доступном бюджете. Формулировки вроде «думаю, тысяч 300 смогу найти» дают budget=300000 и budgetConfirmed=false.
 - availableCapital — общий капитал, который человек реально готов направить на запуск; entryBudget — сумма на оплату первого этапа/услуги команды; additionalLaunchCapital — деньги сверх entryBudget на аренду, залог, комплектацию и другие стартовые расходы. Для неизвестной суммы в этих трёх полях верни -1, для явно отсутствующей отдельной суммы — 0.
+- Не используй 0 как заполнитель неизвестной части бюджета. Вопрос о необходимой сумме не сообщает, сколько денег есть у человека. Ноль для отдельной части допустим только при явно ограниченном объёме капитала и согласованном capitalScope; иначе верни -1.
 - availableCapitalConfirmed=true только для достаточно определённой суммы. Legacy-поля budget/budgetConfirmed сохрани для совместимости: budget равен явно названной основной сумме, но новые финансовые поля и capitalScope точнее передают её смысл.
 - Не считай фразу «есть 50 тысяч» подтверждением полного бюджета запуска: верни entryBudget=50000, availableCapital=-1, capitalScope=ENTRY_ONLY, пока общий капитал неясен.
 - «50 тысяч только на всё, больше этой суммы нет» → availableCapital=50000, entryBudget=-1, additionalLaunchCapital=0, capitalScope=TOTAL_LIMIT; это ограничение суммы, а достаточность определит business policy. additionalExpensesReadiness=NOT_READY добавляй только при прямом отказе оплачивать обязательные расходы по объекту.
@@ -757,12 +759,17 @@ export function createMessageExtractor({
           ambiguousServiceFeeOnly
             ? LAUNCH_COST_REFERENCE.serviceFeeReference
             : parsedData.facts.entryBudget !== null &&
-                parsedData.facts.entryBudget < 0
+                parsedData.facts.entryBudget <= 0
               ? null
               : parsedData.facts.entryBudget,
         additionalLaunchCapital:
           parsedData.facts.additionalLaunchCapital !== null &&
-          parsedData.facts.additionalLaunchCapital < 0
+          (parsedData.facts.additionalLaunchCapital < 0 ||
+            (parsedData.facts.additionalLaunchCapital === 0 &&
+              !(parsedData.facts.capitalScope === "TOTAL_LIMIT" &&
+                parsedData.facts.availableCapital !== null &&
+                parsedData.facts.availableCapital > 0 &&
+                parsedData.facts.availableCapitalConfirmed)))
             ? null
             : parsedData.facts.additionalLaunchCapital,
         calculationUnits:

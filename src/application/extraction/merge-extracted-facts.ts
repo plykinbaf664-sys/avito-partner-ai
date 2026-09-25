@@ -88,6 +88,7 @@ export function mergeExtractedFacts(
   }
   if (
     extraction.facts.entryBudget !== null &&
+    extraction.facts.entryBudget > 0 &&
     extraction.facts.availableCapital === null &&
     extraction.facts.budget === null
   ) {
@@ -158,6 +159,25 @@ export function mergeExtractedFacts(
         budgetConfirmed: true,
       };
     }
+  }
+
+  // Older extractions could store zero placeholders without a declared scope.
+  // Such values are not evidence that the lead has no money; repair them on
+  // the next inbound instead of carrying a false financial blocker forward.
+  if (merged.capitalScope === "UNKNOWN") {
+    merged = {
+      ...merged,
+      entryBudget: merged.entryBudget === 0 ? null : merged.entryBudget,
+      additionalLaunchCapital: merged.additionalLaunchCapital === 0
+        ? null
+        : merged.additionalLaunchCapital,
+      budget: merged.budget === 0 ? null : merged.budget,
+      budgetConfirmed: merged.budget === 0 ? false : merged.budgetConfirmed,
+      availableCapital: merged.availableCapital === 0 ? null : merged.availableCapital,
+      availableCapitalConfirmed: merged.availableCapital === 0
+        ? false
+        : merged.availableCapitalConfirmed,
+    };
   }
 
   const withServiceability = {
