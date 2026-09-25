@@ -89,6 +89,31 @@ describe("isolated Test Chat Lab workflow", () => {
   });
   afterEach(() => persistence.close());
 
+  it("treats a rapid greeting, city and capital as one turn with one reply", async () => {
+    const llm = new FakeLLMProvider([
+      extractionReply(),
+      extractionReply({ city: "Нижний Новгород" }),
+      extractionReply({ city: "Нижний Новгород", availableCapital: 100_000, availableCapitalConfirmed: true }),
+    ]);
+    const lab = createTestChatLabService({
+      persistence,
+      llmProvider: llm,
+      outboundProvider: new FakeOutboundProvider(),
+      managerNotificationProvider: new FakeManagerNotificationProvider(),
+    });
+
+    const result = await lab.runScenario("burst-session", "city-and-insufficient-capital", at(0));
+    const userMessages = result.snapshot.messages.filter((message) => message.actor === "USER");
+    const aiMessages = result.snapshot.messages.filter((message) => message.actor === "AI");
+    expect(userMessages).toHaveLength(3);
+    expect(aiMessages).toHaveLength(1);
+    expect(result.snapshot.lead).toMatchObject({
+      city: "Нижний Новгород",
+      availableCapital: 100_000,
+    });
+    expect(aiMessages[0]?.content).not.toMatch(/какой бюджет|сколько готовы вложить/iu);
+  });
+
   it("keeps Dmitry and client in one history and persists an early phone without qualification questioning", async () => {
     const llm = new FakeLLMProvider([
       extractionReply(),

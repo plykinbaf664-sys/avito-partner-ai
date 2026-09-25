@@ -85,6 +85,24 @@ describe("contextual partner knowledge", () => {
       .toBe(50_000);
   });
 
+  it("routes an elliptical quantity by its resolved time referent, not the surface wording", () => {
+    const extraction = question("А сколько надо?");
+    extraction.signals.contextualReference = true;
+    extraction.signals.resolvedQuestion = "Сколько личного времени в день потребуется партнёру?";
+    extraction.signals.questionKind = "CLARIFICATION";
+    const answer = answerFromKnowledgeBase(extraction, {
+      previousEntryIds: ["small-business-entry", "partner-time"],
+      recentEntryIds: ["partner-time"],
+      recentMessages: [{
+        direction: "OUTBOUND",
+        content: "На запуск нужно уделять время просмотрам и ключевым решениям.",
+      }],
+    });
+    expect(answer.entryIds).toContain("partner-time");
+    expect(answer.entryIds).not.toContain("small-business-entry");
+    expect(answer.economicsContext).toBeUndefined();
+  });
+
   it("uses the preceding one-object economics context for two objects", () => {
     const answer = answerFromKnowledgeBase(
       question("А если два объекта?", { calculationUnits: 2 }),
@@ -190,6 +208,47 @@ describe("contextual partner knowledge", () => {
     expect(answer.entryIds).toEqual(["partner-time"]);
     expect(answer.answerFragments.join(" ")).toContain("3–4 часов в день");
     expect(answer.answerFragments.join(" ")).not.toContain("180 000 ₽");
+    expect(answer.economicsContext).toBeUndefined();
+    expect(answer.contextualReferenceResolved).toBe(false);
+  });
+
+  it("does not revive stale economics for a contextual question about the immediately preceding qualification prompt", () => {
+    const extraction = question("А это важно?");
+    extraction.signals.contextualReference = true;
+    extraction.signals.resolvedQuestion = "Почему важно понять главную цель партнёра?";
+
+    const answer = answerFromKnowledgeBase(extraction, {
+      previousEntryIds: ["small-business-entry", "guarantees-and-economics"],
+      recentMessages: [{
+        direction: "OUTBOUND",
+        content: "Какую главную цель хотите решить этим бизнесом?",
+      }],
+      leadFacts: { city: "Москва", availableCapital: 300_000 },
+    });
+
+    expect(answer.contextualReferenceResolved).toBe(false);
+    expect(answer.economicsContext).toBeUndefined();
+    expect(answer.answerFragments).toEqual([]);
+    expect(answer.entryIds).toEqual([]);
+  });
+
+  it("keeps a meta-question about the current qualification step out of business retrieval", () => {
+    const extraction = question("А это важно?");
+    extraction.signals.questionKind = "CONVERSATION_META";
+    extraction.signals.requiresSubstantiveAnswer = true;
+    extraction.signals.resolvedQuestion = "Почему важен бюджет для запуска?";
+
+    const answer = answerFromKnowledgeBase(extraction, {
+      previousEntryIds: ["small-business-entry"],
+      recentMessages: [{
+        direction: "OUTBOUND",
+        content: "Скажите, какой бюджет вы готовы вложить в запуск бизнеса?",
+      }],
+      leadFacts: { city: "Москва" },
+    });
+
+    expect(answer.answerFragments).toEqual([]);
+    expect(answer.entryIds).toEqual([]);
     expect(answer.economicsContext).toBeUndefined();
     expect(answer.contextualReferenceResolved).toBe(false);
   });

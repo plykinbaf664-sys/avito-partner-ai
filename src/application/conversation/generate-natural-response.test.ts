@@ -164,6 +164,376 @@ describe("natural response generation", () => {
       .resolves.toMatchObject({ text, nextInformationNeed: "LAUNCH_TIMING" });
   });
 
+  it("passes compact conversational memory as context without presenting fallback copy to the model", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({
+      text: "Понимаю сомнение. Давайте сначала разберёмся, какой формат Вам подходит.",
+      nextInformationNeed: null,
+      conversationAction: "ANSWER",
+      qualificationMoveDecision: "DEFER",
+      qualificationMoveRationale: "Сначала отвечаю на сомнение клиента.",
+      conversationMemory: "Человек хочет понять формат до обсуждения бюджета.",
+    })]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const plan: ConversationResponsePlan = {
+      text: "Какой бюджет Вы готовы выделить?",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      allowedNextInformationNeeds: ["AVAILABLE_CAPITAL"],
+      qualificationProgressExpected: true,
+    };
+
+    const result = await generate({
+      lead: {} as Lead,
+      plan,
+      conversationMemory: "Клиент уже обсуждал формат и не захотел сразу назвать бюджет.",
+      recentMessages: [
+        { direction: "OUTBOUND", content: "Какой бюджет готовы вложить?" },
+        { direction: "INBOUND", content: "Сначала расскажите, зачем это нужно" },
+      ],
+    });
+
+    expect(result.conversationMemory).toContain("понять формат");
+    const context = JSON.parse(llm.requests[0]!.userMessage);
+    expect(context.conversationMemory).toContain("не захотел сразу назвать бюджет");
+    expect(context.currentExchange).toEqual({
+      previousSpeakerTurn: "Какой бюджет готовы вложить?",
+      activeUserTurn: ["Сначала расскажите, зачем это нужно"],
+    });
+    expect(context).not.toHaveProperty("fallbackDraft");
+  });
+
+  it("presents consecutive inbound messages as one active conversational turn", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({
+      text: "Спасибо, понял Вашу ситуацию.",
+      nextInformationNeed: null,
+    })]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    await generate({
+      lead: {} as Lead,
+      plan: { ...offerPlan, nextInformationNeed: null, asksUserQuestion: false },
+      recentMessages: [
+        { direction: "OUTBOUND", content: "Расскажите о себе." },
+        { direction: "INBOUND", content: "Здравствуйте" },
+        { direction: "INBOUND", content: "Нижний Новгород" },
+        { direction: "INBOUND", content: "100 тысяч на старт" },
+      ],
+    });
+    const context = JSON.parse(llm.requests[0]!.userMessage);
+    expect(context.currentExchange).toEqual({
+      previousSpeakerTurn: "Расскажите о себе.",
+      activeUserTurn: ["Здравствуйте", "Нижний Новгород", "100 тысяч на старт"],
+    });
+  });
+
+  it("keeps a grounded answer when only the optional next-need metadata is inconsistent", async () => {
+    const timeFact = PARTNER_KNOWLEDGE_BASE.find((entry) => entry.id === "partner-time")!;
+    const llm = new FakeLLMProvider([JSON.stringify({
+      text: "Ориентир личного участия — около 3–4 часов в день. В это время входят просмотры объектов и ключевые решения по запуску.",
+      nextInformationNeed: "FREE_TIME",
+      conversationAction: "ANSWER",
+      qualificationMoveDecision: "ADVANCE",
+      usedKnowledgeEntryIds: [timeFact.id],
+    })]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    await expect(generate({
+      lead: {} as Lead,
+      plan: {
+        text: timeFact.answer,
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: [timeFact.id],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true,
+        groundedAnswerRequired: true,
+        allowedNextInformationNeeds: ["FREE_TIME"],
+        approvedFacts: [{ id: timeFact.id, category: timeFact.category, answer: timeFact.answer }],
+      },
+      recentMessages: [{ direction: "INBOUND", content: "Какое участие потребуется от меня?" }],
+    })).resolves.toMatchObject({
+      nextInformationNeed: null,
+      qualificationMoveDecision: "DEFER",
+      text: expect.stringContaining("3–4 часов"),
+    });
+  });
+
+  it("allows a substantive follow-up to reuse recently explained approved knowledge", async () => {
+    const timeFact = PARTNER_KNOWLEDGE_BASE.find((entry) => entry.id === "partner-time")!;
+    const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
+      JSON.stringify({
+        text: "Если речь о Вашем личном времени, ориентир — около 3–4 часов в день на этапе запуска; точный график зависит от объекта и Вашего участия в просмотрах.",
+        nextInformationNeed: null,
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "DEFER",
+        qualificationMoveRationale: "Уточнил предыдущий ответ о времени.",
+        usedKnowledgeEntryIds: [timeFact.id],
+      }),
+    ]) });
+    await expect(generate({
+      lead: {} as Lead,
+      plan: {
+        text: "Спасибо, понял.",
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: [],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true,
+        currentQuestionKind: "CLARIFICATION",
+        previouslyExplainedKnowledgeEntryIds: [timeFact.id],
+        approvedFacts: [{ id: timeFact.id, category: timeFact.category, answer: timeFact.answer }],
+      },
+      recentMessages: [
+        { direction: "OUTBOUND", content: "При запуске потребуется Ваше личное участие." },
+        { direction: "INBOUND", content: "А сколько надо?" },
+      ],
+    })).resolves.toMatchObject({ text: expect.stringContaining("3–4 часов") });
+  });
+
+  it("rejects an affordable-unit range that exceeds the deterministic calculator", async () => {
+    const economicsContext = buildApprovedEconomicsContext({
+      city: "Москва",
+      availableCapital: 400_000,
+    });
+    const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
+      JSON.stringify({
+        text: "При Вашем бюджете можно запустить 2–3 объекта в Москве.",
+        nextInformationNeed: null,
+        conversationAction: "ANSWER",
+      }),
+    ]) });
+    await expect(generate({
+      lead: { city: "Москва", availableCapital: 400_000 } as Lead,
+      plan: {
+        text: "По утверждённому расчёту при 400 000 ₽ доступны два объекта.",
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: [],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true,
+        economicsContext,
+      },
+      recentMessages: [{ direction: "INBOUND", content: "Со скольких можно начать?" }],
+    })).rejects.toThrow("RESPONSE_POLICY_VIOLATION");
+  });
+
+  it("rejects adding the launch fee a second time to an approved startup total", async () => {
+    const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
+      JSON.stringify({
+        text: "Один объект в Москве обойдётся примерно в 180 тысяч на аренду, залог и подготовку плюс 50 тысяч за помощь в запуске.",
+        nextInformationNeed: null,
+        conversationAction: "ANSWER",
+      }),
+    ]) });
+    await expect(generate({
+      lead: { city: "Москва", availableCapital: 400_000 } as Lead,
+      plan: {
+        text: "Ориентир запуска одного объекта в Москве — 180 000 ₽, включая услугу запуска.",
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: [],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true,
+        economicsContext: buildApprovedEconomicsContext({ city: "Москва", availableCapital: 400_000 }),
+      },
+      recentMessages: [{ direction: "INBOUND", content: "Со скольких объектов начать?" }],
+    })).rejects.toThrow("RESPONSE_POLICY_VIOLATION");
+  });
+
+  it("keeps a natural deterministic rejection when only next-step metadata is stray", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        text: "Для старта одного объекта по предварительному расчёту нужно около 150 000 ₽, включая помощь с запуском, аренду, залог и подготовку. Названных Вами 100 000 ₽ пока недостаточно; точная смета зависит от квартиры.",
+        nextInformationNeed: "GOAL",
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "ADVANCE",
+      }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    await expect(generate({
+      lead: { availableCapital: 100_000 } as Lead,
+      plan: {
+        text: "Для запуска одного объекта нужно 150 000 ₽.",
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: [],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: false,
+        customerFacingDecision: "REJECT",
+        allowedNextInformationNeeds: [],
+        economicsContext: buildApprovedEconomicsContext({ availableCapital: 100_000 }),
+      },
+      recentMessages: [{ direction: "INBOUND", content: "У меня 100 тысяч на запуск" }],
+    })).resolves.toMatchObject({ nextInformationNeed: null });
+    expect(llm.requests[0]?.maxTokens).toBeGreaterThan(480);
+  });
+
+  it("does not replace a capital-based rejection with an invented city exclusion", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        text: "При 100 000 ₽ пока не получится: запуск требует около 150 000 ₽, а в вашем городе мы не работаем.",
+        nextInformationNeed: null,
+      }),
+      JSON.stringify({
+        text: "Для запуска одного объекта по предварительному расчёту нужно около 150 000 ₽ с учётом услуги, аренды, залога и подготовки. Названных Вами 100 000 ₽ пока недостаточно; возможность работы в городе проверяется отдельно.",
+        nextInformationNeed: null,
+      }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const result = await generate({
+      lead: { city: "Нижний Новгород", availableCapital: 100_000 } as Lead,
+      plan: {
+        text: "Для одного объекта нужно 150 000 ₽, названного бюджета пока недостаточно.",
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: [],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+        customerFacingDecision: "REJECT",
+        customerFacingDecisionReason: "INSUFFICIENT_LAUNCH_CAPITAL",
+        serviceabilityStatus: "NEEDS_REVIEW",
+        economicsContext: buildApprovedEconomicsContext({ availableCapital: 100_000, city: "Нижний Новгород" }),
+      },
+      recentMessages: [{ direction: "INBOUND", content: "Нижний Новгород, 100 тысяч" }],
+    });
+    expect(result.text).toContain("150 000 ₽");
+    expect(result.text).not.toContain("не работаем");
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("repairs a terminal policy answer that appends an unrelated questionnaire question", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        text: "Для одного объекта нужно около 150 000 ₽, Ваших 100 000 ₽ пока недостаточно. Когда Вы планируете запуск?",
+        nextInformationNeed: null,
+      }),
+      JSON.stringify({
+        text: "Для одного объекта предварительно нужно около 150 000 ₽, включая помощь с запуском и расходы по квартире. Названных Вами 100 000 ₽ пока недостаточно; если обстоятельства изменятся, можно вернуться к разговору.",
+        nextInformationNeed: null,
+      }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const result = await generate({
+      lead: { city: "Нижний Новгород", availableCapital: 100_000 } as Lead,
+      plan: {
+        text: "Для одного объекта нужно 150 000 ₽.",
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: [],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+        customerFacingDecision: "REJECT",
+        customerFacingDecisionReason: "INSUFFICIENT_LAUNCH_CAPITAL",
+        economicsContext: buildApprovedEconomicsContext({ city: "Нижний Новгород", availableCapital: 100_000 }),
+      },
+      recentMessages: [{ direction: "INBOUND", content: "Нижний Новгород, 100 тысяч" }],
+    });
+    expect(result.text).not.toContain("?");
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("makes approved calculations available without making them the current topic", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({
+      text: "Спасибо, понял. Что Вам важнее всего узнать о запуске?",
+      nextInformationNeed: null,
+      qualificationMoveDecision: "DEFER",
+      qualificationMoveRationale: "Пользователь ещё выбирает интересующую тему.",
+    })]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const plan: ConversationResponsePlan = {
+      text: "Спасибо, понял.",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentTurnRequiresAnswer: true,
+    };
+
+    await generate({
+      lead: { city: "Москва", availableCapital: 300_000 } as Lead,
+      plan,
+      recentMessages: [{ direction: "INBOUND", content: "Я пока разбираюсь" }],
+    });
+
+    const context = JSON.parse(llm.requests[0]!.userMessage);
+    expect(context.economicsContext).toBeNull();
+    expect(context.availableEconomics.scenarios[0].oneObjectLaunch.totalMin).toBe(180_000);
+    expect(context.calculationFacts[0]).toMatchObject({
+      oneObjectStartupTotal: 180_000,
+      startupTotalIncludesOneTimeLaunchFee: true,
+      oneTimeLaunchFee: 50_000,
+      maximumAffordableObjects: 1,
+      capitalShortfallForOneObject: 0,
+      capitalAmountConfirmed: false,
+    });
+    expect(context).not.toHaveProperty("fallbackDraft");
+  });
+
+  it("grounds an unconfirmed low budget with a provisional cost gap without changing qualification", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({
+      text: "Для одного объекта предварительный ориентир — 150 000 ₽. Названных 100 000 ₽ пока меньше; это весь доступный бюджет?",
+      nextInformationNeed: "ADDITIONAL_EXPENSES",
+      conversationAction: "ANSWER",
+      qualificationMoveDecision: "ADVANCE",
+    })]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    await generate({
+      lead: { city: "Нижний Новгород", availableCapital: 100_000, availableCapitalConfirmed: false } as Lead,
+      plan: {
+        text: "Уточните, есть ли дополнительные средства?",
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: [],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+        allowedNextInformationNeeds: ["ADDITIONAL_EXPENSES"],
+      },
+      recentMessages: [{ direction: "INBOUND", content: "100 тысяч" }],
+    });
+    const context = JSON.parse(llm.requests[0]!.userMessage);
+    expect(context.calculationFacts[0]).toMatchObject({
+      oneObjectStartupTotal: 150_000,
+      capitalShortfallForOneObject: 50_000,
+      capitalAmountConfirmed: false,
+    });
+  });
+
+  it("repairs a budget-scope question that omits the approved shortfall", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        text: "Это весь бюджет на запуск?",
+        nextInformationNeed: "AVAILABLE_CAPITAL",
+      }),
+      JSON.stringify({
+        text: "Для одного объекта предварительный ориентир — 150 000 ₽, включая услугу запуска и расходы по объекту. Вы назвали 100 000 ₽ — это весь доступный бюджет?",
+        nextInformationNeed: "AVAILABLE_CAPITAL",
+      }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const result = await generate({
+      lead: { city: "Нижний Новгород", availableCapital: 100_000, availableCapitalConfirmed: false } as Lead,
+      plan: {
+        text: "Это весь бюджет?",
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: [],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+        allowedNextInformationNeeds: ["AVAILABLE_CAPITAL"],
+      },
+      recentMessages: [{ direction: "INBOUND", content: "100 тысяч на старт" }],
+    });
+    expect(result.text).toContain("150 000 ₽");
+    expect(llm.callCount).toBe(2);
+  });
+
   it("rejects internal qualification identifiers in customer-facing model output", async () => {
     const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
       JSON.stringify({
@@ -204,6 +574,186 @@ describe("natural response generation", () => {
         nextInformationNeed: null,
         conversationAction: "ACKNOWLEDGE",
       });
+  });
+
+  it("accepts a substantive answer and natural clarification without forcing a qualification field", async () => {
+    const text = "Да, сейчас Вы общаетесь с AI-консультантом. Я помогу разобраться в формате; что для Вас важно узнать сначала?";
+    const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
+      JSON.stringify({
+        text,
+        nextInformationNeed: null,
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "NOT_APPLICABLE",
+        answerCoverage: "FULL",
+      }),
+    ]) });
+    const plan: ConversationResponsePlan = {
+      text: "Какой бюджет готовы вложить?",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "QUESTION",
+      currentTurnRequiresAnswer: true,
+      groundedAnswerRequired: true,
+      qualificationProgressExpected: true,
+      allowedNextInformationNeeds: ["AVAILABLE_CAPITAL", "GOAL"],
+    };
+
+    await expect(generate({
+      lead: {} as Lead,
+      plan,
+      recentMessages: [{ direction: "INBOUND", content: "Я с ботом разговариваю?" }],
+    })).resolves.toMatchObject({ text, nextInformationNeed: null });
+  });
+
+  it("accepts a conversational meta-answer without pretending it is a business-fact answer", async () => {
+    const text = "Да, сейчас Вы общаетесь с AI-консультантом. Чем я могу Вам помочь разобраться в предложении?";
+    const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
+      JSON.stringify({
+        text,
+        nextInformationNeed: null,
+        conversationAction: "ACKNOWLEDGE",
+        qualificationMoveDecision: "NOT_APPLICABLE",
+        answerCoverage: "FULL",
+      }),
+    ]) });
+    const plan: ConversationResponsePlan = {
+      text: "Какой бюджет готовы вложить?",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "QUESTION",
+      currentQuestionKind: "CONVERSATION_META",
+      currentTurnRequiresAnswer: true,
+      groundedAnswerRequired: false,
+      qualificationProgressExpected: true,
+      allowedNextInformationNeeds: ["AVAILABLE_CAPITAL"],
+    };
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({ text, nextInformationNeed: null });
+  });
+
+  it("allows relevant approved knowledge when explaining why a conversation topic matters", async () => {
+    const timeFact = PARTNER_KNOWLEDGE_BASE.find((entry) => entry.id === "partner-time")!;
+    const text = "Спрашиваю о времени, чтобы понять, сможете ли Вы участвовать в запуске: ориентир — около 3–4 часов в день. Удобно ли Вам это?";
+    const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
+      JSON.stringify({
+        text,
+        nextInformationNeed: null,
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "DEFER",
+        qualificationMoveRationale: "Сначала отвечаю на встречный вопрос о смысле шага.",
+        usedKnowledgeEntryIds: [timeFact.id],
+      }),
+    ]) });
+    const plan: ConversationResponsePlan = {
+      text: "Сможете уделять проекту 3–4 часа в день?",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "QUESTION",
+      currentQuestionKind: "CONVERSATION_META",
+      currentTurnRequiresAnswer: true,
+      groundedAnswerRequired: false,
+      previouslyExplainedKnowledgeEntryIds: ["small-business-entry"],
+      approvedFacts: [{ id: timeFact.id, category: timeFact.category, answer: timeFact.answer }],
+    };
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({ text });
+  });
+
+  it("recovers once from a truncated contextual response instead of falling into a scripted question", async () => {
+    const llm = new FakeLLMProvider([
+      '{"replyAction":"SEND_REPLY","text":"Оборванный ответ',
+      JSON.stringify({
+        text: "Уточняю сроки, чтобы понять, насколько скоро Вам понадобится помощь с подбором и запуском. Если Вам удобнее, можем пока обсудить сам формат.",
+        nextInformationNeed: null,
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "DEFER",
+        qualificationMoveRationale: "Сначала отвечаю на вопрос о смысле срока.",
+      }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const plan: ConversationResponsePlan = {
+      text: "Когда планируете запуск?",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentTurnRequiresAnswer: true,
+      groundedAnswerRequired: true,
+      qualificationProgressExpected: true,
+    };
+
+    await expect(generate({ lead: {} as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({ nextInformationNeed: null });
+    expect(llm.callCount).toBe(2);
+    expect(llm.requests[0]?.maxTokens).toBeGreaterThan(480);
+  });
+
+  it("recovers once from schema-invalid response metadata without losing a user turn", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "Ответ есть", conversationAction: "INVALID" }),
+      JSON.stringify({
+        text: "Лично участвовать в запуске ориентировочно нужно 3–4 часа в день.",
+        nextInformationNeed: null,
+        conversationAction: "ANSWER",
+      }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const result = await generate({
+      lead: {} as Lead,
+      plan: {
+        text: "Ориентир участия партнёра — около 3–4 часов в день.",
+        nextInformationNeed: null,
+        asksUserQuestion: false,
+        knowledgeEntryIds: [],
+        unresolvedQuestions: [],
+        useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true,
+      },
+      recentMessages: [{ direction: "INBOUND", content: "Сколько времени понадобится?" }],
+    });
+    expect(result.text).toContain("3–4 часа");
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("does not mistake an approved startup amount for a numerical income claim", async () => {
+    const text = "Бюджет помогает понять масштаб и ожидания от дохода. Запуск одного объекта в Москве по предварительному расчёту стоит около 180 000 ₽, включая аренду, залог и подготовку. Какую сумму Вы рассматриваете?";
+    const generate = createNaturalResponseGenerator({ llmProvider: new FakeLLMProvider([
+      JSON.stringify({
+        text,
+        nextInformationNeed: "AVAILABLE_CAPITAL",
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "ADVANCE",
+        usedKnowledgeEntryIds: ["small-business-entry"],
+      }),
+    ]) });
+    const plan: ConversationResponsePlan = {
+      text: "Какой бюджет Вы рассматриваете?",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "QUESTION",
+      currentQuestionKind: "CONVERSATION_META",
+      currentTurnRequiresAnswer: true,
+      allowedNextInformationNeeds: ["AVAILABLE_CAPITAL"],
+      approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+    };
+
+    await expect(generate({ lead: { city: "Москва" } as Lead, plan, recentMessages: [] }))
+      .resolves.toMatchObject({ text });
   });
 
   it("retries a vacuous acknowledgement when active qualification must progress", async () => {
@@ -735,6 +1285,73 @@ describe("natural response generation", () => {
     expect(llm.callCount).toBe(2);
     expect(JSON.parse(llm.requests[1]!.userMessage)).toMatchObject({
       validationFeedback: expect.stringContaining("существенно повторяет недавний ответ"),
+    });
+  });
+
+  it("regenerates a contextual answer instead of replaying stale economics", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({
+        replyAction: "SEND_REPLY",
+        text: "Ранее мы уже обсудили ориентир запуска одного объекта — 180 000 ₽. Какую цель вы хотите решить этим бизнесом?",
+        nextInformationNeed: "GOAL",
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "нужно понять цель партнёра",
+        answerCoverage: "FULL",
+        unresolvedTopics: [],
+        usedKnowledgeEntryIds: ["small-business-entry"],
+      }),
+      JSON.stringify({
+        replyAction: "SEND_REPLY",
+        text: "Поэтому я сначала уточняю вашу цель: от неё зависит, на чём лучше сосредоточиться дальше. Какую цель вы хотите решить этим бизнесом?",
+        nextInformationNeed: "GOAL",
+        conversationAction: "ANSWER",
+        qualificationMoveDecision: "ADVANCE",
+        qualificationMoveRationale: "нужно понять цель партнёра",
+        answerCoverage: "FULL",
+        unresolvedTopics: [],
+        usedKnowledgeEntryIds: [],
+      }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    const plan: ConversationResponsePlan = {
+      text: "Какую главную цель хотите решить этим бизнесом?",
+      nextInformationNeed: "GOAL",
+      asksUserQuestion: true,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: true,
+      currentUserIntent: "QUESTION",
+      currentUserQuestions: ["А это важно?"],
+      currentQuestionKind: "CONVERSATION_META",
+      currentTurnRequiresAnswer: true,
+      contextualReference: false,
+      previouslyExplainedKnowledgeEntryIds: ["small-business-entry", "guarantees-and-economics"],
+      economicsContext: buildApprovedEconomicsContext({
+        availableCapital: 300_000,
+        city: "Москва",
+        requestedUnits: 1,
+      }),
+      allowedNextInformationNeeds: ["GOAL"],
+      allowedQualificationMoves: [{
+        need: "GOAL",
+        objective: "понять цель и мотивацию человека",
+      }],
+      approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+    };
+
+    await expect(generate({
+      lead: { city: "Москва", availableCapital: 300_000 } as Lead,
+      plan,
+      recentMessages: [
+        { direction: "OUTBOUND", content: "По этому ориентиру запуск одного объекта — 180 000 ₽." },
+        { direction: "INBOUND", content: "Хорошо, у меня есть 300 000, я рассматриваю в ближайшую неделю" },
+        { direction: "OUTBOUND", content: "Какую главную цель хотите решить этим бизнесом?" },
+      ],
+    })).resolves.toMatchObject({ nextInformationNeed: "GOAL" });
+    expect(llm.callCount).toBe(2);
+    expect(JSON.parse(llm.requests[1]!.userMessage)).toMatchObject({
+      validationFeedback: expect.stringContaining("смыслу шага разговора"),
     });
   });
 

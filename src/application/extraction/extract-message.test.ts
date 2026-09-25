@@ -35,6 +35,7 @@ function structuredExtractionReply(overrides: {
   questions?: string[];
   objections?: string[];
   requiresSubstantiveAnswer?: boolean;
+  questionKind?: "CONVERSATION_META" | "BUSINESS_INFORMATION";
 } = {}): string {
   return JSON.stringify({
     intent: overrides.intent ?? "QUALIFICATION_INFORMATION",
@@ -76,6 +77,7 @@ function structuredExtractionReply(overrides: {
       previousQuestionResponse: "NOT_A_RESPONSE",
       resolvedQuestion: "",
       contextualReference: false,
+      questionKind: overrides.questionKind ?? "BUSINESS_INFORMATION",
       needsStartupScaleRecommendation: false,
       requiresSubstantiveAnswer:
         overrides.requiresSubstantiveAnswer ?? false,
@@ -94,6 +96,54 @@ it("normalizes obvious Russian phone formats deterministically", () => {
 });
 
 describe("message extraction schema", () => {
+  it("does not turn an unspecified amount or scale into a confirmed zero", async () => {
+    const output = JSON.parse(structuredExtractionReply({ intent: "QUESTION" }));
+    output.facts.budget = 0;
+    output.facts.budgetConfirmed = true;
+    output.facts.availableCapital = 0;
+    output.facts.availableCapitalConfirmed = true;
+    output.facts.capitalScope = "TOTAL_LIMIT";
+    output.facts.calculationUnits = 0;
+    const result = await createMessageExtractor({
+      llmProvider: new FakeLLMProvider([JSON.stringify(output)]),
+    })("Пока хочу понять, как устроен бизнес");
+
+    expect(result.extraction.facts).toMatchObject({
+      budget: null,
+      budgetConfirmed: false,
+      availableCapital: null,
+      availableCapitalConfirmed: false,
+      capitalScope: "UNKNOWN",
+      calculationUnits: null,
+    });
+  });
+
+  it("requires a resolved referent for a short contextual question before using it", async () => {
+    const unresolved = JSON.parse(structuredExtractionReply({
+      intent: "QUESTION",
+      questions: ["А сколько надо?"],
+      requiresSubstantiveAnswer: true,
+    }));
+    unresolved.signals.contextualReference = true;
+    unresolved.signals.questionKind = "CLARIFICATION";
+    const resolved = structuredClone(unresolved);
+    resolved.signals.resolvedQuestion = "Сколько личного времени в день потребуется партнёру?";
+    const llm = new FakeLLMProvider([
+      JSON.stringify(unresolved),
+      JSON.stringify(resolved),
+    ]);
+    const result = await createMessageExtractor({ llmProvider: llm })({
+      text: "А сколько надо?",
+      recentMessages: [{ direction: "OUTBOUND", content: "Сколько времени сможете уделять запуску?" }],
+    });
+    expect(result.extraction.signals.resolvedQuestion).toContain("времени");
+    expect(result.diagnostics).toMatchObject({
+      status: "RECOVERED",
+      attempts: 2,
+      failureReasons: ["UNRESOLVED_CONTEXTUAL_REFERENCE"],
+    });
+  });
+
   it("degrades safely after bounded malformed JSON repair attempts", async () => {
     const llm = new FakeLLMProvider(["not-json", "still-not-json"]);
 
@@ -173,6 +223,30 @@ describe("message extraction schema", () => {
       questions: [],
       objections: [],
       requiresSubstantiveAnswer: true,
+    });
+  });
+
+  it("extracts a meta-question about why the current qualification step matters", async () => {
+    const llm = new FakeLLMProvider([structuredExtractionReply({
+      intent: "QUESTION",
+      questions: ["А че это важно?"],
+      requiresSubstantiveAnswer: true,
+      questionKind: "CONVERSATION_META",
+    })]);
+
+    const result = await createMessageExtractor({ llmProvider: llm })({
+      text: "А че это важно?",
+      recentMessages: [{
+        direction: "OUTBOUND",
+        actor: "AI",
+        content: "Скажите, какой бюджет вы готовы вложить в запуск бизнеса?",
+      }],
+    });
+
+    expect(result.extraction.signals).toMatchObject({
+      questionKind: "CONVERSATION_META",
+      requiresSubstantiveAnswer: true,
+      questions: ["А че это важно?"],
     });
   });
 

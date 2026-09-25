@@ -108,6 +108,14 @@ export const extractedMessageSchema = z
         // question and avoids another union in Anthropic's schema.
         resolvedQuestion: z.string().trim().max(MAX_EXTRACTED_TEXT_LENGTH).default(""),
         contextualReference: z.boolean().default(false),
+        questionKind: z.enum([
+          "BUSINESS_INFORMATION",
+          "CONVERSATION_META",
+          "AGENT_IDENTITY",
+          "RECOMMENDATION",
+          "CLARIFICATION",
+          "NONE",
+        ]).default("BUSINESS_INFORMATION"),
         needsStartupScaleRecommendation: z.boolean().default(false),
         requiresSubstantiveAnswer: z.boolean().default(false),
       })
@@ -148,7 +156,8 @@ export type ExtractionFailureReason =
   | "MALFORMED_JSON"
   | "SCHEMA_INVALID"
   | "UNGROUNDED_SIGNALS"
-  | "CONTRADICTORY_SIGNALS";
+  | "CONTRADICTORY_SIGNALS"
+  | "UNRESOLVED_CONTEXTUAL_REFERENCE";
 
 export interface ExtractionDiagnostics {
   status: "VALID" | "RECOVERED" | "DEGRADED";
@@ -215,8 +224,11 @@ CAPITAL CONFIRMATION: when the user presents an amount as money they have, their
 - previousQuestionResponse описывает смысл CURRENT_MESSAGE относительно последнего вопроса AI/HUMAN: ANSWERED — содержательно ответил; UNSURE — прямо или по смыслу не знает ответа; DECLINED_TO_ANSWER — не хочет отвечать сейчас; CHANGED_TOPIC — переключил разговор; NOT_A_RESPONSE — предыдущего вопроса нет или сообщение к нему не относится. Не считай UNSURE заполненным qualification fact и не пытайся угадывать значение.
 - Различай тему ответа и новый вопрос. Упоминание темы одним словом или короткой фразой в ответ на вопрос AI/HUMAN не является вопросом пользователя. Если previousQuestionResponse=ANSWERED/UNSURE/DECLINED_TO_ANSWER и человек отдельно ничего не просит объяснить, questions должен быть пустым, requiresSubstantiveAnswer=false, а intent не должен быть QUESTION.
 - Если текущий вопрос использует эллипсис или ссылку на предыдущий контекст («а сколько примерно?», «а это входит?», «там сколько?»), установи contextualReference=true и запиши в resolvedQuestion его самостоятельный смысл с учётом ближайшего однозначного контекста. Не добавляй новых фактов и не усиливай требуемую точность: слова «конкретный», «точный», адрес или выбранный объект допустимы только когда их действительно указал пользователь. Для самостоятельного вопроса resolvedQuestion=null.
+- Если contextualReference=true, resolvedQuestion обязателен: укажи тему и единицу измерения, унаследованные от ближайшего однозначного хода собеседника. Не заменяй время деньгами, масштаб доходом или наоборот из-за доступных справочных данных. Если референт неоднозначен, оставь contextualReference=false и сохрани исходный вопрос для уточнения в conversation brain.
 - needsStartupScaleRecommendation=true, когда человек просит консультанта определить или посоветовать разумное количество объектов для старта, в том числе потому что сам не знает его. Это семантический сигнал запроса рекомендации, а не startingUnits: не записывай рекомендованное системой число как решение пользователя.
-- requiresSubstantiveAnswer=true, когда CURRENT_MESSAGE просит ответ, объяснение, подробности, совет, расчёт, уточнение или реакцию на возражение — даже если просьба сформулирована без вопросительного знака (например, человек просит рассказать, как устроен бизнес). Это общий conversational signal, а не классификатор темы. Не ставь его для простого ответа на предыдущий вопрос, подтверждения или нового факта без запроса к консультанту.
+- questionKind — семантическая цель текущего вопроса: BUSINESS_INFORMATION — факт/условие/экономика бизнеса; RECOMMENDATION — просьба посоветовать или выбрать вариант; CLARIFICATION — просьба уточнить уже данный ответ; CONVERSATION_META — вопрос о ходе разговора или о том, зачем нужен запрошенный факт; AGENT_IDENTITY — вопрос, общается ли человек с AI или с сотрудником. Для мета-вопросов не превращай слова из предыдущего вопроса в новую тему бизнеса и не запрашивай справку по бюджету, если человек спрашивает о смысле вопроса.
+- wantsHuman=true только при явной просьбе переключить разговор на сотрудника-человека. Вопрос о личности собеседника или о том, используется ли AI, требует честного ответа, но сам по себе не является просьбой о передаче менеджеру. AGENT_IDENTITY используй для вопроса только о личности; если пользователь одновременно явно просит переключить на человека, сохрани wantsHuman=true и классифицируй общий ход как CONVERSATION_META.
+- requiresSubstantiveAnswer=true, когда CURRENT_MESSAGE просит ответ, объяснение, подробности, совет, расчёт, уточнение или реакцию на возражение — даже если просьба сформулирована без вопросительного знака (например, человек просит рассказать, как устроен бизнес). Это общий conversational signal, а не классификатор темы. Не ставь его для простого ответа на предыдущий вопрос, подтверждения или нового факта без запроса к консультанту. Для CONVERSATION_META ставь true: conversation brain должен объяснить цель шага человеческим языком.
 - Короткий ответ интерпретируй в контексте непосредственно заданного вопроса. Если PENDING_INFORMATION_NEED=AVAILABLE_CAPITAL и ассистент спросил общий доступный капитал, названная пользователем сумма без прямого ограничения «только на услугу/первый этап» является availableCapital. Если сумма названа уверенно, без «возможно», «постараюсь найти», «наверное» и аналогичной оговорки, установи availableCapitalConfirmed=true. Формулировка «для начала» означает сумму, которую человек готов выделить на первоначальный запуск и сама по себе не является неопределённостью или оплатой только услуги команды.
 - capitalScope=ENTRY_ONLY и entryBudget используй только когда пользователь явно связал сумму с услугой команды, оплатой компании или первым этапом. Не превращай достаточно определённый ответ о капитале в дополнительный финансовый вопрос из-за одной лишь краткости формулировки.
 - Ответ «это весь бюджет», «больше этой суммы нет» или эквивалентная формулировка означает capitalScope=TOTAL_LIMIT и подтверждает ранее названный availableCapital. Сам по себе общий лимит НЕ означает отказ оплачивать аренду, залог или подготовку: additionalExpensesReadiness=NOT_READY ставь только при прямом отказе финансировать эти статьи, а не из-за отсутствия денег сверх общего бюджета.
@@ -294,6 +306,7 @@ function withExtractionDefaults(value: unknown): unknown {
           previousQuestionResponse: "NOT_A_RESPONSE",
           resolvedQuestion: "",
           contextualReference: false,
+          questionKind: "NONE",
           needsStartupScaleRecommendation: false,
           requiresSubstantiveAnswer: false,
           ...signals,
@@ -369,6 +382,10 @@ function invalidConversationSignalReasons(
     ...(hasContradictoryConversationSignals(extraction)
       ? ["CONTRADICTORY_SIGNALS" as const]
       : []),
+    ...(extraction.signals.contextualReference === true &&
+      !extraction.signals.resolvedQuestion?.trim()
+      ? ["UNRESOLVED_CONTEXTUAL_REFERENCE" as const]
+      : []),
   ];
 }
 
@@ -418,6 +435,7 @@ function sanitizeUntrustedConversationSignals(
         wantsHuman: false,
         resolvedQuestion: "",
         contextualReference: false,
+        questionKind: "NONE",
         needsStartupScaleRecommendation: false,
       },
       uncertainty: [],
@@ -625,8 +643,9 @@ export function createMessageExtractor({
           break;
         }
         failureReasons.push(...signalReasons);
-        validationFeedback =
-          "The previous output contained inconsistent conversational signals or copied/invented a question. A response to the immediately preceding AI/HUMAN question is not itself a user question merely because it mentions that topic. Populate questions only for an independent request for information in CURRENT_MESSAGE. Keep previousQuestionResponse, requiresSubstantiveAnswer and intent semantically consistent. RECENT_MESSAGES may resolve references, but their text must never be emitted as a current question or objection.";
+        validationFeedback = signalReasons.includes("UNRESOLVED_CONTEXTUAL_REFERENCE")
+          ? "The current question refers to earlier conversation but resolvedQuestion was empty. Resolve the nearest unambiguous referent from the immediately preceding AI/HUMAN turn, preserving its subject and unit (time, money, objects, income); never choose a topic solely from available business facts. If ambiguous, set contextualReference=false and let the conversation model ask for clarification."
+          : "The previous output contained inconsistent conversational signals or copied/invented a question. A response to the immediately preceding AI/HUMAN question is not itself a user question merely because it mentions that topic. Populate questions only for an independent request for information in CURRENT_MESSAGE. Keep previousQuestionResponse, requiresSubstantiveAnswer and intent semantically consistent. RECENT_MESSAGES may resolve references, but their text must never be emitted as a current question or objection.";
       } catch (error) {
         if (!(error instanceof InvalidExtractionOutputError)) throw error;
         failureReasons.push(error.reason);
@@ -678,23 +697,29 @@ export function createMessageExtractor({
       ...parsedData,
       facts: {
         ...parsedData.facts,
-        budget: hasNoLaunchCapital ? 0 : parsedData.facts.budget,
+        budget: hasNoLaunchCapital
+          ? 0
+          : parsedData.facts.budget === 0
+            ? null
+            : parsedData.facts.budget,
         budgetConfirmed: hasNoLaunchCapital
           ? true
-          : parsedData.facts.budgetConfirmed,
+          : parsedData.facts.budget === 0
+            ? false
+            : parsedData.facts.budgetConfirmed,
         phoneNumber: deterministicPhone ?? llmPhone,
         phoneConfirmed:
           deterministicPhone !== null || (llmPhone !== null && parsedData.facts.phoneConfirmed),
         availableCapital: hasNoLaunchCapital
           ? 0
-          : ambiguousServiceFeeOnly ||
+          : parsedData.facts.availableCapital === 0 || ambiguousServiceFeeOnly ||
               (parsedData.facts.availableCapital !== null &&
                 parsedData.facts.availableCapital < 0)
             ? null
             : parsedData.facts.availableCapital,
         availableCapitalConfirmed: hasNoLaunchCapital
           ? true
-          : ambiguousServiceFeeOnly
+          : parsedData.facts.availableCapital === 0 || ambiguousServiceFeeOnly
             ? false
             : parsedData.facts.availableCapitalConfirmed,
         entryBudget:
@@ -711,11 +736,13 @@ export function createMessageExtractor({
             : parsedData.facts.additionalLaunchCapital,
         calculationUnits:
           parsedData.facts.calculationUnits !== null &&
-          parsedData.facts.calculationUnits < 0
+          parsedData.facts.calculationUnits <= 0
             ? null
             : parsedData.facts.calculationUnits,
         capitalScope: hasNoLaunchCapital
           ? "TOTAL_LIMIT"
+          : parsedData.facts.availableCapital === 0
+            ? "UNKNOWN"
           : ambiguousServiceFeeOnly
             ? "ENTRY_ONLY"
             : parsedData.facts.capitalScope,

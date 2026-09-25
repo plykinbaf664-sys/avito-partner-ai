@@ -98,7 +98,7 @@ function customerFacingInsufficientCapitalDraft(
     ? formatMoney(launch.totalMin)
     : `примерно ${formatMoney(launch.totalMin)}–${formatMoney(launch.totalMax)}`;
   const units = launch.units === 1 ? "одного объекта" : `${launch.units} объектов`;
-  return `По текущему расчётному ориентиру запуск ${units} в сценарии «${scenario.label}» — ${total}. В сумму входят услуга запуска, аренда, расчётный залог и подготовка; точная смета зависит от квартиры и условий собственника. При бюджете ${formatMoney(capital)} этого недостаточно для старта по этому ориентиру.`;
+  return `Для предварительного расчёта запуск ${units} потребует ${total}: сюда входят услуга запуска, аренда, залог за один месяц и подготовка. У вас ${formatMoney(capital)}, поэтому по этому расчёту суммы пока не хватает. Фактическая смета зависит от квартиры и условий собственника.`;
 }
 
 function compactGuidanceDraft(
@@ -164,6 +164,7 @@ export interface ConversationResponsePlan {
   approvedFacts?: ApprovedKnowledgeFact[];
   currentUserIntent?: MessageIntent;
   currentUserQuestions?: string[];
+  currentQuestionKind?: ExtractedMessage["signals"]["questionKind"];
   previousQuestionResponse?: string;
   greetingRequired?: boolean;
   currentUserObjections?: string[];
@@ -181,6 +182,8 @@ export interface ConversationResponsePlan {
   groundedAnswerRequired?: boolean;
   currentTurnRequiresAnswer?: boolean;
   customerFacingDecision?: "CONTINUE" | "REJECT" | "HANDOFF";
+  customerFacingDecisionReason?: QualificationDecision["reason"];
+  serviceabilityStatus?: Lead["serviceability"];
   preferredContactTime?: string | null;
   callbackPreferenceCaptured?: boolean;
   /** Reliability of the auxiliary extractor for the current inbound turn. */
@@ -258,7 +261,11 @@ export function buildConversationResponse(params: {
   // Whether the user deserves an answer is determined by the semantic function
   // of this turn. Literal KB matching only supplies convenient fragments; it
   // must never decide whether Claude may answer from the full approved context.
-  const groundedAnswerRequired = currentTurnRequiresAnswer;
+  // A question about the conversation itself needs an honest conversational
+  // answer, not a forced citation to a business-knowledge entry.
+  const groundedAnswerRequired = currentTurnRequiresAnswer &&
+    extraction.signals.questionKind !== "CONVERSATION_META" &&
+    extraction.signals.questionKind !== "AGENT_IDENTITY";
   const customerFacingDecision: ConversationResponsePlan["customerFacingDecision"] =
     decision.nextAction === "REJECT_POLITELY"
       ? "REJECT"
@@ -300,6 +307,7 @@ export function buildConversationResponse(params: {
     postHandoffContinuation,
     currentUserIntent: extraction.intent,
     currentUserQuestions: extraction.signals.questions,
+    currentQuestionKind: extraction.signals.questionKind ?? "BUSINESS_INFORMATION",
     previousQuestionResponse: extraction.signals.previousQuestionResponse ?? "NOT_A_RESPONSE",
     greetingRequired: params.greetingRequired === true,
     currentUserObjections: extraction.signals.objections,
@@ -317,7 +325,24 @@ export function buildConversationResponse(params: {
     callbackPreferenceCaptured: params.callbackPreferenceCaptured === true,
     extractionQuality: params.extractionQuality ?? "VALID",
     customerFacingDecision,
+    customerFacingDecisionReason: decision.reason,
+    serviceabilityStatus: params.lead.serviceability,
   };
+
+  if (extraction.signals.questionKind === "AGENT_IDENTITY") {
+    return {
+      text: "Да, сейчас Вы общаетесь с AI-консультантом. Я помогу разобраться с вопросами о запуске, а если Вам удобнее разговор с человеком, передам обращение менеджеру.",
+      nextInformationNeed: null,
+      asksUserQuestion: false,
+      knowledgeEntryIds: [],
+      unresolvedQuestions: [],
+      useNaturalAdaptation: false,
+      contextualReference: false,
+      ...adaptiveContext,
+      economicsContext: undefined,
+      approvedFacts: knowledge.approvedFacts,
+    };
+  }
 
   if (decision.nextAction === "REJECT_POLITELY") {
     const compactRejectedAnswer = compactGuidanceDraft(
@@ -344,7 +369,9 @@ export function buildConversationResponse(params: {
       asksUserQuestion: false,
       knowledgeEntryIds: knowledgeEntryIdsForCurrentTurn,
       unresolvedQuestions: [],
-      useNaturalAdaptation: answerFragmentsForCurrentTurn.length > 0,
+      // The policy owns rejection, not the wording. A model can explain the
+      // approved economics naturally even when no KB fragment matched.
+      useNaturalAdaptation: true,
       contextualReference: knowledge.contextualReferenceResolved,
       ...adaptiveContext,
       economicsContext: responseEconomics,

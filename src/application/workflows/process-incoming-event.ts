@@ -75,6 +75,7 @@ export interface ProcessIncomingEventMetrics {
   responseLlmCalls: 0 | 1;
   totalInputTokens: number | null;
   totalOutputTokens: number | null;
+  responseGenerationSource?: "LLM" | "FALLBACK_DRAFT" | "POLICY_REPLY" | "SUPPRESSED" | "NO_REPLY";
 }
 
 export interface ProcessIncomingEventResult {
@@ -365,6 +366,7 @@ function buildResult({
   managerSummary = null,
   responseLlm = null,
   extractionLlmCalls,
+  responseGenerationSource,
   outOfOrderIgnored = false,
 }: {
   event: IncomingEvent;
@@ -381,6 +383,7 @@ function buildResult({
     outputTokens: number;
   } | null;
   extractionLlmCalls?: number;
+  responseGenerationSource?: ProcessIncomingEventMetrics["responseGenerationSource"];
   outOfOrderIgnored?: boolean;
 }): ProcessIncomingEventResult {
   const decision = suppliedDecision ?? (lead
@@ -433,6 +436,7 @@ function buildResult({
         event.llmOutputTokens === null
           ? null
           : event.llmOutputTokens + (responseLlm?.outputTokens ?? 0),
+      responseGenerationSource,
     },
   };
 }
@@ -458,7 +462,9 @@ interface DeferredInformationNeedMemory {
 
 interface StoredConversationMemory {
   knowledgeEntryIds: string[];
+  mostRecentKnowledgeEntryIds: string[];
   deferredInformationNeeds: DeferredInformationNeedMemory[];
+  conversationalNotes: string;
 }
 
 const DEFERRED_NEED_COOLDOWN_TURNS = 2;
@@ -466,7 +472,9 @@ const DEFERRED_NEED_COOLDOWN_TURNS = 2;
 function parseStoredConversationMemory(summary: string | null): StoredConversationMemory {
   const empty: StoredConversationMemory = {
     knowledgeEntryIds: [],
+    mostRecentKnowledgeEntryIds: [],
     deferredInformationNeeds: [],
+    conversationalNotes: "",
   };
   if (!summary) return empty;
   try {
@@ -503,7 +511,15 @@ function parseStoredConversationMemory(summary: string | null): StoredConversati
             (value): value is string => typeof value === "string",
           )
         : [],
+      mostRecentKnowledgeEntryIds: Array.isArray(record.mostRecentKnowledgeEntryIds)
+        ? record.mostRecentKnowledgeEntryIds.filter(
+            (value): value is string => typeof value === "string",
+          )
+        : [],
       deferredInformationNeeds: deferred,
+      conversationalNotes: typeof record.conversationalNotes === "string"
+        ? record.conversationalNotes.slice(0, 700)
+        : "",
     };
   } catch {
     return empty;
@@ -515,11 +531,14 @@ function rememberDeferredInformationNeed(params: {
   pendingInformationNeed: InformationNeed | null;
   previousQuestionResponse: ExtractedMessage["signals"]["previousQuestionResponse"];
   currentIntent: ExtractedMessage["intent"];
+  currentQuestionKind?: ExtractedMessage["signals"]["questionKind"];
   guidanceNeed?: InformationNeed | null;
   inboundSequence: number;
 }): StoredConversationMemory {
   const respondedToPendingTopic =
     params.pendingInformationNeed !== null &&
+    params.currentQuestionKind !== "CONVERSATION_META" &&
+    params.currentQuestionKind !== "AGENT_IDENTITY" &&
     ((params.previousQuestionResponse ?? "NOT_A_RESPONSE") !== "NOT_A_RESPONSE" ||
       params.currentIntent === "COMPLAINT");
   const needsToDefer = [
@@ -753,7 +772,8 @@ export function createIncomingEventProcessor({
       factNames: extractedFactNames(extracted.extraction),
       questionCount: extracted.extraction.signals.questions.length,
       objectionCount: extracted.extraction.signals.objections.length,
-      wantsHuman: extracted.extraction.signals.wantsHuman,
+      wantsHuman: extracted.extraction.signals.wantsHuman &&
+        extracted.extraction.signals.questionKind !== "AGENT_IDENTITY",
     });
 
     try {
@@ -875,6 +895,8 @@ export function createIncomingEventProcessor({
       const guidanceNeed =
         semanticGuidanceNeed ??
         (currentConversation.pendingInformationNeed !== null &&
+        extracted.extraction.signals.questionKind !== "CONVERSATION_META" &&
+        extracted.extraction.signals.questionKind !== "AGENT_IDENTITY" &&
         ["UNSURE", "DECLINED_TO_ANSWER"].includes(
           extracted.extraction.signals.previousQuestionResponse ??
             "NOT_A_RESPONSE",
@@ -887,6 +909,7 @@ export function createIncomingEventProcessor({
         previousQuestionResponse:
           extracted.extraction.signals.previousQuestionResponse,
         currentIntent: extracted.extraction.intent,
+        currentQuestionKind: extracted.extraction.signals.questionKind,
         guidanceNeed,
         inboundSequence,
       });
@@ -898,6 +921,7 @@ export function createIncomingEventProcessor({
         conversationMemory.knowledgeEntryIds;
       const knowledge = answerFromKnowledgeBase(extracted.extraction, {
         previousEntryIds: previouslyExplainedKnowledge,
+        recentEntryIds: conversationMemory.mostRecentKnowledgeEntryIds,
         guidanceNeed,
         recentMessages: history.map(({ direction, actor, content }) => ({ direction, actor, content })),
         leadFacts: {
@@ -909,7 +933,8 @@ export function createIncomingEventProcessor({
         },
       });
       const decision = evaluateQualification(evaluatedLead, qualificationContextForLead(evaluatedLead, {
-        wantsHuman: extracted.extraction.signals.wantsHuman,
+        wantsHuman: extracted.extraction.signals.wantsHuman &&
+          extracted.extraction.signals.questionKind !== "AGENT_IDENTITY",
         unknownBusinessQuestion: knowledge.unresolvedQuestions.length > 0,
       }));
       evaluatedLead = {
@@ -951,6 +976,7 @@ export function createIncomingEventProcessor({
         : responsePlan;
       let responseLlm: Awaited<ReturnType<NaturalResponseGenerator>> | null =
         null;
+      let responseFailureCode: string | null = null;
       if (
         !options.suppressOutbound &&
         responseGenerationPlan.useNaturalAdaptation &&
@@ -961,6 +987,7 @@ export function createIncomingEventProcessor({
           responseLlm = await generateNaturalResponse({
             lead: evaluatedLead,
             plan: responseGenerationPlan,
+            conversationMemory: storedConversationMemory.conversationalNotes,
             recentMessages: history.map(({ direction, actor, content }) => ({
               direction,
               actor,
@@ -968,12 +995,13 @@ export function createIncomingEventProcessor({
             })),
           });
         } catch (error) {
+          responseFailureCode = safeErrorCode(error);
           logger.error("response_generation.fallback", {
             eventId: registration.event.id,
             leadId: prepared.lead!.id,
             conversationId: prepared.conversation!.id,
             source: input.source,
-            errorType: safeErrorCode(error),
+            errorType: responseFailureCode,
           });
         }
       }
@@ -1034,7 +1062,8 @@ export function createIncomingEventProcessor({
           };
         }
         const transactionDecision = evaluateQualification(transactionLead, qualificationContextForLead(transactionLead, {
-          wantsHuman: extracted.extraction.signals.wantsHuman,
+          wantsHuman: extracted.extraction.signals.wantsHuman &&
+            extracted.extraction.signals.questionKind !== "AGENT_IDENTITY",
           unknownBusinessQuestion:
             knowledge.unresolvedQuestions.length > 0 ||
             responseLlm?.answerCoverage === "UNKNOWN",
@@ -1080,7 +1109,8 @@ export function createIncomingEventProcessor({
         // freely among every allowed qualification direction.
         if (
           responseLlm === null &&
-          transactionResponsePlan.qualificationProgressExpected === true
+          transactionResponsePlan.qualificationProgressExpected === true &&
+          !transactionResponsePlan.currentTurnRequiresAnswer
         ) {
           transactionNextInformationNeed =
             transactionNeeds.suggestedNextInformationNeed;
@@ -1105,7 +1135,12 @@ export function createIncomingEventProcessor({
           responseLlm.nextInformationNeed === transactionNextInformationNeed;
         const transactionOutboundText = canUseAdaptiveResponse
           ? responseLlm!.text
-          : transactionResponsePlan.text;
+          : responseLlm === null &&
+              transactionResponsePlan.currentTurnRequiresAnswer &&
+              transactionDecision.nextAction === "CONTINUE_QUALIFICATION" &&
+              transactionResponsePlan.currentQuestionKind === "CONVERSATION_META"
+            ? "Спрашиваю, чтобы лучше понять вашу ситуацию и предложить подходящий вариант, а не просто заполнить анкету. Если сейчас важнее другой вопрос, давайте сначала разберём его."
+            : transactionResponsePlan.text;
 
         const responseSuppressed =
           options.suppressOutbound === true ||
@@ -1120,12 +1155,14 @@ export function createIncomingEventProcessor({
           (responseLlm?.replyAction === "NO_REPLY" && !postHandoffSubstantiveInbound) ||
           (phoneFulfillsManagerStep && !transactionDecision.shouldHandoffToManager);
         const shouldSendOutbound = !responseSuppressed && !noAiReply;
-        const responseGenerationSource = responseSuppressed
+        const responseGenerationSource: NonNullable<ProcessIncomingEventMetrics["responseGenerationSource"]> = responseSuppressed
           ? "SUPPRESSED"
           : noAiReply
             ? "NO_REPLY"
             : responseLlm
               ? "LLM"
+              : !responseGenerationPlan.useNaturalAdaptation
+                ? "POLICY_REPLY"
               : "FALLBACK_DRAFT";
         const qualificationCompleted = responseSuppressed
           ? storedConversation.qualificationCompleted
@@ -1165,7 +1202,7 @@ export function createIncomingEventProcessor({
         );
         const storedPreviouslyExplainedKnowledge =
           storedMemory.knowledgeEntryIds;
-        const newlyExplainedKnowledge = responseSuppressed
+        const newlyExplainedKnowledge = !shouldSendOutbound
           ? []
           : responseLlm?.usedKnowledgeEntryIds ?? knowledge.entryIds;
         const explainedKnowledge = responseSuppressed
@@ -1182,9 +1219,16 @@ export function createIncomingEventProcessor({
           );
         const updatedConversationMemory: StoredConversationMemory = {
           knowledgeEntryIds: explainedKnowledge,
+          mostRecentKnowledgeEntryIds: !shouldSendOutbound
+            ? storedMemory.mostRecentKnowledgeEntryIds
+            : newlyExplainedKnowledge,
           deferredInformationNeeds: responseSuppressed
             ? storedMemory.deferredInformationNeeds
             : unresolvedDeferredInformationNeeds,
+          conversationalNotes: responseSuppressed
+            ? storedMemory.conversationalNotes
+            : responseLlm?.conversationMemory?.slice(0, 700) ??
+              storedMemory.conversationalNotes,
         };
         const managerSummary =
           !responseSuppressed &&
@@ -1503,7 +1547,7 @@ export function createIncomingEventProcessor({
         fallbackUsed: completed.responseGenerationSource === "FALLBACK_DRAFT",
         fallbackReason:
           completed.responseGenerationSource === "FALLBACK_DRAFT"
-            ? "LLM_UNAVAILABLE_OR_INVALID_OUTPUT"
+            ? responseFailureCode ?? "LLM_NOT_CONFIGURED_OR_SKIPPED"
             : null,
         responseGenerationSource: completed.responseGenerationSource,
       });
@@ -1548,6 +1592,7 @@ export function createIncomingEventProcessor({
         outboundMessage: completed.outboundText,
         managerSummary: completed.managerSummary,
         responseLlm,
+        responseGenerationSource: completed.responseGenerationSource,
       });
     } catch (error) {
       await persistence.incomingEvents.markFailed(

@@ -114,6 +114,212 @@ describe("multi-turn qualification conversation", () => {
       .toBe("CITY");
   });
 
+  it("keeps neutral discovery separate from finance-focused retrieval", async () => {
+    const naturalResponse = vi.fn().mockResolvedValue({
+      text: "Здравствуйте! В каком городе Вы рассматриваете запуск?",
+      nextInformationNeed: "CITY",
+      replyAction: "SEND_REPLY",
+    });
+    const { llm } = harness([reply({ intent: "GREETING" })]);
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse: naturalResponse,
+      generateId: () => `context-test-${++nextId}`,
+      now: () => new Date("2026-09-01T10:00:00Z"),
+    });
+
+    await processEvent(input(1, "Здравствуйте"));
+
+    expect(naturalResponse).toHaveBeenCalledOnce();
+    const plan = naturalResponse.mock.calls[0]?.[0]?.plan;
+    expect(plan?.economicsContext).toBeUndefined();
+    expect(naturalResponse.mock.calls[0]?.[0]?.lead).toBeTruthy();
+  });
+
+  it("keeps insufficient-capital verdict deterministic but lets the conversation brain explain it", async () => {
+    const naturalResponse = vi.fn().mockResolvedValue({
+      text: "Для запуска одного объекта по предварительному расчёту понадобится около 150 000 ₽, поэтому 100 000 ₽ сейчас не хватит. Если возможности изменятся, можно вернуться к разговору.",
+      nextInformationNeed: null,
+      replyAction: "SEND_REPLY",
+    });
+    const { llm } = harness([reply({ facts: {
+      city: "Нижний Новгород",
+      availableCapital: 100_000,
+      availableCapitalConfirmed: true,
+      capitalScope: "TOTAL_LIMIT",
+    } })]);
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse: naturalResponse,
+      generateId: () => `verdict-test-${++nextId}`,
+      now: () => new Date("2026-09-01T10:00:00Z"),
+    });
+
+    const result = await processEvent(input(1, "Нижний Новгород, на запуск есть 100 тысяч"));
+
+    expect(result).toMatchObject({
+      qualificationStatus: "NO_FIT",
+      qualificationReason: "INSUFFICIENT_LAUNCH_CAPITAL",
+    });
+    expect(naturalResponse).toHaveBeenCalledOnce();
+    expect(result.outboundMessage).toContain("150 000 ₽");
+    expect(result.outboundMessage).not.toContain("Региональный ориентир");
+  });
+
+  it("keeps the emergency NO_FIT reply free of internal scenario labels", async () => {
+    const { processEvent } = harness([reply({ facts: {
+      city: "Нижний Новгород",
+      availableCapital: 100_000,
+      availableCapitalConfirmed: true,
+      capitalScope: "TOTAL_LIMIT",
+    } })]);
+
+    const result = await processEvent(input(1, "Нижний Новгород, бюджет 100 тысяч"));
+
+    expect(result.qualificationStatus).toBe("NO_FIT");
+    expect(result.outboundMessage).toContain("150 000 ₽");
+    expect(result.outboundMessage).not.toContain("Региональный ориентир");
+    expect(result.outboundMessage).not.toContain("сценарии");
+  });
+
+  it("carries conversational notes between turns without treating them as lead facts", async () => {
+    const naturalResponse = vi.fn()
+      .mockResolvedValueOnce({
+        text: "Здравствуйте! В каком городе Вы рассматриваете запуск?",
+        nextInformationNeed: "CITY",
+        replyAction: "SEND_REPLY",
+        conversationMemory: "Клиент начал знакомство; город пока не назван.",
+      })
+      .mockResolvedValueOnce({
+        text: "Москва подходит. Что Вам важно узнать о формате в первую очередь?",
+        nextInformationNeed: null,
+        replyAction: "SEND_REPLY",
+        conversationMemory: "Клиент назвал Москву; хочет сначала разобраться в формате.",
+      });
+    const { llm } = harness([
+      reply({ intent: "GREETING" }),
+      reply({ intent: "QUALIFICATION_INFORMATION", facts: { city: "Москва" },
+        signals: { previousQuestionResponse: "ANSWERED" } }),
+    ]);
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse: naturalResponse,
+      generateId: () => `memory-test-${++nextId}`,
+      now: () => new Date("2026-09-01T10:00:00Z"),
+    });
+
+    await processEvent(input(1, "Здравствуйте"));
+    const second = await processEvent(input(2, "Москва"));
+
+    expect(naturalResponse).toHaveBeenCalledTimes(2);
+    expect(naturalResponse.mock.calls[1]?.[0]?.conversationMemory)
+      .toContain("Клиент начал знакомство");
+    expect(second.qualificationStatus).not.toBe("NO_FIT");
+    expect((await persistence.leads.findById(second.leadId!))?.city).toBe("Москва");
+  });
+
+  it("does not turn a question about the previous qualification step into a refusal to answer it", async () => {
+    const naturalResponse = vi.fn()
+      .mockResolvedValueOnce({
+        text: "В каком городе Вы рассматриваете запуск?",
+        nextInformationNeed: "CITY",
+        replyAction: "SEND_REPLY",
+      })
+      .mockResolvedValueOnce({
+        text: "Спрашиваю о городе, чтобы понять, можем ли мы помочь с запуском именно там. Где Вы планируете начать?",
+        nextInformationNeed: "CITY",
+        replyAction: "SEND_REPLY",
+      });
+    const { llm } = harness([
+      reply({ intent: "GREETING" }),
+      reply({ intent: "QUESTION", signals: {
+        questions: ["Почему важно знать город?"],
+        questionKind: "CONVERSATION_META",
+        previousQuestionResponse: "DECLINED_TO_ANSWER",
+        requiresSubstantiveAnswer: true,
+      } }),
+    ]);
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse: naturalResponse,
+      generateId: () => `meta-need-test-${++nextId}`,
+      now: () => new Date("2026-09-01T10:00:00Z"),
+    });
+
+    const first = await processEvent(input(1, "Здравствуйте"));
+    const second = await processEvent(input(2, "Почему важно знать город?"));
+
+    expect(first.suggestedNextInformationNeed).toBe("CITY");
+    expect(second.extraction?.signals.questionKind).toBe("CONVERSATION_META");
+    expect(naturalResponse).toHaveBeenCalledTimes(2);
+    expect(naturalResponse.mock.calls[1]?.[0]?.plan.allowedNextInformationNeeds).toContain("CITY");
+    expect(second.outboundMessage).toContain("Спрашиваю о городе");
+    expect((await persistence.conversations.findById(second.conversationId!))?.pendingInformationNeed)
+      .toBe("CITY");
+  });
+
+  it("does not replace a substantive user question with an unrelated questionnaire fallback", async () => {
+    const naturalResponse = vi.fn()
+      .mockResolvedValueOnce({
+        text: "В каком городе Вы хотите запустить бизнес?",
+        nextInformationNeed: "CITY",
+        replyAction: "SEND_REPLY",
+      })
+      .mockRejectedValueOnce(new Error("RESPONSE_POLICY_VIOLATION"));
+    const { llm } = harness([
+      reply({ intent: "GREETING" }),
+      reply({ intent: "QUESTION", signals: {
+        questions: ["Почему Вы спрашиваете?"],
+        questionKind: "CONVERSATION_META",
+        requiresSubstantiveAnswer: true,
+      } }),
+    ]);
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse: naturalResponse,
+      generateId: () => `fallback-intent-test-${++nextId}`,
+      now: () => new Date("2026-09-01T10:00:00Z"),
+    });
+
+    await processEvent(input(1, "Здравствуйте"));
+    const second = await processEvent(input(2, "Почему Вы спрашиваете?"));
+
+    expect(second.outboundMessage).toMatch(/спрашива|вопрос|уточн/iu);
+    expect(second.outboundMessage).not.toMatch(/бюджет|сколько денег|запуск одного объекта/iu);
+    expect((await persistence.conversations.findById(second.conversationId!))?.pendingInformationNeed)
+      .toBeNull();
+  });
+
+  it("answers assistant-identity questions truthfully without treating them as a handoff request", async () => {
+    const naturalResponse = vi.fn();
+    const { llm } = harness([reply({
+      intent: "QUESTION",
+      signals: {
+        questions: ["Я с ботом разговариваю?"],
+        questionKind: "AGENT_IDENTITY",
+        requiresSubstantiveAnswer: true,
+        wantsHuman: true,
+      },
+    })]);
+    const processEvent = createIncomingEventProcessor({
+      persistence,
+      extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse: naturalResponse,
+      generateId: () => `identity-test-${++nextId}`,
+      now: () => new Date("2026-09-01T10:00:00Z"),
+    });
+    const result = await processEvent(input(1, "Я с ботом разговариваю?"));
+    expect(result.outboundMessage).toMatch(/AI-консультантом/iu);
+    expect(result.shouldHandoffToManager).toBe(false);
+    expect(result.metrics.responseGenerationSource).toBe("POLICY_REPLY");
+    expect(naturalResponse).not.toHaveBeenCalled();
+  });
+
   it("does not reject a lead who is unsure how many objects to start with", async () => {
     const { processEvent } = harness([
       reply({

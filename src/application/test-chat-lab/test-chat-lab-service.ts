@@ -66,6 +66,16 @@ export function createTestChatLabService({
 }: TestChatLabDependencies) {
   let virtualNow = new Date();
   let lastProcessing: TestChatLabSnapshot["lastProcessing"] = null;
+  let responseFailureCode: string | null = null;
+  const diagnosticLogger: StructuredLogger = {
+    info: (event, fields) => logger?.info(event, fields),
+    error: (event, fields) => {
+      if (event === "response_generation.fallback" && typeof fields.errorType === "string") {
+        responseFailureCode = fields.errorType;
+      }
+      logger?.error(event, fields);
+    },
+  };
   const extractMessage = createMessageExtractor({ llmProvider });
   const generateNaturalResponse = createNaturalResponseGenerator({ llmProvider });
   const processIncomingEvent = createIncomingEventProcessor({
@@ -74,7 +84,7 @@ export function createTestChatLabService({
     generateNaturalResponse,
     outboundProvider,
     managerNotificationProvider,
-    logger,
+    logger: diagnosticLogger,
     now: () => virtualNow,
     monotonicNow: () => performance.now(),
   });
@@ -152,8 +162,9 @@ export function createTestChatLabService({
     };
   }
 
-  async function clientMessage(sessionId: string, text: string, now: Date, turnId = generateId()): Promise<TestChatLabActionResult> {
+  async function clientMessage(sessionId: string, text: string, now: Date, turnId = generateId(), suppressOutbound = false): Promise<TestChatLabActionResult> {
     setTime(now);
+    responseFailureCode = null;
     const result: ProcessIncomingEventResult = await processIncomingEvent({
       source: TEST_CHAT_LAB_SOURCE,
       externalEventId: `${sessionId}:client:${turnId}`,
@@ -162,11 +173,13 @@ export function createTestChatLabService({
       text,
       rawPayload: { testChatLab: true, actor: "USER" },
       receivedAt: now,
-    });
+    }, { suppressOutbound });
     lastProcessing = {
       outboundMessage: result.outboundMessage,
       replyAction: result.outboundMessage === null ? "NO_REPLY" : "SEND_REPLY",
       eventStatus: result.eventStatus,
+      responseFailureCode,
+      responseGenerationSource: result.metrics.responseGenerationSource ?? null,
     };
     return { snapshot: await snapshot(sessionId), followUp: null };
   }
@@ -203,10 +216,17 @@ export function createTestChatLabService({
     if (!scenario) throw new Error("TEST_CHAT_LAB_SCENARIO_NOT_FOUND");
     let result: TestChatLabActionResult = { snapshot: await snapshot(sessionId), followUp: null };
     for (const [index, step] of scenario.steps.entries()) {
-      const at = new Date(startAt.getTime() + index * 60_000);
+      const isBurst = "burst" in scenario && scenario.burst === true;
+      const at = new Date(startAt.getTime() + (isBurst ? 0 : index * 60_000));
       result = step.actor === "MANAGER"
         ? await managerMessage(sessionId, step.text, at, `${scenarioId}-${index}`)
-        : await clientMessage(sessionId, step.text, at, `${scenarioId}-${index}`);
+        : await clientMessage(
+            sessionId,
+            step.text,
+            at,
+            `${scenarioId}-${index}`,
+            isBurst && index < scenario.steps.length - 1,
+          );
     }
     return result;
   }

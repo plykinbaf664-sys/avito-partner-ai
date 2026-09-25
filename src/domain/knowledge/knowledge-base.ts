@@ -296,6 +296,7 @@ export interface KnowledgeAnswer {
 
 export interface KnowledgeConversationContext {
   previousEntryIds?: readonly string[];
+  recentEntryIds?: readonly string[];
   recentMessages?: readonly { direction: "INBOUND" | "OUTBOUND"; content: string }[];
   rentReference?: RentRangeReference;
   guidanceNeed?: InformationNeed | null;
@@ -336,6 +337,8 @@ export function answerFromKnowledgeBase(
   context: KnowledgeConversationContext = {},
 ): KnowledgeAnswer {
   const previousQuestionResponse = extraction.signals.previousQuestionResponse ?? "NOT_A_RESPONSE";
+  const conversationMetaQuestion = extraction.signals.questionKind === "CONVERSATION_META" ||
+    extraction.signals.questionKind === "AGENT_IDENTITY";
   const answeredPreviousQuestion = ["ANSWERED", "UNSURE", "DECLINED_TO_ANSWER"].includes(previousQuestionResponse);
   const canContainIndependentQuestion =
     extraction.signals.requiresSubstantiveAnswer === true ||
@@ -344,14 +347,24 @@ export function answerFromKnowledgeBase(
   // assistant asked about goals) is conversation evidence, not a KB query.
   // The extractor retries this inconsistent shape; this guard also prevents a
   // stale or imported extraction from triggering an unrelated knowledge dump.
-  const currentQuestions = canContainIndependentQuestion
+  const currentQuestions = canContainIndependentQuestion && !conversationMetaQuestion
     ? extraction.signals.questions
     : [];
   const hasNewQuestion = currentQuestions.length > 0;
+  const resolvedContextualQuestion = extraction.signals.contextualReference === true &&
+    extraction.signals.resolvedQuestion?.trim()
+    ? extraction.signals.resolvedQuestion.trim()
+    : null;
+  // An elliptical surface form has no independent business topic. Once the
+  // semantic interpreter resolves its referent, route knowledge on that
+  // resolved meaning, not on isolated words in the surface utterance.
+  const semanticQuestions = resolvedContextualQuestion
+    ? [resolvedContextualQuestion]
+    : currentQuestions;
   const userStatements = [
-    ...currentQuestions,
+    ...semanticQuestions,
     ...extraction.signals.objections,
-    ...(extraction.signals.resolvedQuestion && (!answeredPreviousQuestion || hasNewQuestion)
+    ...(!resolvedContextualQuestion && !conversationMetaQuestion && extraction.signals.resolvedQuestion && (!answeredPreviousQuestion || hasNewQuestion)
       ? [extraction.signals.resolvedQuestion]
       : []),
   ].flatMap(questionParts);
@@ -370,6 +383,7 @@ export function answerFromKnowledgeBase(
     ),
   );
   const contextualReference =
+    !conversationMetaQuestion &&
     (!answeredPreviousQuestion || hasNewQuestion) && (
       extraction.signals.contextualReference === true ||
       userStatements.some((statement) =>
@@ -382,11 +396,15 @@ export function answerFromKnowledgeBase(
   const latestOutbound = context.recentMessages?.findLast(
     (message) => message.direction === "OUTBOUND",
   );
-  const recentGroundedCandidates = latestOutbound
+  const recentGroundedCandidates = context.recentEntryIds?.length
     ? PARTNER_KNOWLEDGE_BASE.filter((entry) =>
-      entry.matches(normalizeQuestion(latestOutbound.content)),
+      context.recentEntryIds?.includes(entry.id),
     )
-    : [];
+    : latestOutbound
+      ? PARTNER_KNOWLEDGE_BASE.filter((entry) =>
+        entry.matches(normalizeQuestion(latestOutbound.content)),
+      )
+      : [];
   // A direct answer to the current question has priority. Previous topics are
   // retrieval context only when the current wording is genuinely elliptical;
   // a pronoun such as "это" must not drag an unrelated old topic into a clear
@@ -394,7 +412,14 @@ export function answerFromKnowledgeBase(
   const previousCandidates = contextualReference && directCandidates.length === 0
     ? (recentGroundedCandidates.length > 0
       ? recentGroundedCandidates.slice(0, 3)
-      : allPreviousCandidates.slice(-1))
+      // If there is a latest outbound turn but it does not map to an approved
+      // knowledge entry, the reference is conversational (for example a
+      // question about why we ask something), not a request to replay an old
+      // economics answer. Never revive stale entries just because they were
+      // explained earlier in the conversation.
+      : latestOutbound === undefined
+        ? allPreviousCandidates.slice(-1)
+        : [])
     : [];
   const candidates = [...new Map([...directCandidates, ...previousCandidates]
     .map((entry) => [entry.id, entry])).values()];

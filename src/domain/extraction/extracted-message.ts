@@ -150,6 +150,14 @@ export interface ExtractedSignals {
   /** Standalone meaning of an elliptical/contextual user question. */
   resolvedQuestion?: string | null;
   contextualReference?: boolean;
+  /** Semantic target of a substantive question, independent of its wording. */
+  questionKind?:
+    | "BUSINESS_INFORMATION"
+    | "CONVERSATION_META"
+    | "AGENT_IDENTITY"
+    | "RECOMMENDATION"
+    | "CLARIFICATION"
+    | "NONE";
   /** User asks the consultant to recommend/derive a sensible starting scale. */
   needsStartupScaleRecommendation?: boolean;
   /**

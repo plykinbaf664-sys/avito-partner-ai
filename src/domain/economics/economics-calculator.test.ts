@@ -166,4 +166,13 @@ describe("partner economics calculator", () => {
     expect(context.scenarios.map((scenario) => scenario.requestedUnitsLaunch))
       .toEqual([null, null]);
   });
+
+  it("uses only the regional preliminary reference when a non-Moscow city is known", () => {
+    const context = buildApprovedEconomicsContext({
+      city: "Нижний Новгород",
+      availableCapital: 100_000,
+    });
+    expect(context.scenarios).toHaveLength(1);
+    expect(context.scenarios[0]?.oneObjectLaunch?.totalMin).toBe(150_000);
+  });
 });

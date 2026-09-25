@@ -261,6 +261,8 @@ export function buildApprovedEconomicsContext(input: {
     ? [explicitReference]
     : cityReference
       ? [cityReference]
+      : input.city
+        ? [APPROVED_REGIONAL_RENT_REFERENCE]
       : [APPROVED_REGIONAL_RENT_REFERENCE, APPROVED_MOSCOW_RENT_REFERENCE];
   const uniqueReferences = [...new Map(references.map((reference) => [
     `${reference.city ?? reference.region}:${reference.rentMin}:${reference.rentMax}`,
