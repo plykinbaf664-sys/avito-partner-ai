@@ -1205,13 +1205,11 @@ export function createIncomingEventProcessor({
           options.suppressOutbound === true ||
           (prepared.inboundSequence !== null &&
             prepared.inboundSequence < storedConversation.nextInboundSequence);
-        const postHandoffSubstantiveInbound =
-          storedLead.handoffAt !== null &&
-          (extractedFactNames(extracted.extraction).length > 0 ||
-            extracted.extraction.signals.questions.length > 0 ||
-            extracted.extraction.signals.objections.length > 0);
+        // The conversation generator validates whether this turn needs an
+        // answer. Extraction defaults and repeated known facts are not new
+        // conversational content and must not turn NO_REPLY into draft copy.
         const noAiReply =
-          (responseLlm?.replyAction === "NO_REPLY" && !postHandoffSubstantiveInbound) ||
+          responseLlm?.replyAction === "NO_REPLY" ||
           (phoneFulfillsManagerStep && !transactionDecision.shouldHandoffToManager);
         const shouldSendOutbound = !responseSuppressed && !noAiReply;
         const responseGenerationSource: NonNullable<ProcessIncomingEventMetrics["responseGenerationSource"]> = responseSuppressed

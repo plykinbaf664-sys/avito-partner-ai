@@ -128,7 +128,8 @@ export function createTestChatLabService({
     const needs = assessInformationNeeds(lead);
     const latestInbound = latest(messages, (message) => message.direction === "INBOUND");
     const latestAi = latest(messages, (message) => message.direction === "OUTBOUND" && message.actor === "AI");
-    const replyAction = latestAi && (!latestInbound || latestAi.createdAt.getTime() >= latestInbound.createdAt.getTime()) ? "SEND_REPLY" : "NO_REPLY";
+    // Virtual Lab turns may share a timestamp; repository order breaks ties.
+    const replyAction = latestAi && (!latestInbound || messages.indexOf(latestAi) > messages.indexOf(latestInbound)) ? "SEND_REPLY" : "NO_REPLY";
     const notification = await persistence.managerNotifications.findByIdempotencyKey(`manager-handoff:${lead.id}`);
     return {
       sessionId,

@@ -90,6 +90,78 @@ describe("isolated Test Chat Lab workflow", () => {
   });
   afterEach(() => persistence.close());
 
+  async function handedOffSession(replies: string[]) {
+    const facts: Partial<ExtractedFacts> = {
+      city: "Москва", availableCapital: 300_000, availableCapitalConfirmed: true,
+      businessModelReadiness: "ACCEPTS", additionalExpensesReadiness: "READY",
+      primaryGoal: "EARN_INCOME", launchTiming: "READY_NOW", managementReadiness: "READY",
+    };
+    const llm = new FakeLLMProvider([
+      extractionReply(facts), naturalReply("Здравствуйте! На какой номер менеджер может Вам позвонить?", "PHONE_NUMBER"),
+      extractionReply({ phoneNumber: "+79991234567", phoneConfirmed: true }),
+      extractionReply({}, { previousQuestionResponse: "ANSWERED" }, "CONFIRMATION"),
+      JSON.stringify({ text: "Менеджер свяжется с Вами, чтобы обсудить запуск.",
+        conversationMemory: "Контакт передан. Время клиент согласует с менеджером. Диалог завершён." }),
+      ...replies,
+    ]);
+    const outbound = new FakeOutboundProvider();
+    const notifications = new FakeManagerNotificationProvider();
+    const lab = createTestChatLabService({ persistence, llmProvider: llm,
+      outboundProvider: outbound, managerNotificationProvider: notifications });
+    await lab.clientMessage("closing-regression", "Москва, есть 300 тысяч, готов запускаться", at(0), "start");
+    await lab.clientMessage("closing-regression", "+79991234567", at(0), "phone");
+    await lab.clientMessage("closing-regression", "Время с менеджером согласую", at(0), "callback");
+    expect(notifications.requests).toHaveLength(1);
+    return { lab, llm, outbound, notifications };
+  }
+
+  it.each([{}, { city: "Москва", availableCapital: 300_000, availableCapitalConfirmed: true }])(
+    "respects a contextual no-reply after handoff despite extraction defaults or repeated facts: %j",
+    async (facts) => {
+      const { lab, outbound, notifications } = await handedOffSession([
+        extractionReply(facts, { previousQuestionResponse: "ANSWERED" }, "CONFIRMATION"),
+        JSON.stringify({ replyAction: "NO_REPLY", text: "", conversationAction: "NO_REPLY" }),
+      ]);
+      const sentBefore = outbound.requests.length;
+      const result = await lab.clientMessage("closing-regression", "Прекрасно", at(0), "closing");
+      expect(result.snapshot.lastProcessing).toMatchObject({
+        outboundMessage: null, replyAction: "NO_REPLY", responseGenerationSource: "NO_REPLY",
+      });
+      expect(result.snapshot.replyAction).toBe("NO_REPLY");
+      expect(outbound.requests).toHaveLength(sentBefore);
+      expect(notifications.requests).toHaveLength(1);
+    },
+  );
+
+  it("reopens a completed conversation for questions about the AI's own wording without another handoff", async () => {
+    const noReply = JSON.stringify({ replyAction: "NO_REPLY", text: "", conversationAction: "NO_REPLY" });
+    const { lab, llm, outbound, notifications } = await handedOffSession([
+      extractionReply({}, {}, "CONFIRMATION"), naturalReply("Понял, учту."),
+      extractionReply({}, { questionKind: "CONVERSATION_META", requiresSubstantiveAnswer: true,
+        questions: ["Что именно учтёшь?"] }, "QUESTION"),
+      noReply, naturalReply("Неудачно выразился: новых пожеланий Вы не сообщали, записывать здесь нечего."),
+      extractionReply({}, { questionKind: "NONE", requiresSubstantiveAnswer: true }, "QUESTION"),
+      noReply, JSON.stringify({ text: "Я лишь отреагировал на Ваше согласие. Про учёт написал не к месту, извините.", conversationAction: "REPAIR" }),
+    ]);
+    await lab.clientMessage("closing-regression", "Прекрасно", at(0), "closing");
+    for (const [turn, text] of [
+      ["question", "Что именно учтёшь?"],
+      ["clarification", "ты мне написал типа понял учту, это к чему было?"],
+    ]) {
+      const result = await lab.clientMessage("closing-regression", text!, at(0), turn);
+      expect(result.snapshot.lastProcessing).toMatchObject({ responseGenerationSource: "LLM", responseFailureCode: null });
+      expect(result.snapshot.lastProcessing?.outboundMessage).not.toMatch(/уточните|что.*имеете в виду/iu);
+    }
+    const retried = llm.requests.map((r) => JSON.parse(r.userMessage))
+      .filter((r) => r.validationFeedback);
+    expect(retried).toHaveLength(2);
+    expect(retried[0].currentExchange.previousSpeakerTurn).toBe("Понял, учту.");
+    expect(retried[0].currentExchange.previousUserTurn).toEqual(["Прекрасно"]);
+    expect(retried[1].currentExchange.activeUserTurn).toContain("ты мне написал типа понял учту, это к чему было?");
+    expect(outbound.requests).toHaveLength(6);
+    expect(notifications.requests).toHaveLength(1);
+  });
+
   it("shows the open conversation when an older one closed at the same virtual time", async () => {
     const lead = createInitialLead("lead-snapshot", TEST_CHAT_LAB_SOURCE, "session-snapshot", at(0));
     await persistence.leads.insert(lead);

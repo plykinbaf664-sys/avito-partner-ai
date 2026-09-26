@@ -1643,6 +1643,30 @@ describe("natural response generation", () => {
     })).resolves.toMatchObject({ replyAction: "NO_REPLY", text: "", nextInformationNeed: null });
   });
 
+  it("retries silence on a post-handoff complaint even without an extracted question", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ replyAction: "NO_REPLY", text: "", conversationAction: "NO_REPLY" }),
+      JSON.stringify({ text: "Извините, я неудачно отреагировал на Ваше согласие. Новых пожеланий Вы не сообщали.", conversationAction: "REPAIR" }),
+    ]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: {} as Lead,
+      plan: {
+        text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, postHandoffContinuation: true,
+        currentUserIntent: "COMPLAINT", currentTurnRequiresAnswer: false, conversationRepairRequired: true,
+      },
+      conversationMemory: "Разговор завершён.",
+      recentMessages: [
+        { direction: "INBOUND", content: "Хорошо, спасибо" },
+        { direction: "OUTBOUND", content: "Запомнил." },
+        { direction: "INBOUND", content: "Странная реакция, я ничего нового не сообщал" },
+      ],
+    });
+    expect(result).toMatchObject({ replyAction: "SEND_REPLY", conversationAction: "REPAIR" });
+    expect(llm.callCount).toBe(2);
+    expect(JSON.parse(llm.requests[1]!.userMessage).currentExchange.previousUserTurn).toEqual(["Хорошо, спасибо"]);
+  });
+
   it("does not ask for callback time again after the preference was captured", async () => {
     const repeated = "Менеджер свяжется с вами. В какой день и время вам удобно принять звонок?";
     const confirmation = "Спасибо, зафиксировал: завтра в 10 утра по Москве. Менеджер свяжется с вами в это время.";
