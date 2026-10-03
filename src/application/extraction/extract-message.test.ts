@@ -96,6 +96,19 @@ it("normalizes obvious Russian phone formats deterministically", () => {
 });
 
 describe("message extraction schema", () => {
+  it("provides approved semantic sources and discards invented source IDs without losing the question", async () => {
+    const output = JSON.parse(structuredExtractionReply({
+      intent: "QUESTION", questions: ["С чего начать"], requiresSubstantiveAnswer: true,
+    }));
+    output.signals.knowledgeEntryIds = ["launch-process", "invented-contract", "launch-process"];
+    const llm = new FakeLLMProvider([JSON.stringify(output)]);
+    const result = await createMessageExtractor({ llmProvider: llm })("С чего начать");
+    expect(result.extraction.signals.knowledgeEntryIds).toEqual(["launch-process"]);
+    expect(result.extraction.signals.questions).toEqual(["С чего начать"]);
+    expect(result.diagnostics?.status).toBe("VALID");
+    expect(JSON.parse(llm.requests[0]!.userMessage).APPROVED_KNOWLEDGE)
+      .toEqual(expect.arrayContaining([expect.objectContaining({ id: "launch-process" })]));
+  });
   it("does not persist zero component budgets invented for a question with no capital claim", async () => {
     const output = JSON.parse(structuredExtractionReply({
       intent: "QUESTION",

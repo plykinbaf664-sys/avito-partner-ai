@@ -137,6 +137,8 @@ export interface ExtractedFacts {
 
 export interface ExtractedSignals {
   questions: string[];
+  /** Approved KB entries that answer the current request, selected semantically. */
+  knowledgeEntryIds?: string[];
   objections: string[];
   possiblePrimaryFear: BusinessBarrier | null;
   possibleSecondaryFear: BusinessBarrier | null;

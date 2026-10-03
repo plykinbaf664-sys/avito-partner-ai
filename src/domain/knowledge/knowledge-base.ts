@@ -393,6 +393,17 @@ export function answerFromKnowledgeBase(
       entry.matches(normalizeQuestion(statement)),
     ),
   );
+  // The semantic interpreter supplies an ordered, minimal set for the current
+  // request. Legacy lexical retrieval remains a convenience when no selection
+  // is available; it cannot override the meaning of a semantic selection.
+  const semanticCandidates = canContainIndependentQuestion && !conversationMetaQuestion &&
+    (extraction.intent === "QUESTION" || extraction.signals.requiresSubstantiveAnswer === true ||
+      currentQuestions.length > 0 || extraction.signals.objections.length > 0)
+    ? (extraction.signals.knowledgeEntryIds ?? []).flatMap((id) => {
+        const entry = PARTNER_KNOWLEDGE_BASE.find((candidate) => candidate.id === id);
+        return entry ? [entry] : [];
+      })
+    : [];
   const directCandidates = PARTNER_KNOWLEDGE_BASE.filter((entry) =>
     userStatements.some((statement) =>
       entry.matches(normalizeQuestion(statement)),
@@ -437,7 +448,9 @@ export function answerFromKnowledgeBase(
         ? allPreviousCandidates.slice(-1)
         : [])
     : [];
-  const candidates = [...new Map((referentEntryIds.length > 0
+  const candidates = [...new Map((semanticCandidates.length > 0
+    ? semanticCandidates
+    : referentEntryIds.length > 0
     ? PARTNER_KNOWLEDGE_BASE.filter((entry) => referentEntryIds.includes(entry.id))
     : [...directCandidates, ...previousCandidates])
     .map((entry) => [entry.id, entry])).values()];

@@ -90,6 +90,108 @@ describe("isolated Test Chat Lab workflow", () => {
   });
   afterEach(() => persistence.close());
 
+  it("reviews practical advice in a multi-turn workflow before delivery and retains idempotency", async () => {
+    const supported = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
+      optionalQuestionAppropriate: true, feedback: "" });
+    const llm = new FakeLLMProvider([
+      extractionReply({ city: "Пермь", availableCapital: 150_000, availableCapitalConfirmed: true },
+        { questions: ["Как найти объект и клиентов?"], requiresSubstantiveAnswer: true,
+          knowledgeEntryIds: ["launch-process", "company-responsibilities"] }, "QUESTION"),
+      JSON.stringify({ text: "", answerText: "Команда помогает подобрать объект и разместить объявления. Гостей и бронирования ведёт администратор.",
+        qualificationQuestion: "", usedKnowledgeEntryIds: ["launch-process", "company-responsibilities"] }),
+      supported,
+      extractionReply({}, { questions: ["С чего начать"], questionKind: "CONVERSATION_META", requiresSubstantiveAnswer: true }, "QUESTION"),
+      JSON.stringify({ text: "", answerText: "Первый шаг — встреча с менеджером для показа квартир в Перми.",
+        qualificationQuestion: "", interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["launch-process"] }),
+      JSON.stringify({ answerIsSupported: false, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        feedback: "Обязательная встреча и показ квартир не утверждены; первый практический шаг — подбор объекта." }),
+      JSON.stringify({ text: "", answerText: "Начните с выбора подходящей квартиры при помощи команды, затем подготовьте объект к запуску.",
+        qualificationQuestion: "", interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["launch-process"] }),
+      supported,
+    ]);
+    const outbound = new FakeOutboundProvider();
+    const notifications = new FakeManagerNotificationProvider();
+    const lab = createTestChatLabService({ persistence, llmProvider: llm,
+      outboundProvider: outbound, managerNotificationProvider: notifications });
+    await lab.managerMessage("reviewed-operations", "Здравствуйте! Расскажу о запуске и отвечу на Ваши вопросы.", at(0), "manager");
+    const first = await lab.clientMessage("reviewed-operations", "Пермь, бюджет 150000. Как найти объект и клиентов?", at(0.01), "operations");
+    expect(first.snapshot.lastProcessing?.outboundMessage).toMatch(/подобрать.*объявления.*администратор/iu);
+    const next = await lab.clientMessage("reviewed-operations", "С чего начать", at(0.02), "practical");
+    expect(next.snapshot.lastProcessing).toMatchObject({ responseGenerationSource: "LLM", responseFailureCode: null });
+    expect(next.snapshot.lastProcessing?.outboundMessage).toMatch(/выбора.*квартиры/iu);
+    expect(outbound.requests.map((request) => request.text).join(" ")).not.toMatch(/встреча|показа/iu);
+    const calls = llm.callCount;
+    await lab.clientMessage("reviewed-operations", "С чего начать", at(0.02), "practical");
+    expect(llm.callCount).toBe(calls);
+    expect(outbound.requests).toHaveLength(2);
+    expect(notifications.requests).toHaveLength(0);
+    expect(llm.requests.filter((request) => JSON.parse(request.userMessage).purpose === "ANSWER_SEMANTIC_REVIEW")).toHaveLength(3);
+  });
+
+  it("answers every known part of a compound request when generation is unavailable", async () => {
+    const text = "Своей квартиры нет, я смогу видеть брони и сколько времени это будет отнимать?";
+    const llm = new FakeLLMProvider([
+      extractionReply({}, { questions: [text], requiresSubstantiveAnswer: true,
+        knowledgeEntryIds: ["property-not-required", "crm-visibility", "partner-time"] }, "QUESTION"),
+      new Error("MODEL_UNAVAILABLE"),
+    ]);
+    const lab = createTestChatLabService({ persistence, llmProvider: llm,
+      outboundProvider: new FakeOutboundProvider(), managerNotificationProvider: new FakeManagerNotificationProvider() });
+    const result = await lab.clientMessage("compound-operations", text, at(0), "compound");
+    const answer = result.snapshot.lastProcessing?.outboundMessage ?? "";
+    expect(answer).toMatch(/квартира не обязательна/iu);
+    expect(answer).toMatch(/CRM.*брони/iu);
+    expect(answer).toMatch(/3[–—-]4\s+час/iu);
+    expect(answer).not.toMatch(/имеете в виду/iu);
+  });
+
+  it("preserves operational answers through policy failures, short follow-ups and manager continuation", async () => {
+    const rejectedMove = naturalReply("Команда помогает подобрать объект. Какой бюджет у Вас на запуск?", "AVAILABLE_CAPITAL");
+    const rejectedReferral = naturalReply("С чего начать, лучше обсудить с менеджером.");
+    const llm = new FakeLLMProvider([
+      extractionReply({ city: "Пермь", availableCapital: 100_000, availableCapitalConfirmed: true }),
+      naturalReply("По предварительному ориентиру запуск одного объекта стоит около 150 000 ₽, смета зависит от квартиры."),
+      extractionReply({ availableCapital: 150_000, availableCapitalConfirmed: true }, {}, "CORRECTION"),
+      naturalReply("Когда Вы хотели бы начать?", "LAUNCH_TIMING"),
+      extractionReply({}, { questions: ["Как вести объект?", "Как найти объект?", "Как найти клиентов?"],
+        previousQuestionResponse: "CHANGED_TOPIC", requiresSubstantiveAnswer: true,
+        knowledgeEntryIds: ["company-responsibilities", "operations-guests"] }, "QUESTION"),
+      rejectedMove, rejectedMove,
+      extractionReply({}, { questions: ["С чего начать"], requiresSubstantiveAnswer: true,
+        knowledgeEntryIds: ["launch-process"] }, "QUESTION"),
+      rejectedReferral, rejectedReferral,
+      extractionReply({}, { questions: ["А гости сами будут мне звонить?"], requiresSubstantiveAnswer: true,
+        knowledgeEntryIds: ["operations-guests"] }, "QUESTION"),
+      new Error("MODEL_UNAVAILABLE"),
+    ]);
+    const notifications = new FakeManagerNotificationProvider();
+    const outbound = new FakeOutboundProvider();
+    const lab = createTestChatLabService({ persistence, llmProvider: llm, outboundProvider: outbound, managerNotificationProvider: notifications });
+    await lab.managerMessage("operations-regression", "Здравствуйте! В каком городе и с каким бюджетом рассматриваете запуск?", at(0), "manager-start");
+    await lab.clientMessage("operations-regression", "Пермь\n100000", at(0.01), "capital");
+    const corrected = await lab.clientMessage("operations-regression", "Тогда 150000", at(0.02), "correction");
+    expect(corrected.snapshot.qualification.status).not.toBe("NO_FIT");
+    const operations = await lab.clientMessage("operations-regression", "Хотелось бы сначала понять как вести объект, как найти его и клиентов", at(0.03), "operations");
+    const firstAnswer = operations.snapshot.lastProcessing?.outboundMessage ?? "";
+    expect(firstAnswer).toMatch(/подбор|подобрать|поиск/iu);
+    expect(firstAnswer).toMatch(/реклам|объявлен/iu);
+    expect(firstAnswer).toMatch(/гост|бронирован/iu);
+    expect(firstAnswer).not.toMatch(/что.*имеете в виду|какой бюджет|когда.*начать/iu);
+    const next = await lab.clientMessage("operations-regression", "С чего начать", at(0.04), "next-step");
+    expect(next.snapshot.lastProcessing?.outboundMessage).toMatch(/подобрать объект/iu);
+    expect(next.snapshot.lastProcessing?.outboundMessage).not.toBe(firstAnswer);
+    await lab.managerMessage("operations-regression", "Команда ведёт операционную работу, а детали обсудим при выборе объекта.", at(0.05), "manager-help");
+    const continued = await lab.clientMessage("operations-regression", "А гости сами будут мне звонить?", at(0.06), "guests");
+    expect(continued.snapshot.lastProcessing?.outboundMessage).toMatch(/администратор/iu);
+    expect(continued.snapshot.messages.filter((m) => m.actor === "MANAGER")).toHaveLength(2);
+    expect(outbound.requests).toHaveLength(5);
+    expect(notifications.requests).toHaveLength(0);
+    const callsBeforeDuplicate = llm.callCount;
+    await lab.clientMessage("operations-regression", "А гости сами будут мне звонить?", at(0.06), "guests");
+    expect(llm.callCount).toBe(callsBeforeDuplicate);
+    expect(outbound.requests).toHaveLength(5);
+  });
+
   async function handedOffSession(replies: string[]) {
     const facts: Partial<ExtractedFacts> = {
       city: "Москва", availableCapital: 300_000, availableCapitalConfirmed: true,

@@ -4,6 +4,17 @@ export const TEST_CHAT_LAB_SOURCE = "TEST_CHAT_LAB";
 
 export const testChatLabScenarios = [
   {
+    id: "operations-after-capital-correction",
+    title: "Операционные вопросы после исправления бюджета",
+    steps: [
+      { actor: "MANAGER", text: "Здравствуйте! В каком городе и с каким бюджетом рассматриваете запуск?" },
+      { actor: "USER", text: "Пермь\n100000" },
+      { actor: "USER", text: "Тогда 150000" },
+      { actor: "USER", text: "Хотелось бы сначала понять как вести объект, как найти его и клиентов" },
+      { actor: "USER", text: "С чего начать" },
+    ],
+  },
+  {
     id: "manager-phone",
     title: "Дмитрий просит телефон",
     steps: [

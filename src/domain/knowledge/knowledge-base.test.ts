@@ -29,6 +29,33 @@ function question(text: string, facts: Partial<ExtractedMessage["facts"]> = {}):
 }
 
 describe("contextual partner knowledge", () => {
+  it.each([
+    "Хотелось бы сначала понять как вести объект, как найти его и клиентов",
+    "С чего начать",
+    "Я новичок — кто поможет мне с первым шагом?",
+  ])("uses semantic approved grounding without a literal KB match: %s", (text) => {
+    const extraction = question(text);
+    Object.assign(extraction.signals, {
+      requiresSubstantiveAnswer: true,
+      knowledgeEntryIds: ["launch-process"],
+    });
+    const answer = answerFromKnowledgeBase(extraction);
+    expect(answer.entryIds).toEqual(["launch-process"]);
+    expect(answer.answerFragments.join(" ")).toMatch(/подобрать объект/iu);
+    expect(answer.answerFragments.join(" ")).toMatch(/бронирования.*администратор/iu);
+    expect(answer.unresolvedQuestions).toEqual([]);
+  });
+
+  it("does not turn stale semantic grounding into a knowledge dump after a qualification answer", () => {
+    const extraction = question("Пермь");
+    extraction.intent = "QUALIFICATION_INFORMATION";
+    Object.assign(extraction.signals, {
+      previousQuestionResponse: "ANSWERED", requiresSubstantiveAnswer: false,
+      knowledgeEntryIds: ["launch-process"],
+    });
+    expect(answerFromKnowledgeBase(extraction).entryIds).toEqual([]);
+  });
+
   it("answers Moscow availability and service payment from approved facts", () => {
     const answer = answerFromKnowledgeBase(question(
       "В Москве можно по такой схеме работать? Ваши услуги как оплачиваются?",

@@ -289,6 +289,11 @@ export function buildConversationResponse(params: {
       return entryId === undefined || knowledgeEntryIdsForCurrentTurn.includes(entryId);
     },
   );
+  // The semantic selection is already bounded and scoped to the request. A
+  // compound question must retain all its selected answers during fallback.
+  const fallbackAnswerFragments = extraction.signals.knowledgeEntryIds?.length
+    ? answerFragmentsForCurrentTurn
+    : answerFragmentsForCurrentTurn.slice(0, 2);
   const adaptiveContext = {
     allowedNextInformationNeeds,
     allowedNextQuestions: allowedNextInformationNeeds.map((need) => ({
@@ -360,7 +365,7 @@ export function buildConversationResponse(params: {
     const answeredThenRejected = [
       ...(compactRejectedAnswer
         ? [compactRejectedAnswer]
-        : answerFragmentsForCurrentTurn.slice(0, 2)),
+        : fallbackAnswerFragments),
       customerFacingDecisionDraft,
     ];
     return {
@@ -397,7 +402,7 @@ export function buildConversationResponse(params: {
         : extraction.signals.contextualReference === true &&
             !knowledge.contextualReferenceResolved
           ? []
-          : answerFragmentsForCurrentTurn.slice(0, 2);
+          : fallbackAnswerFragments;
   const asksCallTime =
     preferredContactTime === null &&
     params.lead.handoffAt !== null &&
@@ -442,7 +447,10 @@ export function buildConversationResponse(params: {
     parts.push(currentTurnRequiresAnswer
       ? extraction.intent === "GREETING"
         ? "Я на связи и помогу разобраться с запуском бизнеса на посуточной аренде. Что Вы хотели бы узнать в первую очередь?"
-        : "Хочу ответить по существу, но не уверен, к чему относится Ваш вопрос. Уточните, пожалуйста, что Вы имеете в виду?"
+        : params.extractionQuality === "DEGRADED" ||
+            (extraction.signals.questions.length === 0 && !extraction.signals.resolvedQuestion)
+          ? "Сейчас не удалось подготовить надёжный ответ. Какую часть вопроса о запуске разберём в первую очередь?"
+          : "Ваш вопрос сохранён в переписке, но сейчас не удалось подготовить надёжный ответ."
       : postHandoffContinuation ? "Понял, учту." : "Спасибо, понял.");
   }
 

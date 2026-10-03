@@ -1061,6 +1061,10 @@ export function createIncomingEventProcessor({
             conversationId: prepared.conversation!.id,
             source: input.source,
             errorType: responseFailureCode,
+            recoveryFailureCode: error instanceof Error && "recoveryFailureCode" in error
+              ? String(error.recoveryFailureCode) : null,
+            reviewFailureCode: error instanceof Error && "reviewFailureCode" in error
+              ? String(error.reviewFailureCode) : null,
           });
         }
       }

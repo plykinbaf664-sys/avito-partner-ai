@@ -9,6 +9,211 @@ import { PARTNER_KNOWLEDGE_BASE } from "@/domain/knowledge/knowledge-base";
 import { buildApprovedEconomicsContext } from "@/domain/economics/economics-calculator";
 
 describe("natural response generation", () => {
+  const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
+    optionalQuestionAppropriate: true, feedback: "" });
+
+  it("recovers the current answer without qualification after a malformed structured move", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "", answerText: "Команда помогает подобрать объект. Оставите телефон? Когда удобно созвониться?",
+        qualificationQuestion: "", nextInformationNeed: "PHONE_NUMBER" }),
+      JSON.stringify({ text: "", answerText: "Начните с подбора объекта при помощи команды, затем подготовьте его к запуску.",
+        qualificationQuestion: "", usedKnowledgeEntryIds: ["launch-process"] }),
+      supportedReview,
+    ]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "С чего начать" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        allowedNextInformationNeeds: ["GOAL"],
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+      },
+    });
+    expect(result.text).toMatch(/подбора объекта/iu);
+    expect(result.text).not.toMatch(/телефон|созвон/iu);
+    expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
+    expect(llm.requests[1]!.jsonSchema).toMatchObject({ properties: {
+      text: { const: "" }, qualificationQuestion: { const: "" }, nextInformationNeed: { type: "null" },
+    } });
+  });
+
+  it("repairs an invented mandatory meeting before offering practical launch advice", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "", answerText: "Первый шаг — встреча с менеджером, который покажет примеры квартир в Перми.",
+        qualificationQuestion: "", interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["launch-process"] }),
+      JSON.stringify({ answerIsSupported: false, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        feedback: "Обязательная встреча и показ квартир менеджером отсутствуют в утверждённом процессе. Первый практический этап — подбор объекта с помощью команды." }),
+      JSON.stringify({ text: "", answerText: "Начните с подбора подходящего объекта вместе с командой. Затем подготовите квартиру к запуску.",
+        qualificationQuestion: "", interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["launch-process"] }),
+      supportedReview,
+    ]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: { city: "Пермь", availableCapital: 150_000 } as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "С чего начать" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: ["launch-process"],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+      },
+    });
+    expect(result.text).toMatch(/подбора.*объекта/iu);
+    expect(result.text).not.toMatch(/встреча|покажет/iu);
+    expect(llm.callCount).toBe(4);
+  });
+
+  it("drops a semantically repeated optional question without losing the approved answer", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "", answerText: "Гостей и бронирования ведёт администратор, он же координирует горничную.",
+        qualificationQuestion: "Как скоро планируете запуск?", nextInformationNeed: "LAUNCH_TIMING", qualificationMoveDecision: "ADVANCE",
+        usedKnowledgeEntryIds: ["launch-process"] }),
+      JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: false,
+        feedback: "Вопрос о сроке уже был задан и отложен человеком ради разбора операционной работы." }),
+    ]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [
+        { direction: "OUTBOUND", content: "Когда хотите запускаться?" },
+        { direction: "INBOUND", content: "Сначала хочу понять, кто ведёт объект." },
+      ],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: ["launch-process"],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        allowedNextInformationNeeds: ["LAUNCH_TIMING"],
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+      },
+    });
+    expect(result.text).toMatch(/администратор.*горничную/iu);
+    expect(result.text).not.toMatch(/скоро|запуск/iu);
+    expect(result.nextInformationNeed).toBeNull();
+  });
+
+  it("does not send an unreviewed substantive answer when semantic validation is unavailable", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "", answerText: "Первый шаг — встреча с менеджером.", qualificationQuestion: "" }),
+      new Error("model unavailable"),
+    ]);
+    await expect(createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "С чего начать" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+      },
+    })).rejects.toMatchObject({ code: "RESPONSE_POLICY_SEMANTIC_REVIEW_UNAVAILABLE" });
+  });
+  it("lets the conversation brain repair a mistaken meta label for a practical business request", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({ text: "",
+      answerText: "Начните с выбора квартиры при помощи команды. После выбора Вы заключаете договор аренды и готовите объект к запуску.",
+      qualificationQuestion: "", nextInformationNeed: null, conversationAction: "ANSWER",
+      interpretedQuestionKind: "RECOMMENDATION", qualificationMoveDecision: "DEFER",
+      usedKnowledgeEntryIds: ["launch-process"],
+    }), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [
+        { direction: "OUTBOUND", content: "Команда помогает найти объект и ведёт операционную работу. Какую цель Вы хотите решить этим бизнесом?" },
+        { direction: "INBOUND", content: "С чего начать" },
+      ],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false,
+        knowledgeEntryIds: [], unresolvedQuestions: [], useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, currentQuestionKind: "CONVERSATION_META",
+        previouslyExplainedKnowledgeEntryIds: ["launch-process"],
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+      },
+    });
+    expect(result.interpretedQuestionKind).toBe("RECOMMENDATION");
+    expect(result.text).toMatch(/выбора квартиры/iu);
+    expect(result.text).not.toMatch(/спрашиваю|чтобы лучше понять вашу ситуацию/iu);
+    expect(llm.callCount).toBe(2);
+  });
+  it("retains a grounded answer when only its structured optional question is unavailable", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({
+      text: "", answerText: "Первый шаг — выбрать подходящий объект при помощи команды. Затем Вы заключаете договор аренды и готовите квартиру к запуску.",
+      qualificationQuestion: "Когда Вы хотели бы начать?", nextInformationNeed: "LAUNCH_TIMING",
+      conversationAction: "ANSWER", qualificationMoveDecision: "ADVANCE",
+      usedKnowledgeEntryIds: ["launch-process"],
+    }), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: {} as Lead, recentMessages: [{ direction: "INBOUND", content: "С чего начать" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false,
+        knowledgeEntryIds: ["launch-process"], unresolvedQuestions: [], useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, groundedAnswerRequired: true,
+        allowedNextInformationNeeds: ["GOAL"], deferredInformationNeeds: ["LAUNCH_TIMING"],
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+      },
+    });
+    expect(result.text).toMatch(/выбрать подходящий объект/iu);
+    expect(result.text).not.toMatch(/когда.*начать/iu);
+    expect(result.nextInformationNeed).toBeNull();
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("does not salvage an ungrounded answer by discarding its optional question", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({
+      text: "", answerText: "Запуск стоит 777 000 ₽.",
+      qualificationQuestion: "Какой бюджет?", nextInformationNeed: "AVAILABLE_CAPITAL",
+    })]);
+    await expect(createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead, recentMessages: [],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false,
+        knowledgeEntryIds: [], unresolvedQuestions: [], useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, allowedNextInformationNeeds: [],
+      },
+    })).rejects.toMatchObject({ code: "RESPONSE_POLICY_UNGROUNDED_AMOUNT" });
+  });
+  it("keeps financial guardrails during answer recovery and reports both rejection reasons", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "Порядок запуска уточните у менеджера." }),
+      JSON.stringify({ text: "Цена запуска — 777 000 ₽.", nextInformationNeed: null }),
+    ]);
+    const generate = createNaturalResponseGenerator({ llmProvider: llm });
+    await expect(generate({ lead: {} as Lead, recentMessages: [],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false,
+        knowledgeEntryIds: [], unresolvedQuestions: [], useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, groundedAnswerRequired: true,
+      },
+    })).rejects.toMatchObject({ code: "RESPONSE_POLICY_UNREQUESTED_MANAGER_REFERRAL",
+      recoveryFailureCode: "RESPONSE_POLICY_UNGROUNDED_AMOUNT" });
+  });
+  it("recovers from a known-budget question without discarding the substantive answer", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "Команда ведёт бронирования. Какой бюджет на запуск?", nextInformationNeed: "AVAILABLE_CAPITAL" }),
+      JSON.stringify({ text: "Команда помогает найти объект и размещает объявления. Заявки и работу с гостями ведёт администратор.", nextInformationNeed: null,
+        usedKnowledgeEntryIds: ["launch-process"], qualificationMoveDecision: "DEFER" }),
+    ]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: {} as Lead, recentMessages: [{ direction: "INBOUND", content: "Как найти объект и клиентов?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false,
+        knowledgeEntryIds: [], unresolvedQuestions: [], useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, groundedAnswerRequired: true,
+        allowedNextInformationNeeds: ["GOAL"],
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+      },
+    });
+    expect(result.text).toMatch(/объект.*объявления/iu);
+    expect(result.text).not.toMatch(/бюджет/iu);
+    expect(result.nextInformationNeed).toBeNull();
+    expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
+  });
+
+  it("recovers an answer with a forbidden referral using an answer-only retry", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "Порядок запуска лучше уточнить у менеджера.", nextInformationNeed: null }),
+      JSON.stringify({ text: "Сначала команда помогает подобрать объект и подготовить его к запуску. Затем размещает объявления и ведёт бронирования.", nextInformationNeed: null,
+        usedKnowledgeEntryIds: ["launch-process"], qualificationMoveDecision: "DEFER" }),
+    ]);
+    const plan: ConversationResponsePlan = {
+      text: "", nextInformationNeed: null, asksUserQuestion: false,
+      knowledgeEntryIds: [], unresolvedQuestions: [], useNaturalAdaptation: true,
+      currentTurnRequiresAnswer: true, groundedAnswerRequired: true,
+      allowedNextInformationNeeds: ["GOAL"],
+      allowedQualificationMoves: [{ need: "GOAL", objective: "понять цель" }],
+      qualificationProgressExpected: true,
+      approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+    };
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: {} as Lead, plan, recentMessages: [{ direction: "INBOUND", content: "С чего начать" }],
+    });
+    expect(result.text).toMatch(/подобрать объект/iu);
+    expect(llm.callCount).toBe(2);
+    expect(JSON.parse(llm.requests[1]!.userMessage)).toMatchObject({
+      answerRecovery: true, qualificationMoveAvailable: false,
+      qualificationProgressExpected: false, allowedQualificationMoves: [],
+    });
+    expect(llm.requests[1]!.jsonSchema).toMatchObject({ properties: { nextInformationNeed: { type: "null" } } });
+  });
+
   const offerPlan: ConversationResponsePlan = {
     text: PARTNER_KNOWLEDGE_BASE.find((entry) => entry.id === "offer-overview")!.answer +
       " Какую сумму вы реально готовы выделить: это бюджет только на услугу или общий доступный капитал?",

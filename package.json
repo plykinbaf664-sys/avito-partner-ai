@@ -12,6 +12,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "eval:conversation": "node --env-file-if-exists=.env.local --import tsx scripts/eval-conversation.ts",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

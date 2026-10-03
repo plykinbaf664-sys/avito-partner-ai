@@ -14,6 +14,7 @@ import {
   type ExtractedMessage,
 } from "../../domain/extraction/extracted-message";
 import { LAUNCH_COST_REFERENCE } from "../../domain/economics/economics-calculator";
+import { PARTNER_KNOWLEDGE_BASE } from "../../domain/knowledge/knowledge-base";
 import { normalizePhoneNumber } from "../../domain/lead/phone-number";
 import type { Lead } from "../../domain/lead/lead";
 import type { MessageActor } from "../../domain/message/message";
@@ -118,6 +119,7 @@ export const extractedMessageSchema = z
         ]).default("BUSINESS_INFORMATION"),
         needsStartupScaleRecommendation: z.boolean().default(false),
         requiresSubstantiveAnswer: z.boolean().default(false),
+        knowledgeEntryIds: z.array(z.string().trim().min(1).max(120)).max(4).default([]),
       })
       .strict(),
     // The extractor can always report its confidence, so null adds no meaning.
@@ -228,8 +230,10 @@ CAPITAL CONFIRMATION: when the user presents an amount as money they have, their
 - Если contextualReference=true, resolvedQuestion обязателен: укажи тему и единицу измерения, унаследованные от ближайшего однозначного хода собеседника. Не заменяй время деньгами, масштаб доходом или наоборот из-за доступных справочных данных. Если референт неоднозначен, оставь contextualReference=false и сохрани исходный вопрос для уточнения в conversation brain.
 - needsStartupScaleRecommendation=true, когда человек просит консультанта определить или посоветовать разумное количество объектов для старта, в том числе потому что сам не знает его. Это семантический сигнал запроса рекомендации, а не startingUnits: не записывай рекомендованное системой число как решение пользователя.
 - questionKind — семантическая цель текущего вопроса: BUSINESS_INFORMATION — факт/условие/экономика бизнеса; RECOMMENDATION — просьба посоветовать или выбрать вариант; CLARIFICATION — просьба уточнить уже данный ответ; CONVERSATION_META — вопрос о ходе разговора или о том, зачем нужен запрошенный факт; AGENT_IDENTITY — вопрос, общается ли человек с AI или с сотрудником. Для мета-вопросов не превращай слова из предыдущего вопроса в новую тему бизнеса и не запрашивай справку по бюджету, если человек спрашивает о смысле вопроса.
+- Просьба перейти от обсуждения бизнеса к первому действию — RECOMMENDATION. Учитывай содержательную тему нескольких предыдущих ходов, а не только последний qualification-вопрос. Не относись к любой короткой просьбе после вопроса консультанта как к CONVERSATION_META: этот тип требует, чтобы человек действительно спрашивал о смысле реплики или причине вопроса.
 - wantsHuman=true только при явной просьбе переключить разговор на сотрудника-человека. Вопрос о личности собеседника или о том, используется ли AI, требует честного ответа, но сам по себе не является просьбой о передаче менеджеру. AGENT_IDENTITY используй для вопроса только о личности; если пользователь одновременно явно просит переключить на человека, сохрани wantsHuman=true и классифицируй общий ход как CONVERSATION_META.
 - requiresSubstantiveAnswer=true, когда CURRENT_MESSAGE просит ответ, объяснение, подробности, совет, расчёт, уточнение или реакцию на возражение — даже если просьба сформулирована без вопросительного знака (например, человек просит рассказать, как устроен бизнес). Это общий conversational signal, а не классификатор темы. Не ставь его для простого ответа на предыдущий вопрос, подтверждения или нового факта без запроса к консультанту. Для CONVERSATION_META ставь true: conversation brain должен объяснить цель шага человеческим языком.
+- knowledgeEntryIds — до четырёх id из APPROVED_KNOWLEDGE, которые по смыслу отвечают на текущий запрос. Выбирай минимальный набор по содержанию вопроса и ближайшему контексту, независимо от совпадения слов; поставь самый полезный ответ первым. Учитывай все части составного запроса. Это выбор источников для ответа, а не новые факты о клиенте и не решение о квалификации. Для ответа на вопрос консультанта без новой просьбы, CONVERSATION_META и AGENT_IDENTITY верни []. Если знания отвечают лишь на часть запроса, выбирай источники для известной части; не придумывай отсутствующие условия.
 - Короткий ответ интерпретируй в контексте непосредственно заданного вопроса. Если PENDING_INFORMATION_NEED=AVAILABLE_CAPITAL и ассистент спросил общий доступный капитал, названная пользователем сумма без прямого ограничения «только на услугу/первый этап» является availableCapital. Если сумма названа уверенно, без «возможно», «постараюсь найти», «наверное» и аналогичной оговорки, установи availableCapitalConfirmed=true. Формулировка «для начала» означает сумму, которую человек готов выделить на первоначальный запуск и сама по себе не является неопределённостью или оплатой только услуги команды.
 - capitalScope=ENTRY_ONLY и entryBudget используй только когда пользователь явно связал сумму с услугой команды, оплатой компании или первым этапом. Не превращай достаточно определённый ответ о капитале в дополнительный финансовый вопрос из-за одной лишь краткости формулировки.
 - Ответ «это весь бюджет», «больше этой суммы нет» или эквивалентная формулировка означает capitalScope=TOTAL_LIMIT и подтверждает ранее названный availableCapital. Сам по себе общий лимит НЕ означает отказ оплачивать аренду, залог или подготовку: additionalExpensesReadiness=NOT_READY ставь только при прямом отказе финансировать эти статьи, а не из-за отсутствия денег сверх общего бюджета.
@@ -466,6 +470,7 @@ function sanitizeUntrustedConversationSignals(
         contextualReference: false,
         questionKind: "NONE",
         needsStartupScaleRecommendation: false,
+        knowledgeEntryIds: [],
       },
       uncertainty: [],
     },
@@ -587,6 +592,7 @@ export function createMessageExtractor({
     const userMessage = JSON.stringify({
         type: "UNTRUSTED_CONVERSATION_CONTEXT",
         CURRENT_MESSAGE: validatedText,
+        APPROVED_KNOWLEDGE: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
         PENDING_INFORMATION_NEED:
           typeof input === "string" ? null : input.pendingInformationNeed ?? null,
         CURRENT_LEAD_FACTS: typeof input === "string" || !input.currentLead ? null : {
@@ -798,6 +804,10 @@ export function createMessageExtractor({
       },
       signals: {
         ...parsedData.signals,
+        // Selection may choose sources, never introduce business truth. Unknown
+        // IDs are discarded without losing otherwise valid facts or intent.
+        knowledgeEntryIds: [...new Set(parsedData.signals.knowledgeEntryIds ?? [])]
+          .filter((id) => PARTNER_KNOWLEDGE_BASE.some((entry) => entry.id === id)),
         objections: parsedData.signals.objections.filter(
           (objection) => !isPureManagementAcceptance(objection),
         ),
