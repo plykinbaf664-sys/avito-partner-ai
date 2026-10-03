@@ -12,6 +12,29 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it("does not broaden approved help into physical accompaniment by company staff", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "", answerText: "Команда выедет вместе с Вами на просмотр квартиры.", qualificationQuestion: "",
+        interpretedQuestionKind: "BUSINESS_INFORMATION", usedKnowledgeEntryIds: ["property-not-required"] }),
+      JSON.stringify({ answerIsSupported: false, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        feedback: "Помощь с поиском не устанавливает совместный выезд сотрудников на просмотр." }),
+      JSON.stringify({ text: "", answerText: "Команда помогает искать подходящие объекты и договариваться с собственниками. Вы ездите на подходящие объекты и заключаете договоры.",
+        qualificationQuestion: "", interpretedQuestionKind: "BUSINESS_INFORMATION",
+        usedKnowledgeEntryIds: ["property-not-required", "partner-time"] }),
+      supportedReview,
+    ]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Кто поможет найти первую квартиру?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+      },
+    });
+    expect(result.text).toMatch(/Команда помогает искать/iu);
+    expect(result.text).toMatch(/Вы ездите/iu);
+    expect(result.text).not.toMatch(/вместе с Вами/iu);
+  });
+
   it("does not turn absence of approved contract information into denial of a business service", async () => {
     const llm = new FakeLLMProvider([
       JSON.stringify({ text: "", answerText: "Объявления ведёт команда, а страховки у компании нет.", qualificationQuestion: "",
