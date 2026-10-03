@@ -154,13 +154,25 @@ KB IDs, экономические ограничения при recovery, вс�
   `Your credit balance is too low to access the Anthropic API`.
   Повторная проверка доступности также HTTP 400. Для завершения требуется
   пополнение именно API-аккаунта Anthropic, используемого `.env.local`.
-- Production продолжает работать на `7b8bac4`; health/readiness и integrity
-  SQLite — OK. Подготовленная сборка `f5c3636` находится в
-  `/opt/avito-partner-ai-backups/conversation-recovery-20261003-2145/release`.
-  Переключение ещё не выполнено: обязательный live eval не завершён.
-  Скрипт выпуска требует маркер одобрения точной ревизии, создаёт SQLite backup,
-  сохраняет предыдущую сборку, проверяет сохранность записей и откатывается при
-  сбое запуска. Маркер одобрения не создан.
+- После сообщения о незавершённых live eval и недостаточном балансе владелец
+  прямо поручил выполнить полный push и deploy. По этому указанию выполнен
+  выпуск `954013a` (код `f5c3636`, последующее изменение только отчёта).
+  Незавершённая живая оценка не объявлялась успешной: release manifest явно
+  содержит `liveEvalComplete=false` и
+  `authorizationMode=USER_REQUESTED_WITH_PENDING_LIVE_EVAL`.
+- Ветка `master` отправлена в origin. Сервер fast-forward обновлён с `7b8bac4`;
+  Linux-сборка переключена, приложение и polling перезапущены. Оба сервиса
+  active/running, ExecMainStatus=0, NRestarts=0. Health и readiness — HTTP 200,
+  база доступна. Production SQLite и её резервная копия прошли integrity_check.
+  Количество записей при переключении сохранилось.
+- SQLite backup, предыдущая сборка и manifest выпуска сохранены в
+  `/opt/avito-partner-ai-backups/conversation-recovery-20261003-2145`.
+  Скрипт выпуска предусматривает откат при сбое запуска. Секреты, конфигурация
+  сети и утверждённые бизнес-правила не менялись.
+- Ограничение остаётся: на момент выпуска Anthropic API недоступен из-за
+  баланса. Успешные health/readiness проверяют приложение и БД, но не означают
+  доступность генерации LLM. Завершение живой оценки и штатные ответы через
+  Anthropic требуют рабочего API-баланса.
 
 Поддержка const в используемой JSON schema проверена по
 [официальной документации Anthropic](https://platform.claude.com/docs/en/build-with-claude/structured-outputs).
