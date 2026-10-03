@@ -54,6 +54,9 @@ Telegram, production database, authentication, CRM и полноценный AI-
 
 1. Скопируйте `.env.example` в `.env.local` и задайте `ANTHROPIC_API_KEY` и
    `ANTHROPIC_MODEL`.
+   `ANTHROPIC_MODEL` используется для extraction. Для ответов и семантической
+   проверки применяется `ANTHROPIC_CONVERSATION_MODEL` (по умолчанию
+   `claude-sonnet-4-6`); модель диалога можно настроить отдельно.
 2. Примените миграции и запустите приложение:
 
 ```bash

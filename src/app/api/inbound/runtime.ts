@@ -34,6 +34,7 @@ export function createRuntimeInboundProcessor() {
   const environment = readInboundEnvironment(process.env);
   const persistence = SqlitePersistence.create(environment.DATABASE_URL);
   const llmProvider = new AnthropicLLMProvider(readAnthropicConfig(process.env));
+  const conversationProvider = new AnthropicLLMProvider(readAnthropicConfig(process.env, "conversation"));
   const telegram = readTelegramEnvironment(process.env);
   const managerNotificationProvider = telegram.enabled
     ? new TelegramManagerNotificationProvider({
@@ -44,7 +45,7 @@ export function createRuntimeInboundProcessor() {
   return createIncomingEventProcessor({
     persistence,
     extractMessage: createMessageExtractor({ llmProvider }),
-    generateNaturalResponse: createNaturalResponseGenerator({ llmProvider }),
+    generateNaturalResponse: createNaturalResponseGenerator({ llmProvider: conversationProvider }),
     managerNotificationProvider,
     logger: new ConsoleStructuredLogger(),
   });

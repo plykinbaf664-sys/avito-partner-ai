@@ -12,6 +12,118 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it("does not turn absence of approved contract information into denial of a business service", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "", answerText: "Объявления ведёт команда, а страховки у компании нет.", qualificationQuestion: "",
+        interpretedQuestionKind: "BUSINESS_INFORMATION", usedKnowledgeEntryIds: ["company-responsibilities"] }),
+      JSON.stringify({ answerIsSupported: false, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        feedback: "Нет данных об условиях страхования, поэтому нельзя утверждать, что компания его не предлагает." }),
+      JSON.stringify({ text: "", answerText: "Объявления и работу с гостями ведёт команда. По страхованию нет утверждённой информации, условия нужно уточнить.",
+        qualificationQuestion: "", interpretedQuestionKind: "BUSINESS_INFORMATION", usedKnowledgeEntryIds: ["company-responsibilities"],
+        answerCoverage: "PARTIAL", unresolvedTopics: ["Условия страхования"] }),
+      supportedReview,
+    ]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Как найдёте гостей и есть ли страховка?" }],
+      plan: { text: "Условия страхования неизвестны.", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: ["Условия страхования"], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+      },
+    });
+    expect(result.answerCoverage).toBe("PARTIAL");
+    expect(result.text).toMatch(/нет утверждённой информации/iu);
+    expect(result.text).not.toMatch(/страховки.*нет/iu);
+  });
+
+  it("allows a requested concise practical follow-up despite overlap with the prior full explanation", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "", answerText: "Начните с подбора подходящей квартиры при помощи команды, затем Вы посещаете объекты и заключаете договор аренды.",
+        qualificationQuestion: "", interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["launch-process"] }),
+      supportedReview,
+    ]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [
+        { direction: "OUTBOUND", content: "Команда помогает с подбором подходящей квартиры при помощи команды, затем Вы посещаете объекты и заключаете договор аренды. Объявления, гостей и бронирования ведёт администратор, а брони видны в CRM." },
+        { direction: "INBOUND", content: "А какое первое действие?" },
+      ],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: ["launch-process"],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+      },
+    });
+    expect(result.text).toMatch(/Начните с подбора/iu);
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("does not infer obligatory payment timing merely from an approved service price", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "", answerText: "Первый шаг — оплата услуги запуска, 50 000 ₽.",
+        qualificationQuestion: "", interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["pricing"] }),
+      JSON.stringify({ answerIsSupported: false, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        feedback: "Цена утверждена, порядок оплаты не указан. Обязательная первая оплата не подтверждена источниками." }),
+      JSON.stringify({ text: "", answerText: "Начните с подбора подходящего объекта вместе с командой, затем подготовьте квартиру к запуску.",
+        qualificationQuestion: "", interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["launch-process"] }),
+      supportedReview,
+    ]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "С чего начать?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+      },
+    });
+    expect(result.text).toMatch(/подбора подходящего объекта/iu);
+    expect(result.text).not.toMatch(/оплата|50 000/iu);
+  });
+
+  it("repairs the rejected answer with a focused context instead of the empty qualification fields", async () => {
+    const rejectedAnswer = "Сначала согласуйте обязательную встречу, затем команда поможет подобрать объект.";
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "", answerText: rejectedAnswer, qualificationQuestion: "",
+        interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["launch-process"] }),
+      JSON.stringify({ answerIsSupported: false, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        feedback: "Обязательная встреча не установлена источниками." }),
+      JSON.stringify({ text: "", answerText: "Начните с подбора объекта при помощи команды.", qualificationQuestion: "",
+        interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["launch-process"] }),
+      supportedReview,
+    ]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Какой первый практический шаг?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        missingCriticalFacts: ["CITY"], missingOptionalFacts: ["LAUNCH_TIMING"],
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+      },
+    });
+    expect(result.text).toMatch(/подбора объекта/iu);
+    const repair = JSON.parse(llm.requests[2]!.userMessage);
+    expect(repair.rejectedAnswer).toBe(rejectedAnswer);
+    expect(repair).not.toHaveProperty("missingCriticalFacts");
+    expect(repair).not.toHaveProperty("missingOptionalFacts");
+    expect(repair.qualificationProgressExpected).toBe(false);
+    expect(repair.allowedQualificationMoves).toEqual([]);
+  });
+
+  it("allows the saved capital in a contextual calculation even when the prior question had no amount", async () => {
+    const answer = "При Вашем бюджете 400 000 ₽ можно начать с двух объектов: ориентир запуска — 310 000 ₽, резерв — 90 000 ₽. Точная смета зависит от квартир.";
+    const llm = new FakeLLMProvider([JSON.stringify({ text: answer, nextInformationNeed: null })]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { city: "Москва", availableCapital: 400_000, availableCapitalConfirmed: true } as Lead,
+      recentMessages: [
+        { direction: "INBOUND", content: "Москва, бюджет 400 тысяч." },
+        { direction: "OUTBOUND", content: "Какую цель хотите решить с этим бизнесом?" },
+        { direction: "INBOUND", content: "Это Вы мне скажите, со скольких можно при таком раскладе?" },
+      ],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        contextualReference: true, economicsContext: buildApprovedEconomicsContext({ city: "Москва", availableCapital: 400_000 }),
+      },
+    });
+    expect(result.text).toContain("310 000 ₽");
+    expect(result.text).toContain("400 000 ₽");
+    expect(llm.callCount).toBe(1);
+  });
+
   it("recovers the current answer without qualification after a malformed structured move", async () => {
     const llm = new FakeLLMProvider([
       JSON.stringify({ text: "", answerText: "Команда помогает подобрать объект. Оставите телефон? Когда удобно созвониться?",

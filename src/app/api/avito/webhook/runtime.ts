@@ -21,6 +21,7 @@ export function createRuntimeAvitoWebhook() {
   const persistence = SqlitePersistence.create(inbound.DATABASE_URL);
   const logger = new ConsoleStructuredLogger();
   const llmProvider = new AnthropicLLMProvider(readAnthropicConfig(process.env));
+  const conversationProvider = new AnthropicLLMProvider(readAnthropicConfig(process.env, "conversation"));
   const client = new AvitoApiClient({
     clientId: avito.clientId,
     clientSecret: avito.clientSecret,
@@ -34,7 +35,7 @@ export function createRuntimeAvitoWebhook() {
   const processIncomingEvent = createIncomingEventProcessor({
     persistence,
     extractMessage: createMessageExtractor({ llmProvider }),
-    generateNaturalResponse: createNaturalResponseGenerator({ llmProvider }),
+    generateNaturalResponse: createNaturalResponseGenerator({ llmProvider: conversationProvider }),
     outboundProvider: new AvitoOutboundMessageProvider(client),
     managerNotificationProvider,
     logger,

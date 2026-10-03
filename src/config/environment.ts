@@ -29,6 +29,7 @@ const baseEnvironmentSchema = z.object({
 const inboundEnvironmentSchema = baseEnvironmentSchema.extend({
   ANTHROPIC_API_KEY: z.string().trim().min(1),
   ANTHROPIC_MODEL: z.string().trim().min(1),
+  ANTHROPIC_CONVERSATION_MODEL: z.string().trim().min(1).default("claude-sonnet-4-6"),
   ANTHROPIC_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
 });
 

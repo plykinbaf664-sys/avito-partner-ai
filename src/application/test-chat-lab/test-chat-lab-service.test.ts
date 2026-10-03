@@ -90,6 +90,29 @@ describe("isolated Test Chat Lab workflow", () => {
   });
   afterEach(() => persistence.close());
 
+  it("uses separate extraction and conversation providers in the same real workflow", async () => {
+    const extractor = new FakeLLMProvider([extractionReply({}, {
+      questions: ["Как искать клиентов?"], requiresSubstantiveAnswer: true,
+      knowledgeEntryIds: ["operations-guests"],
+    }, "QUESTION")]);
+    const brain = new FakeLLMProvider([
+      JSON.stringify({ text: "", answerText: "Заявки и работу с гостями ведёт администратор команды, он же координирует горничную.",
+        qualificationQuestion: "", usedKnowledgeEntryIds: ["operations-guests"] }),
+      JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: true, feedback: "" }),
+    ]);
+    const outbound = new FakeOutboundProvider();
+    const lab = createTestChatLabService({ persistence, llmProvider: extractor, conversationLlmProvider: brain,
+      outboundProvider: outbound, managerNotificationProvider: new FakeManagerNotificationProvider() });
+    await lab.managerMessage("model-roles", "Здравствуйте! Отвечу на вопросы о работе команды.", at(0), "manager");
+    const result = await lab.clientMessage("model-roles", "Как искать клиентов?", at(0.01), "question");
+    expect(result.snapshot.lastProcessing?.responseGenerationSource).toBe("LLM");
+    expect(extractor.callCount).toBe(1);
+    expect(brain.callCount).toBe(2);
+    expect(JSON.parse(extractor.requests[0]!.userMessage)).toHaveProperty("CURRENT_MESSAGE");
+    expect(JSON.parse(brain.requests[1]!.userMessage).purpose).toBe("ANSWER_SEMANTIC_REVIEW");
+    expect(outbound.requests).toHaveLength(1);
+  });
+
   it("reviews practical advice in a multi-turn workflow before delivery and retains idempotency", async () => {
     const supported = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
       optionalQuestionAppropriate: true, feedback: "" });

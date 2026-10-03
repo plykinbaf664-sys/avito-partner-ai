@@ -37,6 +37,7 @@ async function withLab<T>(operation: (service: ReturnType<typeof createTestChatL
     const service = createTestChatLabService({
       persistence,
       llmProvider: new AnthropicLLMProvider(readAnthropicConfig(process.env)),
+      conversationLlmProvider: new AnthropicLLMProvider(readAnthropicConfig(process.env, "conversation")),
       outboundProvider,
       managerNotificationProvider,
     });

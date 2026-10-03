@@ -21,13 +21,14 @@ export async function createRuntimeAvitoPolling(options: { chatId?: string } = {
   const inbound = readInboundEnvironment(process.env);
   const telegram = readTelegramEnvironment(process.env);
   const llmProvider = new AnthropicLLMProvider(readAnthropicConfig(process.env));
+  const conversationProvider = new AnthropicLLMProvider(readAnthropicConfig(process.env, "conversation"));
   const persistence = await SqlitePersistence.createMigrated(inbound.DATABASE_URL);
   const logger = new ConsoleStructuredLogger();
   const client = new AvitoApiClient({
     clientId: avito.clientId,
     clientSecret: avito.clientSecret,
   });
-  const naturalResponseGenerator = createNaturalResponseGenerator({ llmProvider });
+  const naturalResponseGenerator = createNaturalResponseGenerator({ llmProvider: conversationProvider });
   const outboundProvider = new AvitoOutboundMessageProvider(client, logger);
   const managerNotificationProvider = telegram.enabled
     ? new TelegramManagerNotificationProvider(

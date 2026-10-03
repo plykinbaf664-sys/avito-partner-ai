@@ -28,6 +28,7 @@ export { TEST_CHAT_LAB_SOURCE, testChatLabScenarios } from "./test-chat-lab-cont
 export interface TestChatLabDependencies {
   persistence: Persistence;
   llmProvider: LlmProvider;
+  conversationLlmProvider?: LlmProvider;
   outboundProvider: OutboundMessageProvider;
   managerNotificationProvider: ManagerNotificationProvider;
   logger?: StructuredLogger;
@@ -60,6 +61,7 @@ function currentNextStep(lead: Lead, conversation: Conversation | null, history:
 export function createTestChatLabService({
   persistence,
   llmProvider,
+  conversationLlmProvider = llmProvider,
   outboundProvider,
   managerNotificationProvider,
   logger,
@@ -77,7 +79,7 @@ export function createTestChatLabService({
     },
   };
   const extractMessage = createMessageExtractor({ llmProvider });
-  const generateNaturalResponse = createNaturalResponseGenerator({ llmProvider });
+  const generateNaturalResponse = createNaturalResponseGenerator({ llmProvider: conversationLlmProvider });
   const processIncomingEvent = createIncomingEventProcessor({
     persistence,
     extractMessage,
