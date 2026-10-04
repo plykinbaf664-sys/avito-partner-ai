@@ -17,8 +17,8 @@ kind and knowledge IDs. Generation was rejected with
 were successful Qwen calls. This was a validation/context failure, not an API
 outage or missing credentials. The full turn took about 119 seconds.
 
-The original candidate text and review feedback were not persisted in production
-telemetry, so the exact unsupported sentence cannot be reconstructed. No claim
+The original candidate text and review feedback were not present in the incident's
+persisted telemetry, so the exact unsupported sentence cannot be reconstructed. No claim
 is made that a particular sentence caused that original rejection.
 
 ## General causes reproduced by regression tests
@@ -122,3 +122,45 @@ readiness, the contextual next-step question and phone through the real pipeline
 Its fixture independently asserts unchanged deterministic qualification and
 absence of handoff authorization before the phone. This distinguishes the
 reported contact/reference failure from the separate financial extraction issue.
+
+## Final release evidence
+
+Production application/build revision: `65b432754d89321cec78a6b91f5e87cfdc6a9d41`.
+All 539 tests, typecheck, lint and build passed in the isolated Linux candidate;
+the application changes also passed locally (tests with one worker).
+
+The targeted seeded replay passed on real `qwen3.8-flash`: three inbound turns,
+three LLM replies, no response failure/fallback, one manager notification. Its
+duplicate inbound caused no new call or outbound. Both semantic judge and manual
+inspection passed. The first generated answer included two requests, but the
+semantic prefix cleanup retained exactly one before delivery. On the follow-on
+question, review removed the repeated optional request while preserving the
+explanation of the contact step. The phone acknowledgment required one bounded
+repair; the final response remained LLM-generated and the handoff remained once.
+
+This replay recorded 11 workflow calls plus one evaluation-judge call, no API
+errors, two rejected drafts, and tariff-estimated total cost $0.010110 including
+the judge. Mean call latency was 14.63 seconds; this small sample is not a
+production cost/latency forecast. The unrelated unseeded financial scenario
+remains failed/open as recorded above, not replaced or weakened by this replay.
+
+The final consistent backup and rollback manifest are at:
+`/opt/avito-partner-ai-backups/qwen-migration-20261004-160126/ready-contact-release.json`.
+After promotion health/readiness passed, both services were active/running with
+zero restarts, and the first four polling cycles completed without error events.
+Two actual production-runtime smoke calls recorded provider Qwen, model
+`qwen3.8-flash`, success, uncached input 28/28, output 63/58, cache creation
+2043/0, cache read 0/2043, latency 2951/1854 ms. No Claude calls were recorded in
+that observation window. Existing networking and credentials were unchanged.
+
+Controlled replay used the real application pipeline on the production server
+with an isolated in-memory database and fake Avito/Telegram delivery. No test
+message was sent to a real customer; actual new customer delivery was not
+claimed from smoke calls. Successful replay was not rerun after promotion.
+
+Rollback on the server (previous working Qwen build/configuration; inbound DB
+is preserved):
+
+```sh
+python3 /root/ready-contact-release.py rollback /opt/avito-partner-ai-backups/qwen-migration-20261004-160126/ready-contact-release.json
+```
