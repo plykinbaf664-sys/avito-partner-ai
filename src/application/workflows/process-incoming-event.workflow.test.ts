@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RetryableInfrastructureError } from "../errors/infrastructure-error";
 import { createOutboundMessageDelivery } from "../delivery/deliver-outbound-message";
 import { createMessageExtractor } from "../extraction/extract-message";
+import { createNaturalResponseGenerator } from "../conversation/generate-natural-response";
 import type { ExtractMessageResult } from "../extraction/extract-message";
 import type { Persistence } from "../ports/repositories";
 import type {
@@ -150,6 +151,30 @@ describe("incoming partner event workflow", () => {
       text,
     };
   }
+
+  it("retains response API attempts and known tokens through fallback without reprocessing a duplicate", async () => {
+    const extracted = extractionResult({ city: "Москва" });
+    extracted.extraction.intent = "QUESTION";
+    Object.assign(extracted.extraction.signals, { questions: ["С чего начать?"], requiresSubstantiveAnswer: true,
+      questionKind: "RECOMMENDATION", knowledgeEntryIds: ["launch-process"] });
+    const llm = new FakeLLMProvider([
+      { model: "test-response", inputTokens: 20, outputTokens: 2, text: JSON.stringify({ text: "", answerText: "Команда поможет подобрать объект.",
+        qualificationQuestion: "", interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["launch-process"],
+        qualificationMoveDecision: "DEFER", qualificationMoveRationale: "Сначала отвечаю на текущую просьбу." }) },
+      { model: "test-response", inputTokens: 30, outputTokens: 3, text: JSON.stringify({ answerIsSupported: false,
+        answersCurrentRequest: true, optionalQuestionAppropriate: true, feedback: "Исправьте неподтверждённое действие." }) },
+      new Error("safe-provider-failure"),
+    ]);
+    const processEvent = createIncomingEventProcessor({ persistence, extractMessage: async () => extracted,
+      generateNaturalResponse: createNaturalResponseGenerator({ llmProvider: llm }) });
+    const event = input("cost-fallback-event", "С чего начать?");
+    const result = await processEvent(event);
+    expect(result.metrics).toMatchObject({ responseLlmCalls: 3, totalInputTokens: 60, totalOutputTokens: 15,
+      usageComplete: false, responseGenerationSource: "FALLBACK_DRAFT" });
+    const duplicate = await processEvent(event);
+    expect(duplicate.duplicate).toBe(true);
+    expect(llm.callCount).toBe(3);
+  });
 
   it("extracts city, available capital, and launch timing from one message", async () => {
     const { processEvent } = createHarness([

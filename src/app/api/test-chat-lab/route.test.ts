@@ -25,6 +25,12 @@ vi.mock("@/integrations/anthropic/config", () => ({
   readAnthropicConfig: vi.fn(() => ({ apiKey: "test", model: "test" })),
 }));
 
+// The route depends on the selected provider factory after the migration.
+// Transport/configuration behavior is covered by provider-config.test.ts.
+vi.mock("@/integrations/llm/runtime-provider", () => ({
+  createRuntimeLlmProvider: vi.fn(() => ({})),
+}));
+
 vi.mock("@/integrations/anthropic/anthropic-llm-provider", () => ({
   AnthropicLLMProvider: class FakeAnthropicLLMProvider {
     constructor(config: unknown) {

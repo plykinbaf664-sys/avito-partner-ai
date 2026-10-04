@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { COMPACT_EXTRACTION_CONTRACT } from "./compact-contract";
+import { describeCompactExtractionSchema } from "./compact-schema";
+import { createLlmUsageTracker, type LlmCallContext, type LlmUsageTotals } from "../observability/llm-usage";
 
 import type { LlmProvider, LlmTextResponse } from "../ports/llm-provider";
 import {
@@ -185,6 +188,7 @@ export class InvalidExtractionOutputError extends Error {
 export interface ExtractMessageResult {
   extraction: ExtractedMessage;
   diagnostics?: ExtractionDiagnostics;
+  llmUsage?: LlmUsageTotals;
   llm: Pick<
     LlmTextResponse,
     "model" | "inputTokens" | "outputTokens"
@@ -197,6 +201,8 @@ export interface ExtractMessageDependencies {
 }
 
 export interface MessageExtractionInput {
+  llmContext?: LlmCallContext;
+  conversationMemory?: string;
   text: string;
   currentLead?: Lead;
   pendingInformationNeed?: InformationNeed | null;
@@ -221,6 +227,7 @@ CAPITAL CONFIRMATION: when the user presents an amount as money they have, their
 - Никогда не выставляй HOT, WARM, PRIORITY, NO_FIT или handoff status.
 - Не додумывай отсутствующие данные. Используй null, пустой массив и UNKNOWN только по смыслу schema.
 - CURRENT_MESSAGE — единственный новый пользовательский ввод. RECENT_MESSAGES, CURRENT_LEAD_FACTS и PENDING_INFORMATION_NEED нужны только для разрешения однозначных ссылок вроде «да, такой бюджет подходит», «а если два?» или «это входит в сумму?». Не записывай слова ассистента как факты пользователя без явного подтверждения в CURRENT_MESSAGE.
+- CONVERSATION_MEMORY — вспомогательная память о темах и договорённостях, не новые факты пользователя. Используй её для понимания ссылок; CURRENT_MESSAGE и надёжная история имеют приоритет.
 - В RECENT_MESSAGES actor=MANAGER означает Дмитрия: учитывай его сообщения как часть общей истории команды и текущий договорённый следующий шаг. Это не факт пользователя само по себе, но ответ пользователя может быть прямым продолжением просьбы Дмитрия.
 - Определи функцию CURRENT_MESSAGE в текущем разговоре. CONFIRMATION — короткое согласие или подтверждение предыдущего вопроса; CORRECTION — исправление ранее сообщённого факта; COMPLAINT — раздражение, непонимание или жалоба на качество предыдущего ответа. Не смешивай COMPLAINT с обычным деловым возражением: это сигнал сначала восстановить взаимопонимание.
 - previousQuestionResponse описывает смысл CURRENT_MESSAGE относительно последнего вопроса AI/HUMAN: ANSWERED — содержательно ответил; UNSURE — прямо или по смыслу не знает ответа; DECLINED_TO_ANSWER — не хочет отвечать сейчас; CHANGED_TOPIC — переключил разговор; NOT_A_RESPONSE — предыдущего вопроса нет или сообщение к нему не относится. Не считай UNSURE заполненным qualification fact и не пытайся угадывать значение.
@@ -291,7 +298,7 @@ function parseJson(text: string): unknown {
   }
 }
 
-function withExtractionDefaults(value: unknown): unknown {
+function withExtractionDefaults(value: unknown, sparse = false): unknown {
   if (!value || typeof value !== "object") return value;
   const root = value as Record<string, unknown>;
   if (!root.facts || typeof root.facts !== "object") return value;
@@ -302,6 +309,8 @@ function withExtractionDefaults(value: unknown): unknown {
   return {
     ...root,
     facts: {
+      ...(sparse ? { ...conservativeExtraction("").facts, phoneNumber: "",
+        availableCapital: -1, entryBudget: -1, additionalLaunchCapital: -1, calculationUnits: -1 } : {}),
       phoneNumber: "",
       phoneConfirmed: false,
       buyingIntent: "UNKNOWN",
@@ -309,6 +318,7 @@ function withExtractionDefaults(value: unknown): unknown {
     },
     signals: signals
       ? {
+          ...(sparse ? conservativeExtraction("").signals : {}),
           previousQuestionResponse: "NOT_A_RESPONSE",
           resolvedQuestion: "",
           contextualReference: false,
@@ -589,10 +599,20 @@ export function createMessageExtractor({
     const generatedSchema = z.toJSONSchema(extractedMessageSchema);
     const jsonSchema = { ...generatedSchema };
     delete jsonSchema.$schema;
+    if (llmProvider.promptProfile === "compact-v1") {
+      // Restore missing fields to unknown before full validation; never infer
+      // a business fact just to fill the provider's output envelope.
+      const properties = jsonSchema.properties as Record<string, { required?: string[] }>;
+      delete properties.facts!.required;
+      properties.signals!.required = ["requiresSubstantiveAnswer", "questionKind", "previousQuestionResponse"];
+      describeCompactExtractionSchema(properties);
+    }
     const userMessage = JSON.stringify({
         type: "UNTRUSTED_CONVERSATION_CONTEXT",
         CURRENT_MESSAGE: validatedText,
-        APPROVED_KNOWLEDGE: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+        CONVERSATION_MEMORY: typeof input === "string" ? "" : input.conversationMemory?.slice(0, 700) ?? "",
+        APPROVED_KNOWLEDGE: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) =>
+          llmProvider.promptProfile === "compact-v1" ? { id, category } : { id, category, answer }),
         PENDING_INFORMATION_NEED:
           typeof input === "string" ? null : input.pendingInformationNeed ?? null,
         CURRENT_LEAD_FACTS: typeof input === "string" || !input.currentLead ? null : {
@@ -627,18 +647,21 @@ export function createMessageExtractor({
             content: content.slice(0, MAX_RECENT_LLM_MESSAGE_LENGTH),
           })),
       });
+    const usage = createLlmUsageTracker();
+    const systemPrompt = llmProvider.promptProfile === "compact-v1" ? COMPACT_EXTRACTION_CONTRACT : EXTRACTION_SYSTEM_PROMPT;
     const requestExtraction = (validationFeedback?: string) =>
-      llmProvider.generateText({
-        systemPrompt: validationFeedback
-          ? `${EXTRACTION_SYSTEM_PROMPT}\n\nTRUSTED_VALIDATION_FEEDBACK: ${validationFeedback}`
-          : EXTRACTION_SYSTEM_PROMPT,
+      usage.call(llmProvider, {
+        systemPrompt: validationFeedback ? `${systemPrompt}\n\nTRUSTED_VALIDATION_FEEDBACK: ${validationFeedback}` : systemPrompt,
         userMessage,
         maxTokens,
         jsonSchema,
-      });
+        cache: { stableFields: ["APPROVED_KNOWLEDGE"], ttl: "5m", systemPrefix: systemPrompt },
+        metadata: { ...(typeof input === "string" ? {} : input.llmContext), stage: "EXTRACTION", attempt: usage.totals.calls + 1,
+          promptVersion: llmProvider.promptProfile === "compact-v1" ? "extraction-compact-v1" : "extraction-context-v2" },
+      }).catch(error => { if (error instanceof Error) Object.assign(error, { llmUsage: usage.totals }); throw error; });
     const parseExtraction = (response: LlmTextResponse): ExtractedMessage => {
       const parsed = extractedMessageSchema.safeParse(
-        withExtractionDefaults(parseJson(response.text)),
+        withExtractionDefaults(parseJson(response.text), llmProvider.promptProfile === "compact-v1"),
       );
       if (!parsed.success) {
         throw new InvalidExtractionOutputError(
@@ -678,15 +701,18 @@ export function createMessageExtractor({
           validatedText,
         );
         if (signalReasons.length === 0) {
+          await llmProvider.annotateCall?.(response.callId, "ACCEPTED");
           parsedData = candidate;
           break;
         }
         failureReasons.push(...signalReasons);
+        await llmProvider.annotateCall?.(response.callId, "REJECTED", "INVALID_CONVERSATION_SIGNALS");
         validationFeedback = signalReasons.includes("UNRESOLVED_CONTEXTUAL_REFERENCE")
           ? "The current question refers to earlier conversation but resolvedQuestion was empty. Resolve the nearest unambiguous referent from the immediately preceding AI/HUMAN turn, preserving its subject and unit (time, money, objects, income); never choose a topic solely from available business facts. If ambiguous, set contextualReference=false and let the conversation model ask for clarification."
           : "The previous output contained inconsistent conversational signals or copied/invented a question. A response to the immediately preceding AI/HUMAN question is not itself a user question merely because it mentions that topic. Populate questions only for an independent request for information in CURRENT_MESSAGE. Keep previousQuestionResponse, requiresSubstantiveAnswer and intent semantically consistent. RECENT_MESSAGES may resolve references, but their text must never be emitted as a current question or objection.";
       } catch (error) {
         if (!(error instanceof InvalidExtractionOutputError)) throw error;
+        await llmProvider.annotateCall?.(response.callId, "REJECTED", error.reason);
         failureReasons.push(error.reason);
         validationFeedback =
           "The previous output was not valid structured extraction JSON. Return one complete JSON object matching the provided schema exactly. Do not omit required fields and do not include markdown or prose.";
@@ -816,6 +842,7 @@ export function createMessageExtractor({
 
     return {
       extraction,
+      llmUsage: usage.totals,
       diagnostics: {
         status: degraded
           ? "DEGRADED"

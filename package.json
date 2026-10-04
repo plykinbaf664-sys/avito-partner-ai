@@ -13,6 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "eval:conversation": "node --env-file-if-exists=.env.local --import tsx scripts/eval-conversation.ts",
+    "report:llm-usage": "node --env-file-if-exists=.env.local --import tsx scripts/report-llm-usage.ts",
+    "measure:llm-context": "node --env-file-if-exists=.env.local --import tsx scripts/measure-llm-context.ts",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",

@@ -342,3 +342,27 @@ export const telegramBotUpdates = sqliteTable("telegram_bot_updates", {
   updateId: text("update_id").primaryKey(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
+
+export const llmCalls = sqliteTable("llm_calls", {
+  id: text("id").primaryKey(),
+  requestId: text("request_id").notNull(),
+  eventId: text("event_id"),
+  conversationId: text("conversation_id"),
+  workload: text("workload").notNull(),
+  stage: text("stage").notNull(),
+  model: text("model").notNull(),
+  status: text("status").notNull(),
+  startedAt: integer("started_at", { mode: "timestamp_ms" }).notNull(),
+  completedAt: integer("completed_at", { mode: "timestamp_ms" }),
+  inputTokens: integer("input_tokens"),
+  outputTokens: integer("output_tokens"),
+  cacheCreationInputTokens: integer("cache_creation_input_tokens"),
+  cacheReadInputTokens: integer("cache_read_input_tokens"),
+  estimatedCostMicrousd: integer("estimated_cost_microusd"),
+  workflowOutcome: text("workflow_outcome").$type<import("@/application/observability/llm-usage").LlmWorkflowOutcome>(),
+  details: text("details", { mode: "json" }).$type<import("@/application/observability/llm-usage").LlmCallRecord>().notNull(),
+}, table => [
+  index("llm_calls_event_idx").on(table.eventId),
+  index("llm_calls_request_idx").on(table.requestId),
+  index("llm_calls_workload_started_idx").on(table.workload, table.startedAt),
+]);

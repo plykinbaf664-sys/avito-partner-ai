@@ -5,8 +5,7 @@ import { createIncomingEventAcceptor } from "@/application/workflows/accept-inco
 import { createIncomingEventProcessor } from "@/application/workflows/process-incoming-event";
 import { readAvitoChannelEnvironment, readInboundEnvironment, readTelegramEnvironment } from "@/config/environment";
 import { SqlitePersistence } from "@/infrastructure/database/sqlite-persistence";
-import { AnthropicLLMProvider } from "@/integrations/anthropic/anthropic-llm-provider";
-import { readAnthropicConfig } from "@/integrations/anthropic/config";
+import { createRuntimeLlmProvider } from "@/integrations/llm/runtime-provider";
 import { AvitoApiClient } from "@/integrations/avito/avito-api-client";
 import { AvitoOutboundMessageProvider } from "@/integrations/avito/avito-outbound-message-provider";
 import { TelegramManagerNotificationProvider } from "@/integrations/telegram/telegram-manager-notification-provider";
@@ -20,8 +19,9 @@ export function createRuntimeAvitoWebhook() {
   const telegram = readTelegramEnvironment(process.env);
   const persistence = SqlitePersistence.create(inbound.DATABASE_URL);
   const logger = new ConsoleStructuredLogger();
-  const llmProvider = new AnthropicLLMProvider(readAnthropicConfig(process.env));
-  const conversationProvider = new AnthropicLLMProvider(readAnthropicConfig(process.env, "conversation"));
+  const telemetry = { usage: persistence.llmUsage, logger, workload: "PRODUCTION" as const };
+  const llmProvider = createRuntimeLlmProvider(process.env, "extraction", telemetry);
+  const conversationProvider = createRuntimeLlmProvider(process.env, "conversation", telemetry);
   const client = new AvitoApiClient({
     clientId: avito.clientId,
     clientSecret: avito.clientSecret,

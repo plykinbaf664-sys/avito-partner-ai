@@ -27,10 +27,19 @@ const baseEnvironmentSchema = z.object({
 });
 
 const inboundEnvironmentSchema = baseEnvironmentSchema.extend({
-  ANTHROPIC_API_KEY: z.string().trim().min(1),
-  ANTHROPIC_MODEL: z.string().trim().min(1),
+  LLM_PROVIDER: z.enum(["anthropic", "qwen"]).default("anthropic"),
+  ANTHROPIC_API_KEY: nonEmptyOptional,
+  ANTHROPIC_MODEL: nonEmptyOptional,
   ANTHROPIC_CONVERSATION_MODEL: z.string().trim().min(1).default("claude-sonnet-4-6"),
   ANTHROPIC_TIMEOUT_MS: z.coerce.number().int().positive().default(15_000),
+  QWEN_API_KEY: nonEmptyOptional,
+  QWEN_API_HOST: nonEmptyOptional,
+  QWEN_MODEL: z.string().trim().min(1).default("qwen3.8-flash"),
+  QWEN_TIMEOUT_MS: z.coerce.number().int().positive().max(120_000).default(45_000),
+  QWEN_CACHE_MODE: z.enum(["implicit", "explicit"]).default("explicit"),
+  QWEN_STRUCTURED_OUTPUT: z.enum(["json_schema", "json_object"]).default("json_object"),
+  QWEN_THINKING_MODE: z.enum(["off", "bounded"]).default("off"),
+  QWEN_THINKING_BUDGET: z.coerce.number().int().min(128).max(4096).default(1024),
 });
 
 export class InvalidEnvironmentError extends Error {
@@ -63,6 +72,10 @@ export function readBaseEnvironment(environment: EnvironmentInput) {
 
 export function readInboundEnvironment(environment: EnvironmentInput) {
   const parsed = parseEnvironment(inboundEnvironmentSchema, environment);
+  const missing = parsed.LLM_PROVIDER === "anthropic"
+    ? [!parsed.ANTHROPIC_API_KEY ? "ANTHROPIC_API_KEY" : null, !parsed.ANTHROPIC_MODEL ? "ANTHROPIC_MODEL" : null]
+    : [!parsed.QWEN_API_KEY ? "QWEN_API_KEY" : null, !parsed.QWEN_API_HOST ? "QWEN_API_HOST" : null];
+  if (missing.some(Boolean)) throw new InvalidEnvironmentError(missing.filter((field): field is string => field !== null));
   validateConditionalEnvironment(parsed);
   return {
     ...parsed,

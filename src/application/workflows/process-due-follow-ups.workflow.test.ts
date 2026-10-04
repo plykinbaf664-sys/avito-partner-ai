@@ -119,6 +119,28 @@ describe("due qualification follow-ups workflow", () => {
     text,
   });
 
+  it("provides approved knowledge, conversational memory and workflow identity to follow-up generation", async () => {
+    const { processEvent } = harness([extractionReply()]);
+    const first = await processEvent(input("follow-up-context", "Здравствуйте"));
+    const conversation = await persistence.conversations.findById(first.conversationId!);
+    await persistence.conversations.update({ ...conversation!, summary: JSON.stringify({
+      conversationalNotes: "Человек пока сравнивает варианты запуска, вопрос о масштабе уже обсуждали.",
+    }) });
+    const requests: Parameters<NaturalResponseGenerator>[0][] = [];
+    const processDue = createDueFollowUpsProcessor({ persistence,
+      generateNaturalResponse: async (request) => {
+        requests.push(request);
+        return { text: "Если появятся вопросы, помогу с расчётом запуска.", model: "fake", inputTokens: 1,
+          outputTokens: 1, nextInformationNeed: null };
+      } });
+    await processDue(new Date("2026-09-01T12:00:00.000Z"));
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.llmContext).toMatchObject({ operation: "FOLLOW_UP", conversationId: first.conversationId,
+      leadId: first.leadId, source: "follow-up-test" });
+    expect(requests[0]!.plan.approvedFacts?.map(fact => fact.id)).toContain("launch-process");
+    expect(requests[0]!.conversationMemory).toContain("вопрос о масштабе уже обсуждали");
+  });
+
   it("sends once at 2 hours and remains idempotent", async () => {
     const { processEvent, processDue, outboundProvider } = harness([
       extractionReply(),
@@ -145,6 +167,37 @@ describe("due qualification follow-ups workflow", () => {
       lastFollowUpAt: currentTime,
       followUpEligibleAt: null,
     });
+  });
+
+  it("honors NO_REPLY and consumes the silence episode without sending an empty message or repeating generation", async () => {
+    const { processEvent } = harness([extractionReply()]);
+    const first = await processEvent(input("follow-up-no-reply", "Здравствуйте"));
+    let generations = 0;
+    const outbound = new FakeOutboundProvider();
+    const due = createDueFollowUpsProcessor({ persistence, outboundProvider: outbound,
+      generateNaturalResponse: async () => {
+        generations++;
+        return { replyAction: "NO_REPLY", text: "", model: "fake", inputTokens: 1, outputTokens: 1, nextInformationNeed: null };
+      } });
+    const result = await due(new Date("2026-09-01T12:00:00.000Z"));
+    await due(new Date("2026-09-01T12:01:00.000Z"));
+    expect(result.created).toHaveLength(0);
+    expect(outbound.requests).toHaveLength(0);
+    expect(generations).toBe(1);
+    expect(await persistence.conversations.findById(first.conversationId!)).toMatchObject({ followUpCount: 0, followUpEligibleAt: null });
+  });
+
+  it("does not consume a new silence episode when inbound arrives during a NO_REPLY decision", async () => {
+    const { processEvent } = harness([extractionReply(), extractionReply({ city: "Москва" })]);
+    const first = await processEvent(input("follow-up-old-episode", "Здравствуйте"));
+    const due = createDueFollowUpsProcessor({ persistence, generateNaturalResponse: async () => {
+      currentTime = new Date("2026-09-01T12:00:01.000Z");
+      await processEvent(input("follow-up-new-episode", "Я в Москве"));
+      return { replyAction: "NO_REPLY", text: "", model: "fake", inputTokens: 1, outputTokens: 1, nextInformationNeed: null };
+    } });
+    expect((await due(new Date("2026-09-01T12:00:00.000Z"))).created).toHaveLength(0);
+    expect(await persistence.conversations.findById(first.conversationId!)).toMatchObject({
+      followUpEligibleAt: new Date("2026-09-01T14:00:01.000Z"), followUpCount: 0 });
   });
 
   it("cancels a due follow-up when Dmitry continues the conversation", async () => {

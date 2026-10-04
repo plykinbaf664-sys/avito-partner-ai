@@ -7,8 +7,7 @@ import {
   readTelegramEnvironment,
 } from "../../../config/environment";
 import { SqlitePersistence } from "../../../infrastructure/database/sqlite-persistence";
-import { AnthropicLLMProvider } from "../../../integrations/anthropic/anthropic-llm-provider";
-import { readAnthropicConfig } from "../../../integrations/anthropic/config";
+import { createRuntimeLlmProvider } from "../../../integrations/llm/runtime-provider";
 import { TelegramManagerNotificationProvider } from "../../../integrations/telegram/telegram-manager-notification-provider";
 import type {
   InboundRequestVerifier,
@@ -33,8 +32,9 @@ export function createRuntimeInboundRequestVerifier(
 export function createRuntimeInboundProcessor() {
   const environment = readInboundEnvironment(process.env);
   const persistence = SqlitePersistence.create(environment.DATABASE_URL);
-  const llmProvider = new AnthropicLLMProvider(readAnthropicConfig(process.env));
-  const conversationProvider = new AnthropicLLMProvider(readAnthropicConfig(process.env, "conversation"));
+  const telemetry = { usage: persistence.llmUsage, logger: new ConsoleStructuredLogger(), workload: "DEVELOPMENT" as const };
+  const llmProvider = createRuntimeLlmProvider(process.env, "extraction", telemetry);
+  const conversationProvider = createRuntimeLlmProvider(process.env, "conversation", telemetry);
   const telegram = readTelegramEnvironment(process.env);
   const managerNotificationProvider = telegram.enabled
     ? new TelegramManagerNotificationProvider({

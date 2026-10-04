@@ -2,8 +2,7 @@ import { resolve } from "node:path";
 
 import { testChatLabActionSchema } from "@/application/test-chat-lab/test-chat-lab-contract";
 import { createTestChatLabService } from "@/application/test-chat-lab/test-chat-lab-service";
-import { readAnthropicConfig } from "@/integrations/anthropic/config";
-import { AnthropicLLMProvider } from "@/integrations/anthropic/anthropic-llm-provider";
+import { createRuntimeLlmProvider } from "@/integrations/llm/runtime-provider";
 import { FakeManagerNotificationProvider } from "@/integrations/fake/fake-manager-notification-provider";
 import { FakeOutboundProvider } from "@/integrations/fake/fake-outbound-provider";
 import { SqlitePersistence } from "@/infrastructure/database/sqlite-persistence";
@@ -36,8 +35,8 @@ async function withLab<T>(operation: (service: ReturnType<typeof createTestChatL
     const managerNotificationProvider = new FakeManagerNotificationProvider();
     const service = createTestChatLabService({
       persistence,
-      llmProvider: new AnthropicLLMProvider(readAnthropicConfig(process.env)),
-      conversationLlmProvider: new AnthropicLLMProvider(readAnthropicConfig(process.env, "conversation")),
+      llmProvider: createRuntimeLlmProvider(process.env, "extraction", { usage: persistence.llmUsage, workload: "TEST_LAB" }),
+      conversationLlmProvider: createRuntimeLlmProvider(process.env, "conversation", { usage: persistence.llmUsage, workload: "TEST_LAB" }),
       outboundProvider,
       managerNotificationProvider,
     });

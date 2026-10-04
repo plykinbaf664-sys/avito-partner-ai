@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { settleLlmUsage, type LlmUsageTotals } from "../observability/llm-usage";
 
 import type { NaturalResponseGenerator } from "../conversation/generate-natural-response";
 import { EventProcessingRejectedError } from "../errors/event-processing-error";
@@ -72,7 +73,10 @@ export interface ProcessIncomingEventMetrics {
   llmSuccess: boolean | null;
   duplicateEventCount: 0 | 1;
   extractionLlmCalls: number;
-  responseLlmCalls: 0 | 1;
+  responseLlmCalls: number;
+  usageComplete?: boolean;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
   totalInputTokens: number | null;
   totalOutputTokens: number | null;
   responseGenerationSource?: "LLM" | "FALLBACK_DRAFT" | "POLICY_REPLY" | "SUPPRESSED" | "NO_REPLY";
@@ -365,6 +369,8 @@ function buildResult({
   outboundMessage = null,
   managerSummary = null,
   responseLlm = null,
+  responseFailureUsage,
+  extractionUsage,
   extractionLlmCalls,
   responseGenerationSource,
   outOfOrderIgnored = false,
@@ -381,7 +387,10 @@ function buildResult({
   responseLlm?: {
     inputTokens: number;
     outputTokens: number;
+    llmUsage?: LlmUsageTotals;
   } | null;
+  responseFailureUsage?: LlmUsageTotals;
+  extractionUsage?: LlmUsageTotals;
   extractionLlmCalls?: number;
   responseGenerationSource?: ProcessIncomingEventMetrics["responseGenerationSource"];
   outOfOrderIgnored?: boolean;
@@ -427,15 +436,18 @@ function buildResult({
       duplicateEventCount: duplicate ? 1 : 0,
       extractionLlmCalls:
         extractionLlmCalls ?? (duplicate ? 0 : extraction === null ? 0 : 1),
-      responseLlmCalls: responseLlm ? 1 : 0,
+      responseLlmCalls: responseLlm?.llmUsage?.calls ?? responseFailureUsage?.calls ?? (responseLlm ? 1 : 0),
+      usageComplete: (extractionUsage?.complete ?? true) && (responseLlm?.llmUsage?.complete ?? responseFailureUsage?.complete ?? true),
+      cacheCreationInputTokens: (extractionUsage?.cacheCreationInputTokens ?? 0) + (responseLlm?.llmUsage?.cacheCreationInputTokens ?? responseFailureUsage?.cacheCreationInputTokens ?? 0),
+      cacheReadInputTokens: (extractionUsage?.cacheReadInputTokens ?? 0) + (responseLlm?.llmUsage?.cacheReadInputTokens ?? responseFailureUsage?.cacheReadInputTokens ?? 0),
       totalInputTokens:
-        event.llmInputTokens === null
+        duplicate ? 0 : event.llmInputTokens === null
           ? null
-          : event.llmInputTokens + (responseLlm?.inputTokens ?? 0),
+          : event.llmInputTokens + (responseLlm?.inputTokens ?? responseFailureUsage?.inputTokens ?? 0),
       totalOutputTokens:
-        event.llmOutputTokens === null
+        duplicate ? 0 : event.llmOutputTokens === null
           ? null
-          : event.llmOutputTokens + (responseLlm?.outputTokens ?? 0),
+          : event.llmOutputTokens + (responseLlm?.outputTokens ?? responseFailureUsage?.outputTokens ?? 0),
       responseGenerationSource,
     },
   };
@@ -742,6 +754,11 @@ export function createIncomingEventProcessor({
     }
 
     const llmStartedAt = timer();
+    const llmContext = { requestId: generateId(), eventId: registration.event.id, leadId: prepared.lead!.id,
+      conversationId: prepared.conversation!.id, source: input.source, operation: "INBOUND" as const };
+    const workflowCallIds: string[] = [];
+    const settleUsage = (outcome: Parameters<typeof settleLlmUsage>[2]) => settleLlmUsage(persistence.llmUsage, workflowCallIds, outcome,
+      () => logger.error("llm.usage_settlement_failed", { requestId: llmContext.requestId }));
     logger.info("extraction.started", {
       eventId: registration.event.id,
       leadId: prepared.lead!.id,
@@ -756,12 +773,17 @@ export function createIncomingEventProcessor({
         MAX_RECENT_LLM_MESSAGES,
       );
       extracted = await extractMessage({
+        llmContext,
+        conversationMemory: parseStoredConversationMemory(prepared.conversation!.summary).conversationalNotes,
         text: input.text,
         currentLead: prepared.lead!,
         pendingInformationNeed: prepared.conversation!.pendingInformationNeed,
         recentMessages: extractionHistory.map(({ direction, actor, content }) => ({ direction, actor, content })),
       });
+      workflowCallIds.push(...(extracted.llmUsage?.callIds ?? []));
     } catch (error) {
+      if (error instanceof Error && "llmUsage" in error) workflowCallIds.push(...((error.llmUsage as LlmUsageTotals)?.callIds ?? []));
+      await settleUsage("FAILED");
       const llmLatencyMs = elapsedMilliseconds(llmStartedAt, timer);
       await persistence.incomingEvents.markFailed(
         registration.event.id,
@@ -864,6 +886,7 @@ export function createIncomingEventProcessor({
           lastAppliedInboundSequence:
             currentConversation.lastAppliedInboundSequence,
         });
+        await settleUsage("SUPPRESSED");
         return buildResult({
           event: {
             ...registration.event,
@@ -882,6 +905,7 @@ export function createIncomingEventProcessor({
           outOfOrderIgnored: true,
           extraction: extracted.extraction,
           extractionLlmCalls: extracted.diagnostics?.attempts ?? 1,
+          extractionUsage: extracted.llmUsage,
           totalProcessingLatencyMs,
         });
       }
@@ -1036,6 +1060,7 @@ export function createIncomingEventProcessor({
       let responseLlm: Awaited<ReturnType<NaturalResponseGenerator>> | null =
         null;
       let responseFailureCode: string | null = null;
+      let responseFailureUsage: LlmUsageTotals | undefined;
       if (
         !options.suppressOutbound &&
         responseGenerationPlan.useNaturalAdaptation &&
@@ -1044,6 +1069,7 @@ export function createIncomingEventProcessor({
       ) {
         try {
           responseLlm = await generateNaturalResponse({
+            llmContext,
             lead: evaluatedLead,
             plan: responseGenerationPlan,
             conversationMemory: storedConversationMemory.conversationalNotes,
@@ -1053,7 +1079,12 @@ export function createIncomingEventProcessor({
               content,
             })),
           });
+          workflowCallIds.push(...(responseLlm.llmUsage?.callIds ?? []));
         } catch (error) {
+          if (error instanceof Error && "llmUsage" in error) {
+            responseFailureUsage = error.llmUsage as LlmUsageTotals;
+            workflowCallIds.push(...(responseFailureUsage?.callIds ?? []));
+          }
           responseFailureCode = safeErrorCode(error);
           logger.error("response_generation.fallback", {
             eventId: registration.event.id,
@@ -1220,7 +1251,7 @@ export function createIncomingEventProcessor({
           ? "SUPPRESSED"
           : noAiReply
             ? "NO_REPLY"
-            : responseLlm
+            : canUseAdaptiveResponse
               ? "LLM"
               : !responseGenerationPlan.useNaturalAdaptation
                 ? "POLICY_REPLY"
@@ -1471,6 +1502,11 @@ export function createIncomingEventProcessor({
 
       });
 
+      await settleUsage(completed.outOfOrderIgnored || completed.responseSuppressed ? "SUPPRESSED" :
+        completed.responseGenerationSource === "NO_REPLY" ? "NO_REPLY" :
+        completed.responseGenerationSource === "FALLBACK_DRAFT" ? "FALLBACK" : "USED");
+      if (completed.responseGenerationSource === "FALLBACK_DRAFT" && responseLlm) responseFailureCode = "RESPONSE_NOT_USED_AFTER_STATE_UPDATE";
+
       if (completed.outOfOrderIgnored) {
         logger.info("event.out_of_order_ignored", {
           eventId: registration.event.id,
@@ -1499,6 +1535,10 @@ export function createIncomingEventProcessor({
           outOfOrderIgnored: true,
           extraction: extracted.extraction,
           extractionLlmCalls: extracted.diagnostics?.attempts ?? 1,
+          responseLlm,
+          responseFailureUsage,
+          extractionUsage: extracted.llmUsage,
+          responseGenerationSource: "SUPPRESSED",
           totalProcessingLatencyMs: completed.totalProcessingLatencyMs,
           decision: completed.decision,
         });
@@ -1660,9 +1700,12 @@ export function createIncomingEventProcessor({
         outboundMessage: completed.outboundText,
         managerSummary: completed.managerSummary,
         responseLlm,
+        responseFailureUsage,
+        extractionUsage: extracted.llmUsage,
         responseGenerationSource: completed.responseGenerationSource,
       });
     } catch (error) {
+      await settleUsage("FAILED");
       await persistence.incomingEvents.markFailed(
         registration.event.id,
         safeErrorCode(error),

@@ -1,4 +1,7 @@
 import { assessInformationNeeds } from "@/domain/conversation/information-needs";
+import { PARTNER_KNOWLEDGE_BASE } from "@/domain/knowledge/knowledge-base";
+import { settleLlmUsage, type LlmUsageTotals } from "../observability/llm-usage";
+import { readConversationalNotes } from "../conversation/conversation-context";
 import type { ConversationResponsePlan } from "@/domain/conversation/conversation-response";
 import {
   qualificationObjectiveForInformationNeed,
@@ -50,6 +53,7 @@ function buildFollowUpPlan(
     nextInformationNeed: null,
     asksUserQuestion: false,
     knowledgeEntryIds: [],
+    approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
     unresolvedQuestions: [],
     useNaturalAdaptation: true,
     allowedNextInformationNeeds,
@@ -169,6 +173,10 @@ export function createDueFollowUpsProcessor({
       if (!prepared) continue;
 
       let selected: { message: Message; created: boolean };
+      let generationUsage: LlmUsageTotals | undefined;
+      let generationFallback = false;
+      const settleUsage = (outcome: Parameters<typeof settleLlmUsage>[2]) => settleLlmUsage(persistence.llmUsage,
+        generationUsage?.callIds ?? [], outcome, () => logger.error("llm.usage_settlement_failed", { conversationId: candidate.id }));
       if (prepared.message) {
         selected = { message: prepared.message, created: false };
       } else {
@@ -180,10 +188,14 @@ export function createDueFollowUpsProcessor({
             .find((message) => message.direction === "OUTBOUND")?.content ?? null,
         );
         let selectedInformationNeed = prepared.plan!.nextInformationNeed;
+        let noReply = false;
         if (generateNaturalResponse) {
           try {
             const natural = await generateNaturalResponse({
+              llmContext: { requestId: generateId(), conversationId: prepared.conversation.id, leadId: prepared.lead.id,
+                source: prepared.lead.source, operation: "FOLLOW_UP" },
               lead: prepared.lead,
+              conversationMemory: readConversationalNotes(prepared.conversation.summary),
               plan: prepared.plan!,
               triggerType: "FOLLOW_UP_DUE",
               silenceMs: prepared.conversation.lastOutboundAt
@@ -198,15 +210,36 @@ export function createDueFollowUpsProcessor({
                 content,
               })),
             });
+            generationUsage = natural.llmUsage;
+            noReply = natural.replyAction === "NO_REPLY";
             content = natural.text;
             selectedInformationNeed = natural.nextInformationNeed;
           } catch (error) {
+            generationFallback = true;
+            if (error instanceof Error && "llmUsage" in error) generationUsage = error.llmUsage as LlmUsageTotals;
             logger.error("follow_up.generation_fallback", {
               leadId: prepared.lead.id,
               conversationId: prepared.conversation.id,
               fallbackReason: error instanceof Error ? error.message : "UNKNOWN",
             });
           }
+        }
+
+        if (noReply) {
+          const consumed = await persistence.transaction(async (repositories) => {
+            const current = await repositories.conversations.findById(prepared.conversation.id);
+            const lead = current ? await repositories.leads.findById(current.leadId) : null;
+            if (!current || !lead || !evaluateFollowUpEligibility(current, lead, now).eligible ||
+                current.lastAppliedInboundSequence !== prepared.conversation.lastAppliedInboundSequence ||
+                current.lastInboundAt?.getTime() !== prepared.conversation.lastInboundAt?.getTime() ||
+                current.lastOutboundAt?.getTime() !== prepared.conversation.lastOutboundAt?.getTime()) return false;
+            // Consume this silence decision, without claiming a message was sent.
+            // A new inbound schedules its own episode through the ordinary workflow.
+            await repositories.conversations.update({ ...current, followUpEligibleAt: null, updatedAt: now });
+            return true;
+          });
+          await settleUsage(consumed ? "NO_REPLY" : "SUPPRESSED");
+          continue;
         }
 
         const inserted = await persistence.transaction(async (repositories) => {
@@ -268,8 +301,9 @@ export function createDueFollowUpsProcessor({
           });
           return { message: followUp, created: true };
         });
-        if (!inserted) continue;
+        if (!inserted) { await settleUsage("SUPPRESSED"); continue; }
         selected = inserted;
+        await settleUsage(generationFallback ? "FALLBACK" : "USED");
       }
 
       if (selected.created) created.push(selected.message);
@@ -314,6 +348,7 @@ export function createDueFollowUpsProcessor({
         return false;
       });
       if (!stillEligible) {
+        await settleUsage("SUPPRESSED");
         logger.info("follow_up.cancelled", {
           leadId: selected.message.leadId,
           conversationId: selected.message.conversationId,

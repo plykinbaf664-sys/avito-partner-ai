@@ -48,10 +48,44 @@ import * as schema from "./schema";
 import type { PollingStateRepository } from "@/application/ports/polling-state";
 import { crmQualifiedStatuses } from "@/application/crm/crm-record";
 import { DrizzlePollingStateRepository } from "./polling-state-repository";
+import type { LlmCallRecord, LlmUsageRepository, LlmWorkflowOutcome } from "@/application/observability/llm-usage";
 
 type Database = LibSQLDatabase<typeof schema>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type DatabaseExecutor = Database | Transaction;
+
+class DrizzleLlmUsageRepository implements LlmUsageRepository {
+  constructor(private readonly database: DatabaseExecutor) {}
+  async record(record: LlmCallRecord): Promise<void> {
+    const values = { id: record.id, requestId: record.requestId, eventId: record.eventId,
+      conversationId: record.conversationId, workload: record.workload, stage: record.stage, model: record.model,
+      status: record.status, startedAt: record.startedAt, completedAt: record.completedAt,
+      inputTokens: record.inputTokens, outputTokens: record.outputTokens,
+      cacheCreationInputTokens: record.cacheCreationInputTokens, cacheReadInputTokens: record.cacheReadInputTokens,
+      estimatedCostMicrousd: record.estimatedCostMicrousd, details: record };
+    await this.database.insert(schema.llmCalls).values(values).onConflictDoUpdate({ target: schema.llmCalls.id, set: values });
+  }
+  async settle(callIds: string[], outcome: LlmWorkflowOutcome): Promise<void> {
+    if (callIds.length === 0) return;
+    await this.database.update(schema.llmCalls).set({ workflowOutcome: outcome }).where(inArray(schema.llmCalls.id, callIds));
+  }
+  async annotate(callId: string, outcome: "ACCEPTED" | "REJECTED", errorCode?: string): Promise<void> {
+    const [row] = await this.database.select().from(schema.llmCalls).where(eq(schema.llmCalls.id, callId));
+    if (!row) return;
+    await this.database.update(schema.llmCalls).set({ details: { ...row.details, validationOutcome: outcome,
+      validationErrorCode: errorCode ?? null } }).where(eq(schema.llmCalls.id, callId));
+  }
+  async list(query: Parameters<LlmUsageRepository["list"]>[0] = {}) {
+    const rows = await this.database.select().from(schema.llmCalls).where(and(
+      query.eventId ? eq(schema.llmCalls.eventId, query.eventId) : undefined,
+      query.workload ? eq(schema.llmCalls.workload, query.workload) : undefined,
+      query.since ? sql`${schema.llmCalls.startedAt} >= ${query.since.getTime()}` : undefined,
+    )).orderBy(asc(schema.llmCalls.startedAt), asc(schema.llmCalls.id)).limit(Math.min(query.limit ?? 1_000, 100_000));
+    return rows.map(row => ({ ...row.details, startedAt: new Date(row.details.startedAt),
+      completedAt: row.details.completedAt ? new Date(row.details.completedAt) : null,
+      workflowOutcome: row.workflowOutcome }));
+  }
+}
 
 class DrizzleLeadRepository implements LeadRepository {
   constructor(private readonly database: DatabaseExecutor) {}
@@ -803,6 +837,7 @@ function serializeRepository<T extends object>(
 }
 
 export class SqlitePersistence implements Persistence {
+  readonly llmUsage: LlmUsageRepository;
   readonly pollingStates: PollingStateRepository;
   readonly leads: LeadRepository;
   readonly conversations: ConversationRepository;
@@ -822,6 +857,7 @@ export class SqlitePersistence implements Persistence {
     const repositories = createRepositoryContext(database);
     const serialize = <Result>(operation: () => Promise<Result>) =>
       this.serialize(operation);
+    this.llmUsage = serializeRepository(new DrizzleLlmUsageRepository(database), serialize);
     this.pollingStates = serializeRepository(new DrizzlePollingStateRepository(database), serialize);
     this.leads = serializeRepository(repositories.leads, serialize);
     this.conversations = serializeRepository(repositories.conversations, serialize);
@@ -910,6 +946,7 @@ export class SqlitePersistence implements Persistence {
         .select({ id: schema.telegramManagerRecipients.id })
         .from(schema.telegramManagerRecipients)
         .limit(1);
+      await this.database.select({ id: schema.llmCalls.id }).from(schema.llmCalls).limit(1);
     });
   }
 

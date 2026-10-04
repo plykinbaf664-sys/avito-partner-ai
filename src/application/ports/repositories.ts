@@ -153,6 +153,7 @@ export interface RepositoryContext {
 }
 
 export interface Persistence extends RepositoryContext {
+  llmUsage?: import("../observability/llm-usage").LlmUsageRepository;
   transaction<T>(
     operation: (repositories: RepositoryContext) => Promise<T>,
   ): Promise<T>;
