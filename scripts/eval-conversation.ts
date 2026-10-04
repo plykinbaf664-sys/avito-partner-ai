@@ -98,6 +98,16 @@ async function main() {
         { actor: "USER", text: "Это каждый день или только на этапе запуска?" },
       ],
     },
+    {
+      id: "ready-contact-after-follow-on-request",
+      criteria: "Сохранить текущий смысл короткого вопроса о следующем шаге через историю. Уже готовому подходящему лиду ответить про утверждённый процесс запуска и естественно предложить контакт для менеджера, без выдуманных обязательных документов/оплаты/встреч и без анкеты. После номера один handoff, без повторного запроса телефона. Каждый substantive turn должен быть LLM, без технического fallback. Не требовать точную формулировку или вопрос о номере в строго определённом turn: допустимо предложить его после готовности или после ответа на следующий вопрос.",
+      steps: [
+        { actor: "USER", text: "Москва, на запуск сейчас есть 300 тысяч, хочу основной бизнес, начать в ближайшие дни. Отдельно оплачиваю аренду, залог, подготовку и текущие расходы. Готов ездить на просмотры и заключать договоры. Сколько времени в день нужно лично от меня?" },
+        { actor: "USER", text: "а ну окей, я готов" },
+        { actor: "USER", text: "Отлично, что для этого надо." },
+        { actor: "USER", text: "+79991234567" },
+      ],
+    },
   ] as const;
   const selected = scenarios.filter((scenario, index) => (!selectedId || scenario.id === selectedId) && index % shardCount === shardIndex);
   assert(selected.length > 0, "Unknown scenario");
@@ -225,9 +235,15 @@ async function main() {
           }
         }
         const snapshot = await lab.snapshot(sessionId);
-        if (scenario.id === "phone-handoff-continuation") {
+        if (scenario.id === "phone-handoff-continuation" || scenario.id === "ready-contact-after-follow-on-request") {
           assert.equal(snapshot.phone, "+79991234567");
           assert.equal(notifications.requests.length, 1, "Qualified phone must hand off exactly once");
+        }
+        if (scenario.id === "ready-contact-after-follow-on-request") {
+          for (const turn of turns.slice(0, -1)) {
+            assert.equal(turn.source, "LLM", "Substantive ready-lead turns must not fall back");
+            assert.equal(turn.failure, null, "Ready-lead generation must validate");
+          }
         }
         if (scenario.id === "manager-phone") assert.equal(snapshot.phone, "+79049163020");
         if (scenario.id === "correction") assert.notEqual(snapshot.qualification.status, "NO_FIT");

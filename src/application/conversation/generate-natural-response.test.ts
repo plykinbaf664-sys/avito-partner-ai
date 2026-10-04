@@ -31,6 +31,69 @@ describe("natural response generation", () => {
     expect(llm.callCount).toBe(2);
   });
 
+  it("preserves an eligible contact offer after answering a contextual next-step recommendation", async () => {
+    const llm = Object.assign(new FakeLLMProvider([JSON.stringify({
+      answerText: "Команда помогает подобрать объект; Вы посещаете просмотры и заключаете договор аренды.",
+      qualificationQuestion: "Оставите номер для связи с менеджером по запуску?", nextInformationNeed: "PHONE_NUMBER",
+      interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["launch-process"],
+    }), supportedReview]), { promptProfile: "compact-v1" as const });
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { qualificationStatus: "HOT", qualificationReason: "PHONE_UNKNOWN", phoneNumber: null,
+        phoneConfirmed: false, handoffAt: null, city: "Москва", availableCapital: 300_000 } as Lead,
+      recentMessages: [{ direction: "OUTBOUND", content: "Можно переходить к подбору объекта." },
+        { direction: "INBOUND", content: "Отлично, что для этого надо." }],
+      plan: { text: "", nextInformationNeed: "PHONE_NUMBER", asksUserQuestion: true, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        currentQuestionKind: "RECOMMENDATION", allowedNextInformationNeeds: ["PHONE_NUMBER"],
+        qualificationReasonCodes: ["SMALL_BUSINESS_READY", "PHONE_UNKNOWN"], customerFacingDecision: "CONTINUE",
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+      },
+    });
+    expect(result.text).toMatch(/подобрать.*объект/iu);
+    expect(result.text).toMatch(/номер.*менеджер/iu);
+    expect(result.nextInformationNeed).toBe("PHONE_NUMBER");
+    const generation = JSON.parse(llm.requests[0]!.userMessage);
+    const review = JSON.parse(llm.requests[1]!.userMessage);
+    expect(generation.handoffPolicy).toMatchObject({ contactRequestAllowed: true, handoffAuthorized: false, phoneKnown: false });
+    expect(review.handoffPolicy).toEqual(generation.handoffPolicy);
+  });
+
+  it.each([false, true])("accepts a structurally separate contact request without a question mark (current answer=%s)", async (currentTurnRequiresAnswer) => {
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Команда поможет подобрать объект.",
+      qualificationQuestion: "Оставьте номер, чтобы обсудить запуск с менеджером.", nextInformationNeed: "PHONE_NUMBER",
+      interpretedQuestionKind: "NONE", qualificationMoveDecision: "ADVANCE" }), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { qualificationStatus: "HOT", phoneNumber: null, phoneConfirmed: false, handoffAt: null } as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Готов участвовать в запуске." }],
+      plan: { text: "", nextInformationNeed: "PHONE_NUMBER", asksUserQuestion: true, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, allowedNextInformationNeeds: ["PHONE_NUMBER"],
+        qualificationProgressExpected: true, currentTurnRequiresAnswer },
+    });
+    expect(result.nextInformationNeed).toBe("PHONE_NUMBER");
+    expect(llm.callCount).toBe(2);
+    expect(JSON.parse(llm.requests[1]!.userMessage).purpose).toBe("ANSWER_SEMANTIC_REVIEW");
+    expect(llm.requests.some(request => request.metadata?.stage === "REPAIR")).toBe(false);
+  });
+
+  it("reviews optional questions on confirmation turns and drops a repeated request independently", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Готовность к запуску учтена.",
+      qualificationQuestion: "Подскажите, на какой номер Вам позвонить?", nextInformationNeed: "PHONE_NUMBER",
+      interpretedQuestionKind: "NONE", qualificationMoveDecision: "ADVANCE" }),
+      JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: false,
+        feedback: "Телефон уже попросили в предыдущем сообщении, клиент пока лишь подтвердил готовность." })]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { qualificationStatus: "HOT", phoneNumber: null, phoneConfirmed: false, handoffAt: null } as Lead,
+      recentMessages: [{ direction: "OUTBOUND", content: "Оставите номер для менеджера?" },
+        { direction: "INBOUND", content: "Да, я готов." }],
+      plan: { text: "", nextInformationNeed: "PHONE_NUMBER", asksUserQuestion: true, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, allowedNextInformationNeeds: ["PHONE_NUMBER"],
+        qualificationProgressExpected: true, currentTurnRequiresAnswer: false },
+    });
+    expect(result.text).toBe("Готовность к запуску учтена.");
+    expect(result.nextInformationNeed).toBeNull();
+    expect(llm.callCount).toBe(2);
+  });
+
   it("semantically reviews a calculation continued after its missing input is supplied", async () => {
     const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Для Москвы запуск двух квартир ориентировочно обойдётся в 310 000 ₽.",
       qualificationQuestion: "", interpretedQuestionKind: "BUSINESS_INFORMATION", usedKnowledgeEntryIds: ["small-business-entry"] }), supportedReview]);
@@ -159,7 +222,7 @@ describe("natural response generation", () => {
     expect(result.text).toContain("3–4");
     expect(llm.callCount).toBe(3);
     expect(llm.requests[0]!.maxTokens).toBeGreaterThanOrEqual(2000);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v1");
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v2");
     expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
     expect(JSON.stringify(llm.requests)).not.toContain("operations-after-capital-correction");
   });

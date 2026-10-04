@@ -408,11 +408,10 @@ function invalidConversationSignalReasons(
 function keepContextualSurfaceSeparateFromReferent(
   extraction: ExtractedMessage,
   currentMessage: string,
-  pendingInformationNeed: InformationNeed | null,
+  hasPreviousSpeaker: boolean,
 ): ExtractedMessage {
   if (
-    pendingInformationNeed === null ||
-    extraction.intent !== "QUESTION" ||
+    !hasPreviousSpeaker ||
     extraction.signals.contextualReference !== true ||
     extraction.signals.requiresSubstantiveAnswer !== true ||
     !extraction.signals.resolvedQuestion?.trim() ||
@@ -657,7 +656,7 @@ export function createMessageExtractor({
         jsonSchema,
         cache: { stableFields: ["APPROVED_KNOWLEDGE"], ttl: "5m", systemPrefix: systemPrompt },
         metadata: { ...(typeof input === "string" ? {} : input.llmContext), stage: "EXTRACTION", attempt: usage.totals.calls + 1,
-          promptVersion: llmProvider.promptProfile === "compact-v1" ? "extraction-compact-v1" : "extraction-context-v2" },
+          promptVersion: llmProvider.promptProfile === "compact-v1" ? "extraction-compact-v2" : "extraction-context-v2" },
       }).catch(error => { if (error instanceof Error) Object.assign(error, { llmUsage: usage.totals }); throw error; });
     const parseExtraction = (response: LlmTextResponse): ExtractedMessage => {
       const parsed = extractedMessageSchema.safeParse(
@@ -693,7 +692,7 @@ export function createMessageExtractor({
         const candidate = keepContextualSurfaceSeparateFromReferent(
           parseExtraction(response),
           validatedText,
-          typeof input === "string" ? null : input.pendingInformationNeed ?? null,
+          typeof input !== "string" && (input.recentMessages ?? []).some(message => message.direction === "OUTBOUND"),
         );
         lastStructurallyValid = candidate;
         const signalReasons = invalidConversationSignalReasons(

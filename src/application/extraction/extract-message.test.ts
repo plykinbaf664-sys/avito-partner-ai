@@ -233,6 +233,29 @@ describe("message extraction schema", () => {
     expect(llm.callCount).toBe(1);
   });
 
+  it("preserves a resolved follow-on question without a pending CRM question or QUESTION intent", async () => {
+    const expanded = JSON.parse(structuredExtractionReply({
+      intent: "QUESTION",
+      questions: ["Какие действия нужны для подбора и запуска объекта?"],
+      requiresSubstantiveAnswer: true,
+    }));
+    expanded.intent = "CONFIRMATION";
+    expanded.signals.contextualReference = true;
+    expanded.signals.resolvedQuestion = "Какие действия нужны для подбора и запуска объекта?";
+    expanded.signals.questionKind = "RECOMMENDATION";
+    const llm = new FakeLLMProvider([JSON.stringify(expanded), JSON.stringify(expanded)]);
+    const result = await createMessageExtractor({ llmProvider: llm })({
+      text: "Отлично, что для этого надо.",
+      pendingInformationNeed: null,
+      recentMessages: [{ direction: "OUTBOUND", actor: "AI", content: "Команда поможет подобрать объект; Вы посещаете просмотры и заключаете договор." }],
+    });
+    expect(result.diagnostics?.status).toBe("VALID");
+    expect(result.extraction.signals.questions).toEqual(["Отлично, что для этого надо."]);
+    expect(result.extraction.signals.resolvedQuestion).toContain("подбора");
+    expect(result.extraction.signals.requiresSubstantiveAnswer).toBe(true);
+    expect(llm.callCount).toBe(1);
+  });
+
   it("degrades safely after bounded malformed JSON repair attempts", async () => {
     const llm = new FakeLLMProvider(["not-json", "still-not-json"]);
 

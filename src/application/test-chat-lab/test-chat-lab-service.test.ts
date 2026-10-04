@@ -215,6 +215,47 @@ describe("isolated Test Chat Lab workflow", () => {
     expect(outbound.requests).toHaveLength(5);
   });
 
+  it("answers a ready lead's follow-on request, offers contact and hands off once through the real pipeline", async () => {
+    const extraction = new FakeLLMProvider([
+      extractionReply({ city: "Москва", availableCapital: 300_000, availableCapitalConfirmed: true,
+        additionalExpensesReadiness: "READY", primaryGoal: "MAIN_BUSINESS", launchTiming: "READY_NOW",
+        managementReadiness: "READY", hasFreeTime: true, buyingIntent: "READY_TO_START" },
+        { previousQuestionResponse: "ANSWERED" }, "CONFIRMATION"),
+      extractionReply({}, { questions: ["Отлично, что для этого надо."], requiresSubstantiveAnswer: true,
+        contextualReference: true, resolvedQuestion: "Что нужно для подбора и запуска объекта?",
+        questionKind: "RECOMMENDATION", knowledgeEntryIds: ["launch-process"] }, "QUESTION"),
+      extractionReply({ phoneNumber: "+79991234567", phoneConfirmed: true }),
+    ]);
+    const conversation = Object.assign(new FakeLLMProvider([
+      JSON.stringify({ answerText: "Вы готовы участвовать в запуске. Команда поможет подобрать объект в Москве.",
+        qualificationQuestion: "", nextInformationNeed: null, interpretedQuestionKind: "NONE" }),
+      JSON.stringify({ answerText: "Команда помогает подобрать объект; Вы посещаете просмотры и заключаете договор аренды.",
+        qualificationQuestion: "Оставите номер для связи с менеджером по запуску?", nextInformationNeed: "PHONE_NUMBER",
+        interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["launch-process"] }),
+      JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: true, feedback: "" }),
+    ]), { promptProfile: "compact-v1" as const });
+    const outbound = new FakeOutboundProvider();
+    const notifications = new FakeManagerNotificationProvider();
+    const lab = createTestChatLabService({ persistence, llmProvider: extraction, conversationLlmProvider: conversation,
+      outboundProvider: outbound, managerNotificationProvider: notifications });
+    await lab.managerMessage("ready-follow-on", "На запуск нужно около 3–4 часов в день: просмотры объектов и ключевые решения.", at(0), "context");
+    const ready = await lab.clientMessage("ready-follow-on", "Москва, есть 300 тысяч на запуск, хочу основной бизнес, начать сейчас. Расходы отдельно оплачиваю, готов участвовать в запуске.", at(0.01), "ready");
+    expect(ready.snapshot.qualification.reason).toBe("PHONE_UNKNOWN");
+    const next = await lab.clientMessage("ready-follow-on", "Отлично, что для этого надо.", at(0.02), "next");
+    expect(next.snapshot.lastProcessing).toMatchObject({ responseGenerationSource: "LLM", responseFailureCode: null });
+    expect(next.snapshot.lastProcessing?.outboundMessage).toMatch(/подобрать.*объект/iu);
+    expect(next.snapshot.lastProcessing?.outboundMessage).toMatch(/номер.*менеджер/iu);
+    expect(notifications.requests).toHaveLength(0);
+    await lab.clientMessage("ready-follow-on", "+79991234567", at(0.03), "phone");
+    expect(notifications.requests).toHaveLength(1);
+    const calls = extraction.callCount + conversation.callCount;
+    const deliveries = outbound.requests.length;
+    await lab.clientMessage("ready-follow-on", "+79991234567", at(0.03), "phone");
+    expect(extraction.callCount + conversation.callCount).toBe(calls);
+    expect(outbound.requests).toHaveLength(deliveries);
+    expect(notifications.requests).toHaveLength(1);
+  });
+
   async function handedOffSession(replies: string[]) {
     const facts: Partial<ExtractedFacts> = {
       city: "Москва", availableCapital: 300_000, availableCapitalConfirmed: true,
