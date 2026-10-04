@@ -138,4 +138,38 @@ operations-after-capital-correction PASS с bounded 2048: исправление
 
 Свежий server preflight PASS: uncached input 28/28, output 38/56,
 cache write/read 2043/2043, latency 2300/1729 ms. Production rollout и один
-controlled E2E выполняются после этого commit; их результат фиксируется отдельно.
+controlled E2E завершены успешно.
+
+## Production rollout 2026-10-04
+
+Код выпуска: `5c27d54a24c79f716c957bfb7cae47d8c9eed58b`.
+Перед переключением Linux-кандидат побайтно сверен с Git commit для source,
+migrations и build configuration. Backup:
+`/opt/avito-partner-ai-backups/qwen-migration-20261004-064935`, прежняя ревизия
+`d6c3fdc4e56ebb0018a88cfc05117b682131d4ca`, SQLite integrity `ok`.
+Сохранены env, consistent DB copy и прежняя `.next`; production DB не заменялась.
+Добавочная миграция выполнена, сборка переключена, оба сервиса перезапущены.
+Health/readiness PASS, app/polling active, 19 polling cycles завершились без ошибок
+в первом наблюдении. AWG/Anthropic networking сохранено.
+
+Два реальных вызова из production runtime (`workload=PRODUCTION`, ledger `llm_calls`)
+вернули provider `qwen`, model `qwen3.8-flash`, SUCCESS. Uncached input 28/28,
+output 64/63, cache read 2043/2043, cache creation 0/0 (прогретый prefix),
+latency 3761/2655 ms, тарифная оценка USD 0.000067/0.000066. Это synthetic smoke,
+не статистика реальных клиентов. Anthropic LLM calls в этой проверке отсутствуют.
+
+Один controlled E2E из production checkout/config: `phone-handoff-continuation`
+PASS, 4 inbound, 3 delivery, один handoff. Phone early не квалифицирует;
+после достаточных данных телефон не спрашивается повторно, после handoff
+вопрос получает ответ, благодарность допускает NO_REPLY, duplicate не делает
+повторного LLM/outbound. Для безопасности использованы isolated in-memory SQLite
+и fake external delivery/notification; реальным клиентам/Telegram тест не отправлялся.
+Все модельные calls реальные Qwen: 12 calls включая eval judge, 0 transport errors,
+uncached input 13961, output 7371, cache creation 7610, cache read 33112,
+USD 0.007610 с judge; latency median 12359.5 ms, p90 20826.2 ms на call.
+
+Остаточное ограничение: 3 drafts отклонены guardrails; первый phone-only turn
+использовал deterministic fallback после multiple-questions violation.
+Обработка фактов/handoff прошла, но repair/fallback и bounded reasoning добавляют
+стоимость и latency. Расширенная оценка естественности и долгосрочная статистика
+production usage остаются последующей работой; идеальное качество не заявляется.
