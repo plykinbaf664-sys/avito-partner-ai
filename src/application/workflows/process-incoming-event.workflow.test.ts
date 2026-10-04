@@ -888,6 +888,7 @@ describe("incoming partner event workflow", () => {
   it("keeps a failed event claim retryable before the LLM call", async () => {
     let failNextTransaction = true;
     const flakyPersistence: Persistence = {
+      botStatus: persistence.botStatus,
       leads: persistence.leads,
       conversations: persistence.conversations,
       messages: persistence.messages,

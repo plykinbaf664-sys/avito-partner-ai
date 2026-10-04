@@ -141,6 +141,7 @@ export interface IncomingEventRepository {
 }
 
 export interface RepositoryContext {
+  botStatus: import("../analytics/bot-status").BotStatusReadRepository;
   leads: LeadRepository;
   conversations: ConversationRepository;
   messages: MessageRepository;

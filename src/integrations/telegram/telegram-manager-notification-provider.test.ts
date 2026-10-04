@@ -461,6 +461,44 @@ describe("Telegram manager notifications", () => {
     expect(sender.calls[1].text).toContain("Chat ID: 101");
   });
 
+  it("shows Avito analytics in /status only to the active authorized manager", async () => {
+    await register();
+    const analytics = vi.spyOn(persistence.botStatus, "snapshot");
+    const sender = new RecordingSender();
+    const processUpdate = createTelegramManagerUpdateProcessor({ persistence, sender,
+      inviteCode: "valid_invite_code_123", now: () => timestamp });
+    await expect(processUpdate(update(600, 101, "/status@our_bot"))).resolves.toBe("STATUS");
+    expect(sender.calls[0].text).toContain("Статистика Avito");
+    expect(sender.calls[0].text).toContain("Сегодня");
+    expect(sender.calls[0].text).toContain("Последние 7 дней");
+    expect(sender.calls[0].text).toContain("Начато диалогов: 0");
+    expect(sender.calls[0].text).toContain("Передано в Telegram: 0");
+    expect(sender.calls[0].text).not.toMatch(/NaN|Infinity/);
+    await expect(processUpdate(update(600, 101, "/status"))).resolves.toBe("DUPLICATE");
+    expect(sender.calls).toHaveLength(1);
+    const forged = update(601, 101, "/status");
+    forged.message.from.id = 202;
+    await processUpdate(forged);
+    expect(sender.calls[1].text).not.toContain("Статистика Avito");
+    await processUpdate(update(602, 101, "/stop"));
+    await processUpdate(update(603, 101, "/status"));
+    expect(sender.calls[3].text).not.toContain("Статистика Avito");
+    expect(analytics).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases a failed /status update for retry instead of acknowledging a lost answer", async () => {
+    await register();
+    const sender = new RecordingSender((_chatId, attempt) => attempt === 1
+      ? { status: "FAILED", retryable: true, errorCode: "NETWORK_ERROR" }
+      : { status: "SENT", externalId: "retry" });
+    const processUpdate = createTelegramManagerUpdateProcessor({ persistence, sender,
+      inviteCode: "valid_invite_code_123", now: () => timestamp });
+    await expect(processUpdate(update(700, 101, "/status"))).rejects.toMatchObject({ code: "NETWORK_ERROR" });
+    await expect(processUpdate(update(700, 101, "/status"))).resolves.toBe("STATUS");
+    await expect(processUpdate(update(700, 101, "/status"))).resolves.toBe("DUPLICATE");
+    expect(sender.calls).toHaveLength(2);
+  });
+
   it("does not exhaust notification retries while another worker owns the delivery", async () => {
     await register();
     const notification = request();

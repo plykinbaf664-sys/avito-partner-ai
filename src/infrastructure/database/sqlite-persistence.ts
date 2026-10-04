@@ -49,6 +49,8 @@ import type { PollingStateRepository } from "@/application/ports/polling-state";
 import { crmQualifiedStatuses } from "@/application/crm/crm-record";
 import { DrizzlePollingStateRepository } from "./polling-state-repository";
 import type { LlmCallRecord, LlmUsageRepository, LlmWorkflowOutcome } from "@/application/observability/llm-usage";
+import type { BotStatusReadRepository } from "@/application/analytics/bot-status";
+import { DrizzleBotStatusReadRepository } from "./bot-status-repository";
 
 type Database = LibSQLDatabase<typeof schema>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -798,6 +800,7 @@ class DrizzleIncomingEventRepository implements IncomingEventRepository {
 
 function createRepositoryContext(database: DatabaseExecutor): RepositoryContext {
   return {
+    botStatus: new DrizzleBotStatusReadRepository(database),
     leads: new DrizzleLeadRepository(database),
     conversations: new DrizzleConversationRepository(database),
     messages: new DrizzleMessageRepository(database),
@@ -837,6 +840,7 @@ function serializeRepository<T extends object>(
 }
 
 export class SqlitePersistence implements Persistence {
+  readonly botStatus: BotStatusReadRepository;
   readonly llmUsage: LlmUsageRepository;
   readonly pollingStates: PollingStateRepository;
   readonly leads: LeadRepository;
@@ -883,6 +887,7 @@ export class SqlitePersistence implements Persistence {
       serialize,
     );
     this.crm = serializeRepository(repositories.crm, serialize);
+    this.botStatus = serializeRepository(repositories.botStatus, serialize);
   }
 
   private async serialize<T>(operation: () => Promise<T>): Promise<T> {
