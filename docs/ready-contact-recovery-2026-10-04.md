@@ -59,6 +59,13 @@ is made that a particular sentence caused that original rejection.
 - Review optional requests even on confirmation turns; remove an inappropriate
   optional question independently of a supported answer. Contact permission
   does not authorize invented prerequisites, meetings or callback deadlines.
+- The reviewer explicitly reports an extra qualification request embedded in
+  `answerText` and selects the useful exact prefix before it. Code permits only
+  tail deletion from the original; generated replacements are rejected. The
+  retained answer is checked against the current request and all hard policy
+  checks run again before delivery. Genuine clarification of the current
+  ambiguous request remains allowed. Modern real providers must return these
+  segmentation fields explicitly. This reuses the existing review call.
 - Version extraction, conversation and review contexts for usage attribution.
   Regression trajectories remain test/eval data and never enter production
   model context.
@@ -75,6 +82,21 @@ fallback and one handoff. It revealed the punctuation-related repair, which
 was then covered and fixed. This first run alone is not proof of the final
 version; the final server controlled E2E is the release gate. Broad exploratory
 live evaluation remains deferred as requested by the owner.
+
+The initial production candidate `53c6149` passed 534 tests, Linux build,
+health/readiness and runtime Qwen smoke. Its server E2E auto-judge also passed,
+but manual trajectory review found duplicate contact requests within individual
+turns: the request appeared both in the answer and the optional component. This
+was a critical product failure despite successful handoff. The release was
+rolled back to `262bc841e65839c54e4a0122f716885df85bc2c8`; the database was not
+restored over new messages. The backup manifest records the failed manual review.
+That run is not counted as a product-quality PASS. The new permanent tests and
+explicit segmentation output cover this additional failure class.
+
+Subsequent releases require manual inspection of the server candidate's
+controlled E2E before promotion. After promotion, runtime Qwen smoke and
+health/readiness still gate the rollout, with automatic rollback on failure.
+Successful trajectories are not rerun without an affected code change.
 
 Deployment uses an isolated Linux checkout, full software checks, a consistent
 SQLite backup and the previous build. No schema migration, credential change,

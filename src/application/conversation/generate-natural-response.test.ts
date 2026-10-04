@@ -94,6 +94,70 @@ describe("natural response generation", () => {
     expect(llm.callCount).toBe(2);
   });
 
+  it.each(["Оставьте номер для связи с менеджером.", "Оставите номер для связи с менеджером?"])("removes a model-identified duplicated request as an exact prefix edit: %s", async (qualificationQuestion) => {
+    const prefix = "На этапе запуска нужно около 3–4 часов в день. После запуска повседневную работу ведёт команда.";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: prefix + " Подскажите удобный номер?",
+      qualificationQuestion, nextInformationNeed: "PHONE_NUMBER",
+      interpretedQuestionKind: "BUSINESS_INFORMATION", qualificationMoveDecision: "ADVANCE" }),
+      JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        additionalRequestInAnswer: true, answerWithoutAdditionalRequest: prefix, feedback: "" })]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { qualificationStatus: "HOT", phoneNumber: null, phoneConfirmed: false, handoffAt: null } as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Сколько времени нужно для запуска?" }],
+      plan: { text: "", nextInformationNeed: "PHONE_NUMBER", asksUserQuestion: true, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        allowedNextInformationNeeds: ["PHONE_NUMBER"] },
+    });
+    expect(result.text).toBe(prefix + " " + qualificationQuestion);
+    expect(result.nextInformationNeed).toBe("PHONE_NUMBER");
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("preserves a genuine clarification of the current ambiguous request", async () => {
+    const clarification = "Вы имеете в виду время на запуск или ежедневное участие после запуска?";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: clarification, qualificationQuestion: "",
+      nextInformationNeed: null, interpretedQuestionKind: "CLARIFICATION" }),
+      JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        additionalRequestInAnswer: false, answerWithoutAdditionalRequest: "", feedback: "" })]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Как долго это всё?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true },
+    });
+    expect(result.text).toBe(clarification);
+    expect(result.nextInformationNeed).toBeNull();
+  });
+
+  it("requires explicit segmentation review fields from a real provider", async () => {
+    const fake = new FakeLLMProvider([JSON.stringify({ answerText: "Ориентир — 3–4 часа в день.", qualificationQuestion: "",
+      nextInformationNeed: null, interpretedQuestionKind: "BUSINESS_INFORMATION" }), supportedReview]);
+    const llm = { async generateText(request: Parameters<typeof fake.generateText>[0]) {
+      return { ...await fake.generateText(request), provider: "qwen" as const };
+    } };
+    await expect(createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Сколько времени нужно?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true },
+    })).rejects.toMatchObject({ code: "RESPONSE_POLICY_SEMANTIC_REVIEW_UNAVAILABLE",
+      reviewFailureCode: "REVIEW_SEGMENTATION_FIELDS_MISSING" });
+  });
+
+  it("rejects a semantic cleanup that adds or changes the original business answer", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Нужно около 3–4 часов в день. Оставьте номер?",
+      qualificationQuestion: "Поделитесь номером.", nextInformationNeed: "PHONE_NUMBER",
+      interpretedQuestionKind: "BUSINESS_INFORMATION", qualificationMoveDecision: "ADVANCE" }),
+      JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        additionalRequestInAnswer: true, answerWithoutAdditionalRequest: "Доход гарантирован.", feedback: "" }),
+      new Error("MODEL_UNAVAILABLE")]);
+    await expect(createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { qualificationStatus: "HOT", phoneNumber: null, phoneConfirmed: false, handoffAt: null } as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Сколько времени нужно?" }],
+      plan: { text: "", nextInformationNeed: "PHONE_NUMBER", asksUserQuestion: true, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        allowedNextInformationNeeds: ["PHONE_NUMBER"] },
+    })).rejects.toMatchObject({ code: "RESPONSE_POLICY_INVALID_SEMANTIC_CLEANUP" });
+  });
+
   it("semantically reviews a calculation continued after its missing input is supplied", async () => {
     const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Для Москвы запуск двух квартир ориентировочно обойдётся в 310 000 ₽.",
       qualificationQuestion: "", interpretedQuestionKind: "BUSINESS_INFORMATION", usedKnowledgeEntryIds: ["small-business-entry"] }), supportedReview]);
