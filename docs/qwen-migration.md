@@ -105,6 +105,45 @@ unknown units, complaint, follow-up, CRM visibility и duplicate inbound без 
 
 ## Env и rollback
 
+Для локального Test Chat Lab credentials на production-сервере недостаточны:
+Next dev читает локальный `.env.local`. Если `LLM_PROVIDER` не указан, выбирается
+Anthropic. 2026-10-04 один local POST воспроизвёл HTTP 500: usage ledger
+`data/test-chat-lab.db` показал EXTRACTION / anthropic / ANTHROPIC_HTTP_400 / BILLING.
+Локальные QWEN_API_KEY/QWEN_API_HOST отсутствовали, provider initialization при этом
+проходила и GET snapshot возвращал 200. Причиной был вызов прежнего Anthropic с
+недостаточным балансом, а не ошибка создания Qwen provider.
+
+Настройка Windows dev-среды со скрытым вводом, без пересылки секретов:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\User\avito-partner-ai\scripts\configure-local-qwen.ps1
+```
+
+Скрипт явно выбирает Qwen и отдельную `file:./data/test-chat-lab.db`, сохраняет
+прочие env-переменные, проверяет Git ignore и закрывает ACL credential-файла.
+После ввода key/host нужно перезапустить только local dev server.
+
+В Windows PowerShell для атомарной замены env используется `[NullString]::Value`:
+обычный `$null` в строковом аргументе `File.Replace` превращался в пустой backup
+path и вызывал `ArgumentException` до сохранения. Offline regression проверяет
+существующий/новый env, повторный ввод без дублей, отклонение неверного host,
+сохранение прочих переменных, private ACL и UTF-8 без BOM:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\configure-local-qwen.test.ps1
+```
+
+Локальная проверка после настройки: два последовательных POST в
+`http://localhost:3001/api/test-chat-lab` вернули HTTP 200, source LLM,
+responseFailureCode=null. Первый запрос — про время участия с известными городом
+и капиталом; второй — короткое уточнение ежедневной вовлечённости и этапа запуска.
+Usage подтверждает Qwen, fake delivery и отдельную test-chat-lab.db; production
+не изменялась. Время POST 36.985/70.491 секунд — это весь pipeline, не один API call.
+При этом второй ответ повторил дополнительный вопрос о цели. Открытая поведенческая
+регрессия сохранена как `qualification-after-side-clarification` в live eval runner;
+conversation behavior в этой локальной configuration-задаче не менялось, новых
+dialogue/eval calls не запускалось. Нельзя считать anti-repetition полностью проверенным.
+
 Секреты вводятся интерактивно через `scripts/configure-qwen-credentials.py` на сервере:
 `QWEN_API_KEY`, `QWEN_API_HOST`. Файл вне репозитория, mode 0600.
 Настройки: `LLM_PROVIDER=qwen`, `QWEN_MODEL=qwen3.8-flash`,
