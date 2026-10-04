@@ -110,3 +110,15 @@ turns with optional requests that were previously unreviewed. Avoided repair
 calls can offset this, but no percentage saving is claimed without measurement.
 The first targeted run had substantial LLM latency; this change does not solve
 the separate inference-latency problem.
+
+The isolated server trajectory for `64f868c` failed its handoff assertion:
+Qwen interpreted the initial synthetic financial statement as ENTRY_ONLY,
+with budgetConfirmed=false. Financial policy correctly withheld handoff; no
+qualification assertions or rules were relaxed. Exact-prefix cleanup worked
+in that run. The full-trajectory scenario remains unchanged and open; it is
+not counted as PASS. A separate permanent replay starts from the incident's
+confirmed qualified profile and authentic AI participation context, then runs
+readiness, the contextual next-step question and phone through the real pipeline.
+Its fixture independently asserts unchanged deterministic qualification and
+absence of handoff authorization before the phone. This distinguishes the
+reported contact/reference failure from the separate financial extraction issue.

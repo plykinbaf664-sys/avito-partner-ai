@@ -12,6 +12,8 @@ import { buildApprovedEconomicsContext } from "../src/domain/economics/economics
 import type { LlmProvider } from "../src/application/ports/llm-provider";
 import type { LlmCallRecord } from "../src/application/observability/llm-usage";
 import { buildLlmUsageReport } from "../src/application/observability/llm-usage-report";
+import { createInitialLead } from "../src/application/workflows/process-incoming-event";
+import { evaluateQualification } from "../src/domain/qualification/qualification-policy";
 
 // Opt-in live evaluation: real conversation pipeline/model, in-memory database
 // and fake delivery only. This runner never reads or changes production leads.
@@ -32,6 +34,16 @@ async function main() {
     shardCount <= 5 && shardIndex >= 0 && shardIndex < shardCount, "Invalid eval shard");
 
   const scenarios = [
+    {
+      id: "ready-profile-contextual-next-step",
+      seedQualifiedProfile: true,
+      criteria: "Профиль уже прошёл бизнес-критерии, телефон ещё неизвестен. На подтверждение готовности естественно предложить следующий контактный шаг или полезное объяснение. На 'что для этого надо' понять контекст запуска, ответить по существу и предложить контакт менеджера без обязательной анкеты/встреч/оплаты/документов. Не повторять вопросы об известных фактах и не возвращаться к необязательным CRM-полям. Один контактный запрос на AI-turn; не дублировать его в ответе и дополнительном вопросе. После номера один handoff, без повторного запроса телефона. Никакого технического fallback или просьбы уточнить понятный вопрос.",
+      steps: [
+        { actor: "USER", text: "а ну окей, я готов" },
+        { actor: "USER", text: "Отлично, что для этого надо." },
+        { actor: "USER", text: "+79991234567" },
+      ],
+    },
     {
       id: "operations-after-capital-correction",
       criteria: "После исправления бюджета 100000 на 150000 нет окончательного отказа. На составной вопрос ответить про помощь команды в поиске объекта, привлечение клиентов через объявления и ведение объекта администратором/командой; достаточно объяснить распределение ролей, подробная инструкция операций не требуется. На 'С чего начать' обозначить ближайшее практическое действие: подбор/выбор объекта при помощи команды и затем запуск. Не требовать пояснить уже понятный вопрос и не заменять ответ вопросом о бюджете или сроке. Обязательный созвон, анкета или документы не являются утверждённым первым шагом.",
@@ -209,6 +221,46 @@ async function main() {
         const steps = "steps" in scenario ? scenario.steps : preset!.steps;
         const turns = [];
         const sessionId = `live-eval-${scenario.id}-${run}`;
+        if ("seedQualifiedProfile" in scenario) {
+          // Reproduce the incident's already-persisted business state. Synthetic
+          // fixture, isolated DB only; no test trajectories enter model prompts.
+          const at = new Date("2026-10-03T08:59:00Z");
+          const lead = {
+            ...createInitialLead(`seed-${sessionId}`, "TEST_CHAT_LAB", sessionId, at),
+            city: "Москва", serviceability: "SUPPORTED" as const,
+            budget: 300_000, budgetConfirmed: true,
+            availableCapital: 300_000, availableCapitalConfirmed: true,
+            capitalScope: "TOTAL_LIMIT" as const,
+            additionalExpensesReadiness: "READY" as const,
+            businessModelReadiness: "ACCEPTS" as const,
+            segment: "SMALL_BUSINESS" as const, segmentConfidence: 1,
+            scalingPotentialUnits: 10, hasFreeTime: true,
+            primaryGoal: "MAIN_BUSINESS" as const, launchTiming: "READY_NOW" as const,
+            managementReadiness: "READY" as const,
+          };
+          const qualification = evaluateQualification(lead);
+          assert(qualification.reasonCodes.includes("SMALL_BUSINESS_READY"), "Replay fixture must satisfy unchanged business criteria");
+          assert.equal(qualification.shouldHandoffToManager, false, "Unknown phone prevents handoff");
+          await persistence.leads.insert({ ...lead, qualificationStatus: qualification.status,
+            qualificationReason: qualification.reason });
+          const conversationId = `conversation-${sessionId}`;
+          await persistence.conversations.insert({
+            id: conversationId, leadId: lead.id, state: "QUALIFYING", summary: null,
+            pendingInformationNeed: null, lastInboundAt: at, lastOutboundAt: at,
+            awaitingUserReply: true, qualificationCompleted: false,
+            followUpEligibleAt: null, followUpCount: 0, lastFollowUpAt: null,
+            nextInboundSequence: 0, lastAppliedInboundSequence: 0,
+            createdAt: at, updatedAt: at, closedAt: null,
+          });
+          await persistence.messages.insert({
+            id: `context-${sessionId}`, conversationId, leadId: lead.id,
+            incomingEventId: null, externalMessageId: null, deduplicationKey: null,
+            sequence: null, direction: "OUTBOUND", actor: "AI",
+            content: "На этапе запуска ориентир — около 3–4 часов в день: это просмотры объектов, договоры, ключевые решения. После запуска основную работу (бронирования, гости, клининг) ведёт команда, а Ваше участие сводится к эпизодическим визитам при нестандартных ситуациях.",
+            deliveryStatus: "SENT", deliveryAttempts: 1, deliveryRetryable: false,
+            lastDeliveryErrorCode: null, sentAt: at, createdAt: at,
+          });
+        }
         for (const [index, step] of steps.entries()) {
           if (scenario.id === "follow-up-silence" && index === 1) {
             const first = await lab.advanceTime(sessionId, new Date("2026-10-03T11:00:00Z"));
@@ -235,11 +287,11 @@ async function main() {
           }
         }
         const snapshot = await lab.snapshot(sessionId);
-        if (scenario.id === "phone-handoff-continuation" || scenario.id === "ready-contact-after-follow-on-request") {
+        if (scenario.id === "phone-handoff-continuation" || scenario.id === "ready-contact-after-follow-on-request" || scenario.id === "ready-profile-contextual-next-step") {
           assert.equal(snapshot.phone, "+79991234567");
           assert.equal(notifications.requests.length, 1, "Qualified phone must hand off exactly once");
         }
-        if (scenario.id === "ready-contact-after-follow-on-request") {
+        if (scenario.id === "ready-contact-after-follow-on-request" || scenario.id === "ready-profile-contextual-next-step") {
           for (const turn of turns.slice(0, -1)) {
             assert.equal(turn.source, "LLM", "Substantive ready-lead turns must not fall back");
             assert.equal(turn.failure, null, "Ready-lead generation must validate");
