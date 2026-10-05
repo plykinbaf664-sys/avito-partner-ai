@@ -656,7 +656,7 @@ export function createMessageExtractor({
         jsonSchema,
         cache: { stableFields: ["APPROVED_KNOWLEDGE"], ttl: "5m", systemPrefix: systemPrompt },
         metadata: { ...(typeof input === "string" ? {} : input.llmContext), stage: "EXTRACTION", attempt: usage.totals.calls + 1,
-          promptVersion: llmProvider.promptProfile === "compact-v1" ? "extraction-compact-v2" : "extraction-context-v2" },
+          promptVersion: llmProvider.promptProfile === "compact-v1" ? "extraction-compact-v3" : "extraction-context-v2" },
       }).catch(error => { if (error instanceof Error) Object.assign(error, { llmUsage: usage.totals }); throw error; });
     const parseExtraction = (response: LlmTextResponse): ExtractedMessage => {
       const parsed = extractedMessageSchema.safeParse(

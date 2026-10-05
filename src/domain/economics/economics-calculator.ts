@@ -229,6 +229,8 @@ export interface ApprovedEconomicsScenario {
   affordableObjectCount: AffordableObjectCount | null;
   oneObjectLaunch: LaunchBudgetRange | null;
   requestedUnitsLaunch: LaunchBudgetRange | null;
+  /** Bounded adjacent alternatives for comparison; never chosen lead facts. */
+  nearbyLaunchCosts?: Array<Pick<LaunchBudgetRange, "units" | "totalMin" | "totalMax">>;
 }
 
 export interface ApprovedEconomicsContext {
@@ -292,6 +294,11 @@ export function buildApprovedEconomicsContext(input: {
       requestedUnitsLaunch: requestedUnits === null
         ? null
         : calculateLaunchBudgetRange({ units: requestedUnits, rentReference: reference }),
+      nearbyLaunchCosts: requestedUnits === null ? [] :
+        [requestedUnits - 1, requestedUnits, requestedUnits + 1]
+          .map(units => calculateLaunchBudgetRange({ units, rentReference: reference }))
+          .filter((launch): launch is LaunchBudgetRange => launch !== null)
+          .map(({ units, totalMin, totalMax }) => ({ units, totalMin, totalMax })),
     })),
     limitations: [
       "Суммы являются утверждёнными ориентировочными сценариями, а не live-ценой конкретного объекта.",

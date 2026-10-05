@@ -13,6 +13,48 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it("keeps a semantically reviewed correction despite noncanonical optional annotations", async () => {
+    const lead = { ...createInitialLead("annotation-test", "TEST", "synthetic", new Date()),
+      city: "Москва", startingUnits: 5, availableCapital: 1_200_000,
+      availableCapitalConfirmed: true, capitalScope: "TOTAL_LIMIT" as const };
+    const answerText = "Запуск пяти объектов — около 700 000 ₽, шести — около 830 000 ₽. Бюджета 1 200 000 ₽ хватает на оба расчётных варианта; точная смета зависит от квартиры.";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText, qualificationQuestion: "",
+      interpretedQuestionKind: "CORRECTION", usedKnowledgeEntryIds: ["approvedFacts:pricing"] }), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead,
+      recentMessages: [{ direction: "INBOUND", content: "5,6" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false,
+        knowledgeEntryIds: [], unresolvedQuestions: [], useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+        economicsContext: buildApprovedEconomicsContext({ city: "Москва", availableCapital: 1_200_000, requestedUnits: 5 }) },
+    });
+    expect(result.text).toBe(answerText);
+    expect(result.usedKnowledgeEntryIds).toEqual(["pricing"]);
+    expect(llm.requests[1]!.metadata?.stage).toBe("REVIEW");
+    expect(llm.callCount).toBe(2);
+    expect(lead.startingUnits).toBe(5);
+  });
+
+  it("still rejects an unknown source ID despite a recognized source namespace", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Команда помогает выбрать объект.",
+      qualificationQuestion: "", usedKnowledgeEntryIds: ["approvedFacts:invented-source"] })]);
+    await expect(createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "С чего начать?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })) },
+    })).rejects.toMatchObject({ code: "RESPONSE_POLICY_UNKNOWN_KNOWLEDGE_ID" });
+  });
+
+  it("never delivers a discarded optional interpretation without semantic review", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Команда помогает выбрать объект.",
+      qualificationQuestion: "", interpretedQuestionKind: "OTHER_TAXONOMY" })]);
+    await expect(createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Уточняю свой выбор." }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: false },
+    })).rejects.toMatchObject({ code: "RESPONSE_POLICY_SEMANTIC_REVIEW_UNAVAILABLE" });
+  });
+
   it("shares scale-specific financial evidence with brain and reviewer without mutating the selected scale", async () => {
     const lead = { ...createInitialLead("financial-context", "TEST", "synthetic", new Date()),
       city: "Москва", startingUnits: 10, availableCapital: 1_200_000,

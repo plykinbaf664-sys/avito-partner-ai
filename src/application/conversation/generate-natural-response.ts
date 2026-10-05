@@ -119,6 +119,7 @@ function approvedEconomicsMoneyValues(plan: ConversationResponsePlan): Set<numbe
       scenario.oneObjectLaunch?.totalMax,
       scenario.requestedUnitsLaunch?.totalMin,
       scenario.requestedUnitsLaunch?.totalMax,
+      ...(scenario.nearbyLaunchCosts ?? []).flatMap(launch => [launch.totalMin, launch.totalMax]),
     ]),
     context.requestedUnitsIncome?.estimatedMonthlyIncome,
   ];
@@ -137,6 +138,7 @@ function approvedEconomicsUnitCounts(plan: ConversationResponsePlan): Set<number
       scenario.affordableObjectCount?.maxUnitsAtMinCost,
       scenario.affordableObjectCount?.maxUnitsAtMaxCost,
       scenario.requestedUnitsLaunch?.units,
+      ...(scenario.nearbyLaunchCosts ?? []).map(launch => launch.units),
     ]),
   ];
   const approvedCounts = counts.filter((value): value is number =>
@@ -607,6 +609,9 @@ export function createNaturalResponseGenerator(params: {
     jsonSchema.required = [...new Set([...(jsonSchema.required ?? []),
       "answerText", "qualificationQuestion", "interpretedQuestionKind"])];
     jsonSchema.properties = { ...jsonSchema.properties, text: { type: "string", const: "" } };
+    const approvedFactIds = new Set((plan.approvedFacts ?? []).map(fact => fact.id));
+    jsonSchema.properties.usedKnowledgeEntryIds = { type: "array", maxItems: 20,
+      items: approvedFactIds.size ? { type: "string", enum: [...approvedFactIds] } : { type: "string" } };
     if (llmProvider.promptProfile === "compact-v1") {
       const fields = new Set(["replyAction", "answerText", "qualificationQuestion", "interpretedQuestionKind",
         "nextInformationNeed", "answerCoverage", "unresolvedTopics", "usedKnowledgeEntryIds", "conversationMemory"]);
@@ -651,6 +656,7 @@ export function createNaturalResponseGenerator(params: {
         : null,
       capitalAmountConfirmed: lead.availableCapitalConfirmed === true,
       requestedCalculationUnits: availableEconomics.requestedUnits,
+      nearbyLaunchCosts: scenario.nearbyLaunchCosts ?? [],
       requestedStartupTotalMin: scenario.requestedUnitsLaunch?.totalMin ?? null,
       requestedStartupTotalMax: scenario.requestedUnitsLaunch?.totalMax ?? null,
       requestedCalculationShortfall: financialAssessment.confirmedCapital !== null && scenario.requestedUnitsLaunch
@@ -855,8 +861,25 @@ IMPORTANT CONVERSATION RULES:
       });
     const parseAndValidate = async (response: Awaited<ReturnType<typeof requestResponse>>, answerRecovery = false) => {
       const raw: unknown = JSON.parse(response.text);
-      const validatedOutput = naturalResponseSchema.parse(raw);
-      const rawFields = raw as Record<string, unknown>;
+      const rawFields = raw && typeof raw === "object" && !Array.isArray(raw)
+        ? { ...raw as Record<string, unknown> } : {};
+      // Optional technical annotations cannot replace semantic review. Discard
+      // an unknown taxonomy label rather than guess a human meaning. Normalize
+      // only a known source namespace with an exact approved ID; unknown IDs
+      // still fail the existing grounding guard. Customer text stays untouched.
+      const discardedQuestionAnnotation = typeof rawFields.answerText === "string" &&
+        typeof rawFields.qualificationQuestion === "string" && typeof rawFields.interpretedQuestionKind === "string" &&
+        !naturalResponseSchema.shape.interpretedQuestionKind.safeParse(rawFields.interpretedQuestionKind).success;
+      if (discardedQuestionAnnotation) delete rawFields.interpretedQuestionKind;
+      if (Array.isArray(rawFields.usedKnowledgeEntryIds)) {
+        rawFields.usedKnowledgeEntryIds = rawFields.usedKnowledgeEntryIds.map(id => {
+          if (typeof id !== "string" || !id.startsWith("approvedFacts:")) return id;
+          const canonical = id.slice("approvedFacts:".length);
+          return approvedFactIds.has(canonical) ? canonical : id;
+        });
+      }
+      const validatedOutput = naturalResponseSchema.parse(
+        raw && typeof raw === "object" && !Array.isArray(raw) ? rawFields : raw);
       // These are encodings of the model's selected move, not a choice of a
       // human intent or next question. The model still owns both answer parts,
       // the topic, semantic interpretation, coverage and conversational memory.
@@ -952,7 +975,7 @@ IMPORTANT CONVERSATION RULES:
       // business vocabulary. Structured substantive replies must pass the
       // semantic review below; token overlap alone cannot veto that answer.
       const requiresSemanticReview = segmented && parsed.replyAction === "SEND_REPLY" &&
-        (plan.currentTurnRequiresAnswer === true ||
+        (discardedQuestionAnnotation || plan.currentTurnRequiresAnswer === true ||
           (!discardOptionalQuestion && Boolean(parsed.qualificationQuestion)) ||
           ["BUSINESS_INFORMATION", "RECOMMENDATION", "CLARIFICATION", "CONVERSATION_META"]
             .includes(parsed.interpretedQuestionKind ?? ""));

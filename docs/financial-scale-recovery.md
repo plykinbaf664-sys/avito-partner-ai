@@ -46,9 +46,21 @@ Test Chat Lab evaluation with an isolated database and fake deliveries. It repla
 the short contextual scale response and explicit six-object selection plus phone;
 it requires real LLM replies without fallback, preserved capital and one handoff.
 
-Local verification: 549 tests in 43 files, typecheck, lint and build passed. Linux candidate
+Initial local verification: 549 tests in 43 files, typecheck, lint and build passed. Linux candidate
 checks, live Qwen trajectory review and production rollout are separate release
 gates, not inferred from these local results.
+
+The first live Qwen replay was blocked before deployment: a correct calculation
+was rejected because source IDs had an `approvedFacts:` namespace, followed by an
+invalid optional question taxonomy label during repair. A further regression
+protects technical normalization: only exact known namespaced IDs are canonicalized;
+unknown IDs remain rejected. Invalid optional interpretation annotations are
+discarded only for segmented answers that then require independent semantic review.
+They do not select a replacement human intent. The schema lists permitted source
+IDs explicitly. Adjacent scale totals are supplied by the calculator for natural
+comparisons, without committing either alternative to lead facts. Compact extraction
+explicitly distinguishes an ambiguous range from a chosen single starting scale.
+After this correction, 552 local tests in 43 files, typecheck, lint and build passed.
 
 ## Incident repair constraints
 

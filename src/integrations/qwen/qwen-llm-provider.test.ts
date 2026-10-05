@@ -136,7 +136,7 @@ describe("Qwen API, usage and provider boundaries", () => {
     const llm = Object.assign(new FakeLLMProvider(["{}", "{}"]), { promptProfile: "compact-v1" as const });
     await createMessageExtractor({ llmProvider: llm })("Сколько времени потребуется?");
     expect(llm.requests[0]!.systemPrompt).toBe(COMPACT_EXTRACTION_CONTRACT);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("extraction-compact-v2");
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("extraction-compact-v3");
     expect(llm.requests[0]!.systemPrompt).not.toContain("operations-after-capital-correction");
   });
 
