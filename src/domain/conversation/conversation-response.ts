@@ -6,6 +6,7 @@ import {
 import type { ExtractedMessage } from "../extraction/extracted-message";
 import type { MessageIntent } from "../extraction/extracted-message";
 import type { Lead } from "../lead/lead";
+import { assessFinancialReadiness, type FinancialReadinessAssessment } from "../qualification/financial-readiness";
 import {
   asksForPreferredCallbackTime,
   preferredContactTimeFromQuestions,
@@ -84,15 +85,13 @@ function formatMoney(value: number): string {
 }
 
 function customerFacingInsufficientCapitalDraft(
-  economics: ApprovedEconomicsContext | undefined,
+  assessment: FinancialReadinessAssessment,
 ): string {
-  const scenario = economics?.scenarios.find((candidate) =>
-    candidate.requestedUnitsLaunch !== null || candidate.oneObjectLaunch !== null,
-  );
-  const launch = scenario?.requestedUnitsLaunch ?? scenario?.oneObjectLaunch;
-  const capital = economics?.availableCapital;
-  if (!scenario || !launch || capital === null || capital === undefined) {
-    return "По текущему расчётному ориентиру бюджета может не хватить для запуска выбранного объёма. В расчёт входят услуга запуска, аренда, залог и подготовка объекта; точная смета зависит от квартиры и условий собственника.";
+  const launch = assessment.minimumLaunchBudgetRange;
+  const capital = assessment.confirmedCapital;
+  if (capital === null || capital >= launch.totalMin) {
+    // An inconsistent caller must never fabricate an insufficient comparison.
+    return "Финансовые условия запуска требуют проверки. Расчётный ориентир включает услугу запуска, аренду, залог и подготовку; фактическая смета зависит от квартиры и условий собственника.";
   }
   const total = launch.totalMin === launch.totalMax
     ? formatMoney(launch.totalMin)
@@ -132,13 +131,15 @@ function compactContextualEconomicsDraft(
     return null;
   }
   const scenario = economics.scenarios.find((candidate) => candidate.oneObjectLaunch !== null);
-  const launch = scenario?.oneObjectLaunch;
+  const launch = extraction.facts.calculationUnits !== null
+    ? scenario?.requestedUnitsLaunch : scenario?.oneObjectLaunch;
   if (!scenario || !launch) return null;
   const format = (value: number) => value.toLocaleString("ru-RU").replaceAll("\u00a0", " ");
   const range = launch.totalMin === launch.totalMax
     ? `${format(launch.totalMin)} ₽`
     : `примерно ${format(launch.totalMin)}–${format(launch.totalMax)} ₽`;
-  return `По этому ориентиру запуск одного объекта — ${range}. В расчёте учтены услуга запуска, аренда, расчётный залог и базовая подготовка; фактический залог зависит от объекта и собственника.`;
+  const units = launch.units === 1 ? "одного объекта" : `${launch.units} объектов`;
+  return `По этому ориентиру запуск ${units} — ${range}. В расчёте учтены услуга запуска, аренда, расчётный залог и базовая подготовка; фактический залог зависит от объекта и собственника.`;
 }
 
 export interface ConversationResponsePlan {
@@ -234,7 +235,7 @@ export function buildConversationResponse(params: {
       ? buildApprovedEconomicsContext({
           availableCapital: params.lead.availableCapital,
           city: params.lead.city,
-          requestedUnits: params.lead.startingUnits,
+          requestedUnits: 1,
         })
       : undefined);
   const conversationRepairRequired = extraction.intent === "COMPLAINT";
@@ -359,7 +360,7 @@ export function buildConversationResponse(params: {
       knowledge.contextualReferenceResolved,
     );
     const customerFacingDecisionDraft = decision.reason === "INSUFFICIENT_LAUNCH_CAPITAL"
-      ? customerFacingInsufficientCapitalDraft(responseEconomics)
+      ? customerFacingInsufficientCapitalDraft(assessFinancialReadiness(params.lead))
       : customerFacingRejectionDrafts[decision.reason] ??
         "К сожалению, текущий формат вам не подойдёт. Спасибо за разговор.";
     const answeredThenRejected = [

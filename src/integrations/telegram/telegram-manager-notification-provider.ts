@@ -75,6 +75,7 @@ const financialBarrierLabels: Record<string, string> = {
   ADDITIONAL_LAUNCH_CAPITAL_UNKNOWN: "не подтверждён полный капитал запуска",
   UNWILLING_TO_FUND_REQUIRED_EXPENSES: "не готов финансировать расходы объекта",
   CAPITAL_BELOW_LAUNCH_RANGE: "капитал ниже расчётного диапазона запуска",
+  DESIRED_SCALE_EXCEEDS_CAPITAL: "на желаемый масштаб не хватает; возможен меньший запуск",
 };
 const barrierLabels: Record<string, string> = {
   FEAR_LOSE_MONEY: "опасается потерять деньги", FEAR_LOW_DEMAND: "сомневается в спросе",

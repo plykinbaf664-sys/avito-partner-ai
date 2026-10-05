@@ -68,6 +68,32 @@ function reply({
 }
 
 describe("multi-turn qualification conversation", () => {
+  it("does not reject a funded six-object calculation against a stale ten-object target and recovers after selection", async () => {
+    const { processEvent } = harness([
+      reply({ facts: { city: "Москва", availableCapital: 1_200_000,
+        availableCapitalConfirmed: true, startingUnits: 10, scalingPotentialUnits: 10,
+        capitalScope: "TOTAL_LIMIT", primaryGoal: "MAIN_BUSINESS",
+        launchTiming: "READY_NOW", managementReadiness: "READY",
+        additionalExpensesReadiness: "READY" } }),
+      reply({ intent: "QUESTION", facts: { calculationUnits: 6 }, signals: {
+        questions: ["А если пока пять-шесть? Посчитайте шесть."], requiresSubstantiveAnswer: true,
+        contextualReference: true, resolvedQuestion: "Сколько нужно для запуска шести объектов?" } }),
+      reply({ facts: { startingUnits: 6 } }),
+    ]);
+    const initial = await processEvent(input(801, "Москва, 1 миллион 200 тысяч, думал начать с десяти. Готов запускать свой бизнес сейчас и участвовать лично."));
+    expect(initial.qualificationStatus).not.toBe("NO_FIT");
+    expect(initial.extraction?.facts.startingUnits).toBe(10);
+    expect(initial.qualificationReason).toBe("STARTING_SCALE_EXCEEDS_CAPITAL");
+    const calculation = await processEvent(input(802, "А если пока пять-шесть? Посчитайте шесть."));
+    expect(calculation.extraction?.facts.calculationUnits).toBe(6);
+    expect(calculation.outboundMessage).toContain("830 000");
+    expect(calculation.outboundMessage).not.toMatch(/суммы пока не хватает|формат вам не подойдёт/u);
+    expect(calculation.qualificationStatus).not.toBe("NO_FIT");
+    expect((await persistence.leads.findByExternalIdentity("conversation-test", "lead-1"))?.startingUnits).toBe(10);
+    const selected = await processEvent(input(803, "Тогда начну с шести."));
+    expect(selected.qualificationDecision?.blockingReasons).toEqual([]);
+    expect(selected.qualificationDecision?.reasonCodes).toContain("SMALL_BUSINESS_READY");
+  });
   let persistence: SqlitePersistence;
   let nextId: number;
 

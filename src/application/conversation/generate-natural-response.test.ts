@@ -7,10 +7,40 @@ import { createNaturalResponseGenerator } from "./generate-natural-response";
 import type { ConversationResponsePlan } from "@/domain/conversation/conversation-response";
 import { PARTNER_KNOWLEDGE_BASE } from "@/domain/knowledge/knowledge-base";
 import { buildApprovedEconomicsContext } from "@/domain/economics/economics-calculator";
+import { createInitialLead } from "../workflows/process-incoming-event";
 
 describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
+
+  it("shares scale-specific financial evidence with brain and reviewer without mutating the selected scale", async () => {
+    const lead = { ...createInitialLead("financial-context", "TEST", "synthetic", new Date()),
+      city: "Москва", startingUnits: 10, availableCapital: 1_200_000,
+      availableCapitalConfirmed: true, capitalScope: "TOTAL_LIMIT" as const };
+    const answerText = "Запуск шести объектов — ориентировочно 830 000 ₽. Ваших 1 200 000 ₽ хватает на этот расчёт; фактическая смета зависит от объекта и собственника.";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText, qualificationQuestion: "",
+      interpretedQuestionKind: "BUSINESS_INFORMATION", nextInformationNeed: null }), supportedReview]);
+    await createNaturalResponseGenerator({ llmProvider: llm })({ lead,
+      recentMessages: [{ direction: "INBOUND", content: "А если шесть?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false,
+        knowledgeEntryIds: [], unresolvedQuestions: [], useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, customerFacingDecision: "CONTINUE",
+        economicsContext: buildApprovedEconomicsContext({ city: "Москва", availableCapital: 1_200_000, requestedUnits: 6 }) },
+    });
+    const brain = JSON.parse(llm.requests[0]!.userMessage);
+    const reviewer = JSON.parse(llm.requests[1]!.userMessage);
+    expect(brain.financialDecisionEvidence).toMatchObject({
+      confirmedCapital: 1_200_000, minimumLaunchTotalMin: 180_000,
+      desiredStartingUnits: 10, desiredLaunchTotalMin: 1_350_000,
+      barrier: "DESIRED_SCALE_EXCEEDS_CAPITAL", desiredScaleShortfall: 150_000,
+    });
+    expect(brain.calculationFacts[0]).toMatchObject({ requestedCalculationUnits: 6,
+      requestedStartupTotalMin: 830_000, requestedCalculationShortfall: 0 });
+    expect(reviewer.financialDecisionEvidence).toEqual(brain.financialDecisionEvidence);
+    expect(reviewer.calculationFacts).toEqual(brain.calculationFacts);
+    expect(lead.startingUnits).toBe(10);
+    expect(llm.callCount).toBe(2);
+  });
 
   it("keeps a practical recommendation self-contained despite a suggested CRM question", async () => {
     const answerText = "Начните с подбора объекта при помощи команды, затем лично посетите просмотр и заключите договор.";
@@ -286,7 +316,7 @@ describe("natural response generation", () => {
     expect(result.text).toContain("3–4");
     expect(llm.callCount).toBe(3);
     expect(llm.requests[0]!.maxTokens).toBeGreaterThanOrEqual(2000);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v2");
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v3");
     expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
     expect(JSON.stringify(llm.requests)).not.toContain("operations-after-capital-correction");
   });

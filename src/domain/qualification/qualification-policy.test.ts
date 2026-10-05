@@ -93,6 +93,21 @@ function readyInvestor(
 }
 
 describe("segment-aware partner qualification", () => {
+  it("keeps a viable smaller launch open without handing off an unresolved desired scale", () => {
+    const profile = readySmallBusiness({ city: "Москва", startingUnits: 10,
+      availableCapital: 1_200_000, availableCapitalConfirmed: true,
+      entryBudget: null, additionalLaunchCapital: null, capitalScope: "TOTAL_LIMIT" });
+    expect(evaluateQualification(profile)).toMatchObject({
+      status: "BORDERLINE", blockingReasons: [], shouldHandoffToManager: false,
+      reason: "STARTING_SCALE_EXCEEDS_CAPITAL", nextAction: "CONTINUE_QUALIFICATION",
+    });
+    expect(evaluateQualification({ ...profile, startingUnits: 6 })).toMatchObject({
+      blockingReasons: [], shouldHandoffToManager: true,
+    });
+    expect(evaluateQualification({ ...profile, availableCapital: 170_000 })).toMatchObject({
+      status: "NO_FIT", reason: "INSUFFICIENT_LAUNCH_CAPITAL", shouldHandoffToManager: false,
+    });
+  });
   it("retains investor priority while waiting for a valid confirmed phone", () => {
     for (const phoneNumber of [null, "invalid", ""]) {
       expect(evaluateQualification(readyInvestor({ phoneNumber, phoneConfirmed: true })))

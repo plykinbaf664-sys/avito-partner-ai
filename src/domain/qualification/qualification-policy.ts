@@ -31,6 +31,7 @@ export type HardBlockingReasonCode =
 export const weakSignalCodes = [
   "ENTRY_CAPITAL_BELOW_REFERENCE",
   "ADDITIONAL_CAPITAL_UNCLEAR",
+  "STARTING_SCALE_EXCEEDS_CAPITAL",
   "WEAK_LAUNCH_INTENT",
   "LIMITED_OPERATIONAL_CAPACITY",
   "REGION_NEEDS_REVIEW",
@@ -230,7 +231,8 @@ export function evaluateQualification(
     weakSignals.push("ENTRY_CAPITAL_BELOW_REFERENCE");
   }
   if (financialAssessment.financialReadiness === "BORDERLINE") {
-    weakSignals.push("ADDITIONAL_CAPITAL_UNCLEAR");
+    weakSignals.push(financialAssessment.financialBarrier === "DESIRED_SCALE_EXCEEDS_CAPITAL"
+      ? "STARTING_SCALE_EXCEEDS_CAPITAL" : "ADDITIONAL_CAPITAL_UNCLEAR");
   }
   if (facts.launchTiming === "LATER") {
     weakSignals.push("WEAK_LAUNCH_INTENT");
@@ -303,7 +305,7 @@ export function evaluateQualification(
   }
 
   const unresolvedFinancialRisk = weakSignals.some((signal) =>
-    ["ENTRY_CAPITAL_BELOW_REFERENCE", "ADDITIONAL_CAPITAL_UNCLEAR"].includes(
+    ["ENTRY_CAPITAL_BELOW_REFERENCE", "ADDITIONAL_CAPITAL_UNCLEAR", "STARTING_SCALE_EXCEEDS_CAPITAL"].includes(
       signal,
     ),
   );

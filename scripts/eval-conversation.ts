@@ -35,6 +35,15 @@ async function main() {
 
   const scenarios = [
     {
+      id: "financial-scale-recovery",
+      seedFinancialIncident: true,
+      criteria: "Капитал 1 200 000 рублей подтверждён, Москва, прежнее желание десять объектов. После рекомендации доступного меньшего запуска короткое '5,6' относится к числу объектов: ответить по существу, не утверждать, что 1 200 000 меньше 830 000. Запуск пяти стоит около 700 000, шести около 830 000, не 50 тысяч за каждый объект. Глобальный отказ недопустим. Не повторять известный бюджет, город или вопрос о масштабе. После явного выбора шести и телефона, при уже подтверждённых остальных бизнес-фактах один handoff. Не придумывать гарантии дохода или срок звонка.",
+      steps: [
+        { actor: "USER", text: "5,6" },
+        { actor: "USER", text: "Тогда начну с шести. Мой номер +79991234567, готов обсудить запуск с менеджером." },
+      ],
+    },
+    {
       id: "ready-profile-contextual-next-step",
       seedQualifiedProfile: true,
       criteria: "Профиль уже прошёл бизнес-критерии, телефон ещё неизвестен. На подтверждение готовности естественно предложить следующий контактный шаг или полезное объяснение. На 'что для этого надо' понять контекст запуска, ответить по существу и предложить контакт менеджера без обязательной анкеты/встреч/оплаты/документов. Не повторять вопросы об известных фактах и не возвращаться к необязательным CRM-полям. Один контактный запрос на AI-turn; не дублировать его в ответе и дополнительном вопросе. После номера один handoff, без повторного запроса телефона. Никакого технического fallback или просьбы уточнить понятный вопрос.",
@@ -221,7 +230,7 @@ async function main() {
         const steps = "steps" in scenario ? scenario.steps : preset!.steps;
         const turns = [];
         const sessionId = `live-eval-${scenario.id}-${run}`;
-        if ("seedQualifiedProfile" in scenario) {
+        if ("seedQualifiedProfile" in scenario || "seedFinancialIncident" in scenario) {
           // Reproduce the incident's already-persisted business state. Synthetic
           // fixture, isolated DB only; no test trajectories enter model prompts.
           const at = new Date("2026-10-03T08:59:00Z");
@@ -241,8 +250,11 @@ async function main() {
           const qualification = evaluateQualification(lead);
           assert(qualification.reasonCodes.includes("SMALL_BUSINESS_READY"), "Replay fixture must satisfy unchanged business criteria");
           assert.equal(qualification.shouldHandoffToManager, false, "Unknown phone prevents handoff");
-          await persistence.leads.insert({ ...lead, qualificationStatus: qualification.status,
-            qualificationReason: qualification.reason });
+          const financialIncident = "seedFinancialIncident" in scenario;
+          await persistence.leads.insert({ ...lead,
+            ...(financialIncident ? { budget: 1_200_000, availableCapital: 1_200_000, startingUnits: 10 } : {}),
+            qualificationStatus: financialIncident ? "NO_FIT" : qualification.status,
+            qualificationReason: financialIncident ? "INSUFFICIENT_LAUNCH_CAPITAL" : qualification.reason });
           const conversationId = `conversation-${sessionId}`;
           await persistence.conversations.insert({
             id: conversationId, leadId: lead.id, state: "QUALIFYING", summary: null,
@@ -256,7 +268,9 @@ async function main() {
             id: `context-${sessionId}`, conversationId, leadId: lead.id,
             incomingEventId: null, externalMessageId: null, deduplicationKey: null,
             sequence: null, direction: "OUTBOUND", actor: "AI",
-            content: "На этапе запуска ориентир — около 3–4 часов в день: это просмотры объектов, договоры, ключевые решения. После запуска основную работу (бронирования, гости, клининг) ведёт команда, а Ваше участие сводится к эпизодическим визитам при нестандартных ситуациях.",
+            content: financialIncident
+              ? "При Вашем бюджете 1 200 000 ₽ в Москве можно рассмотреть до восьми объектов: ориентир запуска 1 090 000 ₽. Сумма на десять — 1 350 000 ₽; можно начать с меньшего масштаба. Это предварительные расчёты, фактическая смета зависит от объекта."
+              : "На этапе запуска ориентир — около 3–4 часов в день: это просмотры объектов, договоры, ключевые решения. После запуска основную работу (бронирования, гости, клининг) ведёт команда, а Ваше участие сводится к эпизодическим визитам при нестандартных ситуациях.",
             deliveryStatus: "SENT", deliveryAttempts: 1, deliveryRetryable: false,
             lastDeliveryErrorCode: null, sentAt: at, createdAt: at,
           });
@@ -280,6 +294,13 @@ async function main() {
             if (scenario.id === "phone-handoff-continuation" && index === 0) {
               assert.equal(notifications.requests.length, 0, "Phone alone must not qualify");
             }
+            if (scenario.id === "financial-scale-recovery") {
+              assert.notEqual(result.snapshot.qualification.status, "NO_FIT", "A funded smaller launch must remain open");
+              assert.equal(result.snapshot.lastProcessing?.responseGenerationSource, "LLM");
+              assert.equal(result.snapshot.lastProcessing?.responseFailureCode, null);
+              assert.equal(persistedLead.availableCapital, 1_200_000, "Known capital must remain intact");
+              if (index === 1) assert.equal(persistedLead.startingUnits, 6, "Explicit selection replaces the older target");
+            }
             turns.push({ user: step.text, reply: result.snapshot.lastProcessing?.outboundMessage,
               source: result.snapshot.lastProcessing?.responseGenerationSource,
               failure: result.snapshot.lastProcessing?.responseFailureCode,
@@ -287,7 +308,7 @@ async function main() {
           }
         }
         const snapshot = await lab.snapshot(sessionId);
-        if (scenario.id === "phone-handoff-continuation" || scenario.id === "ready-contact-after-follow-on-request" || scenario.id === "ready-profile-contextual-next-step") {
+        if (scenario.id === "phone-handoff-continuation" || scenario.id === "ready-contact-after-follow-on-request" || scenario.id === "ready-profile-contextual-next-step" || scenario.id === "financial-scale-recovery") {
           assert.equal(snapshot.phone, "+79991234567");
           assert.equal(notifications.requests.length, 1, "Qualified phone must hand off exactly once");
         }

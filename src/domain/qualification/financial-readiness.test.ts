@@ -18,6 +18,21 @@ function facts(
 }
 
 describe("small-business financial readiness", () => {
+  it("distinguishes an unaffordable desired scale from inability to launch", () => {
+    const assessment = assessFinancialReadiness(facts({
+      city: "Москва", startingUnits: 10,
+      availableCapital: 1_200_000, availableCapitalConfirmed: true,
+    }));
+    expect(assessment).toMatchObject({
+      financialReadiness: "BORDERLINE",
+      financialBarrier: "DESIRED_SCALE_EXCEEDS_CAPITAL",
+      launchBudgetRange: { units: 10, totalMin: 1_350_000 },
+    });
+    expect(assessFinancialReadiness(facts({
+      city: "Москва", startingUnits: 6,
+      availableCapital: 1_200_000, availableCapitalConfirmed: true,
+    }))).toMatchObject({ financialReadiness: "HIGH", financialBarrier: null });
+  });
   it("treats 50,000 for the first stage as incomplete context", () => {
     expect(assessFinancialReadiness(facts({ entryBudget: 50_000 }))).toMatchObject({
       launchCostAwareness: "UNKNOWN",

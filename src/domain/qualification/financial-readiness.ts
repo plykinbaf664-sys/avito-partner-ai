@@ -30,6 +30,7 @@ export type FinancialBarrier =
   | "ADDITIONAL_LAUNCH_CAPITAL_UNKNOWN"
   | "UNWILLING_TO_FUND_REQUIRED_EXPENSES"
   | "CAPITAL_BELOW_LAUNCH_RANGE"
+  | "DESIRED_SCALE_EXCEEDS_CAPITAL"
   | null;
 
 export interface FinancialReadinessAssessment {
@@ -38,6 +39,8 @@ export interface FinancialReadinessAssessment {
   financialBarrier: FinancialBarrier;
   launchBudgetRange: LaunchBudgetRange;
   usesCitySpecificRent: boolean;
+  minimumLaunchBudgetRange: LaunchBudgetRange;
+  confirmedCapital: number | null;
 }
 
 export type FinancialReadinessFacts = Pick<
@@ -83,6 +86,12 @@ export function assessFinancialReadiness(
     rentReference: cityReference ?? GENERAL_RENT_RANGE_REFERENCE,
   })!;
   const totalCapital = confirmedTotalCapital(facts);
+  const minimumLaunchBudgetRange = calculateLaunchBudgetRange({
+    units: 1, rentReference: cityReference ?? GENERAL_RENT_RANGE_REFERENCE,
+  })!;
+  const evidence = { minimumLaunchBudgetRange, confirmedCapital: totalCapital };
+  const confirmedCapitalCoversMinimumRange =
+    totalCapital !== null && totalCapital >= minimumLaunchBudgetRange.totalMax;
   const confirmedCapitalCoversFullRange =
     totalCapital !== null && totalCapital >= launchBudgetRange.totalMax;
   const explicitExpenseRefusal =
@@ -90,7 +99,7 @@ export function assessFinancialReadiness(
     (facts.objections?.length ?? 0) > 0;
   const launchCostAwareness: LaunchCostAwareness =
     facts.additionalExpensesReadiness === "NOT_READY"
-      ? confirmedCapitalCoversFullRange && !explicitExpenseRefusal
+      ? confirmedCapitalCoversMinimumRange && !explicitExpenseRefusal
         ? "CONFIRMED"
         : "REJECTED"
       : facts.additionalExpensesReadiness === "READY" ||
@@ -107,9 +116,10 @@ export function assessFinancialReadiness(
   // rejection. Explicitly insufficient totals remain blocked below.
   if (
     facts.additionalExpensesReadiness === "NOT_READY" &&
-    (!confirmedCapitalCoversFullRange || explicitExpenseRefusal)
+    (!confirmedCapitalCoversMinimumRange || explicitExpenseRefusal)
   ) {
     return {
+      ...evidence,
       launchCostAwareness,
       financialReadiness: "INCOMPATIBLE",
       financialBarrier: "UNWILLING_TO_FUND_REQUIRED_EXPENSES",
@@ -118,8 +128,11 @@ export function assessFinancialReadiness(
     };
   }
 
-  if (totalCapital !== null && totalCapital < launchBudgetRange.totalMin) {
+  // Failure to fund a desired multi-object scale is negotiable. Only failure
+  // to fund even one approved object establishes inability to launch at all.
+  if (totalCapital !== null && totalCapital < minimumLaunchBudgetRange.totalMin) {
     return {
+      ...evidence,
       launchCostAwareness,
       financialReadiness: "INCOMPATIBLE",
       financialBarrier: "CAPITAL_BELOW_LAUNCH_RANGE",
@@ -128,8 +141,15 @@ export function assessFinancialReadiness(
     };
   }
 
+  if (totalCapital !== null && totalCapital < launchBudgetRange.totalMin) {
+    return { ...evidence, launchCostAwareness, financialReadiness: "BORDERLINE",
+      financialBarrier: "DESIRED_SCALE_EXCEEDS_CAPITAL", launchBudgetRange,
+      usesCitySpecificRent: cityReference !== null };
+  }
+
   if (confirmedCapitalCoversFullRange) {
     return {
+      ...evidence,
       launchCostAwareness,
       financialReadiness: "HIGH",
       financialBarrier: null,
@@ -145,6 +165,7 @@ export function assessFinancialReadiness(
       : facts.availableCapital === null && facts.entryBudget === null)
   ) {
     return {
+      ...evidence,
       launchCostAwareness,
       financialReadiness: "READY",
       financialBarrier: null,
@@ -155,6 +176,7 @@ export function assessFinancialReadiness(
 
   if (totalCapital === null && facts.availableCapital === null && facts.entryBudget === null) {
     return {
+      ...evidence,
       launchCostAwareness,
       financialReadiness: "UNKNOWN",
       financialBarrier: "ADDITIONAL_LAUNCH_CAPITAL_UNKNOWN",
@@ -164,6 +186,7 @@ export function assessFinancialReadiness(
   }
 
   return {
+    ...evidence,
     launchCostAwareness,
     financialReadiness: "BORDERLINE",
     financialBarrier: "ADDITIONAL_LAUNCH_CAPITAL_UNKNOWN",
