@@ -106,3 +106,51 @@ The model still interprets semantic corrections; the new hard policy prevents a
 stale scale from becoming a global financial refusal but does not invent agreement
 to a smaller launch. The separately observed ambiguity between total capital and
 entry-only capital remains a distinct open evaluation issue.
+
+## Release result — 2026-10-06
+
+Application revision `29a40110cb9235691f5a2cb3c43352c2632a0107` is deployed.
+Local and isolated Linux checks: typecheck, 557 tests in 43 files, lint and build
+all passed. The final real-Qwen two-turn Test Chat Lab replay passed the automated
+judge and manual review: both customer replies used LLM output, no fallback,
+correct five/six-object economics, explicit six-object selection and exactly one
+fake handoff. No live Avito customer message was sent by this release procedure.
+
+The replay made nine API calls, including one repair and the evaluation judge;
+provider-reported aggregate usage: 22,899 uncached input tokens, 21,685 cache-create
+tokens, 9,997 cache-read tokens and 9,729 output tokens. Recorded estimated cost
+was USD 0.012505; mean per-call latency 19,067 ms. This is one affected evaluation,
+including judging and repair, not an estimate of typical production dialog cost.
+
+Production health/readiness passed; both services are active without restarts.
+Two network smoke calls used `qwen/qwen3.8-flash`, with no Claude fallback:
+
+| Call | Uncached input | Output | Cache create | Cache read | API latency | Estimated USD |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 28 | 53 | 2,043 | 0 | 2,340 ms | 0.000438 |
+| 2 | 28 | 62 | 0 | 2,043 | 2,150 ms | 0.000066 |
+
+One retryable `AVITO_NETWORK_ERROR` occurred at polling startup. Subsequent
+polling recovered; the final three observed cycles were `PASS`, zero failures.
+Existing selective Anthropic networking and provider credentials were unchanged.
+
+The authorized manual recovery card was accepted by Telegram for both active
+manager recipients. The incident lead now has `BORDERLINE` /
+`STARTING_SCALE_EXCEEDS_CAPITAL`; the repaired current conversation is `QUALIFYING`,
+not marked fully qualified and has no automatic follow-up scheduled. Six archived
+conversations remain closed. Confirmed capital, phone and all business facts are
+preserved; the ambiguous five/six discussion is not silently committed as six.
+No automatic qualified handoff record was fabricated.
+
+Backup/rollback manifest:
+`/opt/avito-partner-ai-backups/qwen-migration-20261006-082630/ready-contact-release.json`.
+To restore the previous application/build/environment on the server:
+
+```sh
+python3 /root/financial-release.py rollback /opt/avito-partner-ai-backups/qwen-migration-20261006-082630/ready-contact-release.json
+```
+
+This restores revision `76ec680ec4b2beaac9567f44a5927251e87e2d80` and restarts/checks
+both services. It does not restore the database or undo already delivered Telegram
+messages. Keep the repaired incident state; do not overwrite new inbound data from
+the backup. The rollback version contains the original financial-scale bug.
