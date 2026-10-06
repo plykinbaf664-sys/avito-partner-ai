@@ -236,6 +236,8 @@ export interface ApprovedEconomicsScenario {
     remainingCapital: number | null;
     capitalShortfall: number | null;
   }>;
+  /** Bounded affordable preview independent of semantic extraction's chosen units. */
+  affordableLaunchCosts?: ApprovedEconomicsScenario["nearbyLaunchCosts"];
 }
 
 export interface ApprovedEconomicsContext {
@@ -276,6 +278,14 @@ export function buildApprovedEconomicsContext(input: {
     reference,
   ])).values()];
   const requestedUnits = input.requestedUnits ?? null;
+  const launchOptions = (reference: RentRangeReference, counts: number[]) => counts
+    .map(units => calculateLaunchBudgetRange({ units, rentReference: reference }))
+    .filter((launch): launch is LaunchBudgetRange => launch !== null)
+    .map(({ units, totalMin, totalMax }) => ({ units, totalMin, totalMax,
+      estimatedMonthlyIncome: calculateEconomicsEstimate(units)!.estimatedMonthlyIncome,
+      incomeGuaranteed: false as const,
+      remainingCapital: input.availableCapital == null ? null : Math.max(0, input.availableCapital - totalMax),
+      capitalShortfall: input.availableCapital == null ? null : Math.max(0, totalMin - input.availableCapital) }));
   return {
     launchFee: PARTNER_SERVICE_FEE_REFERENCE,
     preparationPerObject: PARTNER_PREPARATION_PER_UNIT_REFERENCE,
@@ -300,14 +310,13 @@ export function buildApprovedEconomicsContext(input: {
         ? null
         : calculateLaunchBudgetRange({ units: requestedUnits, rentReference: reference }),
       nearbyLaunchCosts: requestedUnits === null ? [] :
-        [requestedUnits - 1, requestedUnits, requestedUnits + 1]
-          .map(units => calculateLaunchBudgetRange({ units, rentReference: reference }))
-          .filter((launch): launch is LaunchBudgetRange => launch !== null)
-          .map(({ units, totalMin, totalMax }) => ({ units, totalMin, totalMax,
-            estimatedMonthlyIncome: calculateEconomicsEstimate(units)!.estimatedMonthlyIncome,
-            incomeGuaranteed: false as const,
-            remainingCapital: input.availableCapital == null ? null : Math.max(0, input.availableCapital - totalMax),
-            capitalShortfall: input.availableCapital == null ? null : Math.max(0, totalMin - input.availableCapital) })),
+        launchOptions(reference, [requestedUnits - 1, requestedUnits, requestedUnits + 1]),
+      // A context size bound, not a business/qualification ceiling. Explicit
+      // calculations and the actual affordable maximum remain available above it.
+      affordableLaunchCosts: input.availableCapital == null ? [] : launchOptions(reference,
+        Array.from({ length: Math.min(12, calculateAffordableObjectCount({
+          availableCapital: input.availableCapital, rentReference: reference,
+        })?.maxUnitsAtMaxCost ?? 0) }, (_, index) => index + 1)),
     })),
     limitations: [
       "Суммы являются утверждёнными ориентировочными сценариями, а не live-ценой конкретного объекта.",

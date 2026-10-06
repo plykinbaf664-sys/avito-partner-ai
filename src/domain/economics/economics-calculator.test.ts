@@ -175,4 +175,16 @@ describe("partner economics calculator", () => {
     expect(context.scenarios).toHaveLength(1);
     expect(context.scenarios[0]?.oneObjectLaunch?.totalMin).toBe(150_000);
   });
+
+  it("bounds affordable previews without capping explicit calculations or choosing lead scale", () => {
+    const context = buildApprovedEconomicsContext({ city: "Москва", availableCapital: 10_000_000, requestedUnits: 30 });
+    expect(context.scenarios[0]?.affordableLaunchCosts).toHaveLength(12);
+    expect(context.scenarios[0]?.requestedUnitsLaunch?.units).toBe(30);
+    expect(context.scenarios[0]?.affordableObjectCount?.maxUnitsAtMaxCost).toBeGreaterThan(12);
+    const alternatives = buildApprovedEconomicsContext({ city: "Москва", availableCapital: 1_200_000 });
+    expect(alternatives.requestedUnits).toBeNull();
+    expect(alternatives.scenarios[0]?.affordableLaunchCosts).toContainEqual(expect.objectContaining({ units: 6,
+      totalMin: 830_000, estimatedMonthlyIncome: 120_000, remainingCapital: 370_000, capitalShortfall: 0 }));
+    expect(buildApprovedEconomicsContext({ city: "Москва" }).scenarios[0]?.affordableLaunchCosts).toEqual([]);
+  });
 });

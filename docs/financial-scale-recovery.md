@@ -83,6 +83,15 @@ segmented handoff always receives semantic support/action review, including repa
 Callback deadlines and other promises remain unsupported without agreement.
 Both new regression tests failed before the fix and passed after it.
 
+The fourth live replay showed that extraction can correctly retain uncertainty
+without supplying calculation units. The brain understood the five/six alternatives
+from history, but grounding only had the older ten-object calculation. The approved
+calculator now provides a bounded preview of affordable scales independently of
+that auxiliary annotation: at most twelve options, without capping explicit larger
+calculations or the actual affordable maximum. Startup, income and reserve remain
+deterministic. Another failing-then-passing regression protects brain understanding
+with absent calculation units. The preview does not mutate chosen lead facts.
+
 A manually authorized recovery card must distinguish confirmed capital from the
 older stored scale, the subsequently discussed range and missing business facts.
 It must not claim completed qualification or create a fabricated automatic handoff.

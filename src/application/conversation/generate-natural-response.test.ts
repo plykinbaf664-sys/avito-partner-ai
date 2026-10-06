@@ -13,6 +13,29 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it("grounds affordable alternatives understood by the brain when auxiliary extraction supplies no calculation units", async () => {
+    const lead = { ...createInitialLead("missing-calculation", "TEST", "synthetic", new Date()),
+      city: "Москва", startingUnits: 10, availableCapital: 1_200_000, availableCapitalConfirmed: true };
+    const answerText = "Пять объектов — около 700 000 ₽, шесть — около 830 000 ₽. Оба варианта укладываются в 1 200 000 ₽. Доход ориентировочно 100 000–120 000 ₽ в месяц, без гарантии.";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText, qualificationQuestion: "",
+      interpretedQuestionKind: "CLARIFICATION", usedKnowledgeEntryIds: ["pricing"] }), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead,
+      recentMessages: [{ direction: "OUTBOUND", content: "Десять не укладываются, можно выбрать меньший старт." },
+        { direction: "INBOUND", content: "Может пять или шесть, пока выбираю" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: false,
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+        economicsContext: buildApprovedEconomicsContext({ city: "Москва", availableCapital: 1_200_000, requestedUnits: 10 }) },
+    });
+    expect(result.text).toBe(answerText);
+    expect(lead.startingUnits).toBe(10);
+    const brain = JSON.parse(llm.requests[0]!.userMessage);
+    const review = JSON.parse(llm.requests[1]!.userMessage);
+    expect(brain.calculationFacts[0].affordableLaunchCosts).toContainEqual(expect.objectContaining({ units: 6, totalMin: 830_000 }));
+    expect(review.calculationFacts).toEqual(brain.calculationFacts);
+    expect(llm.callCount).toBe(2);
+  });
+
   it("shares established team identity with generation and semantic review", async () => {
     const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Номер принят, передаю контакт менеджеру Дмитрию.",
       qualificationQuestion: "", interpretedQuestionKind: "CONVERSATION_META" }), supportedReview]);
@@ -416,7 +439,7 @@ describe("natural response generation", () => {
     expect(result.text).toContain("3–4");
     expect(llm.callCount).toBe(3);
     expect(llm.requests[0]!.maxTokens).toBeGreaterThanOrEqual(2000);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v4");
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v5");
     expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
     expect(JSON.stringify(llm.requests)).not.toContain("operations-after-capital-correction");
   });
