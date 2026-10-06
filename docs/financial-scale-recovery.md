@@ -74,6 +74,15 @@ remaining capital and shortfall computed in code. Final local verification:
 
 ## Incident repair constraints
 
+The third live replay passed its financial turn but stopped at handoff. The
+generation contract knew the manager's established name while the reviewer did
+not, so it rejected that identity. Its repair used `NONE` and skipped semantic
+review, where repeated prior source tags then blocked a useful acknowledgement.
+Team identity is now supplied identically to generation and review; an authorized
+segmented handoff always receives semantic support/action review, including repair.
+Callback deadlines and other promises remain unsupported without agreement.
+Both new regression tests failed before the fix and passed after it.
+
 A manually authorized recovery card must distinguish confirmed capital from the
 older stored scale, the subsequently discussed range and missing business facts.
 It must not claim completed qualification or create a fabricated automatic handoff.

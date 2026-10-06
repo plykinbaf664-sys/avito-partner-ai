@@ -13,6 +13,47 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it("shares established team identity with generation and semantic review", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Номер принят, передаю контакт менеджеру Дмитрию.",
+      qualificationQuestion: "", interpretedQuestionKind: "CONVERSATION_META" }), supportedReview]);
+    await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { qualificationStatus: "HOT", phoneNumber: "+79991234567", phoneConfirmed: true, handoffAt: null } as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Вот мой номер, соедините с менеджером." }],
+      plan: { text: "Передам менеджеру.", nextInformationNeed: null, asksUserQuestion: false,
+        knowledgeEntryIds: [], unresolvedQuestions: [], useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, customerFacingDecision: "HANDOFF" },
+    });
+    const generation = JSON.parse(llm.requests[0]!.userMessage);
+    const review = JSON.parse(llm.requests[1]!.userMessage);
+    expect(generation.teamIdentity).toEqual({ managerName: "Дмитрий" });
+    expect(review.teamIdentity).toEqual(generation.teamIdentity);
+  });
+
+  it("reviews an authorized transfer during recovery without returning to the manager-referral phrase guard", async () => {
+    const llm = Object.assign(new FakeLLMProvider([
+      JSON.stringify({ answerText: "Номер получил, менеджер позвонит ровно в полдень.", qualificationQuestion: "",
+        interpretedQuestionKind: "CONVERSATION_META" }),
+      JSON.stringify({ answerIsSupported: false, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        feedback: "Время звонка не согласовано." }),
+      JSON.stringify({ answerText: "Номер получил, передаю Вас менеджеру для обсуждения запуска.",
+        qualificationQuestion: "", interpretedQuestionKind: "NONE", usedKnowledgeEntryIds: ["pricing"] }), supportedReview,
+    ]), { promptProfile: "compact-v1" as const });
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { qualificationStatus: "HOT", phoneNumber: "+79991234567", phoneConfirmed: true, handoffAt: null } as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Готов, вот телефон, обсудим с менеджером." }],
+      plan: { text: "Контакт передаю менеджеру.", nextInformationNeed: null, asksUserQuestion: false,
+        knowledgeEntryIds: [], unresolvedQuestions: [], useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: false, customerFacingDecision: "HANDOFF",
+        previouslyExplainedKnowledgeEntryIds: ["pricing"],
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })) },
+    });
+    expect(result.text).toMatch(/передаю Вас менеджеру/iu);
+    expect(result.text).not.toMatch(/полдень/iu);
+    expect(llm.requests[2]!.metadata?.stage).toBe("REPAIR");
+    expect(llm.requests[3]!.metadata?.stage).toBe("REVIEW");
+    expect(llm.callCount).toBe(4);
+  });
+
   it("keeps a semantically reviewed correction despite noncanonical optional annotations", async () => {
     const lead = { ...createInitialLead("annotation-test", "TEST", "synthetic", new Date()),
       city: "Москва", startingUnits: 5, availableCapital: 1_200_000,
@@ -375,7 +416,7 @@ describe("natural response generation", () => {
     expect(result.text).toContain("3–4");
     expect(llm.callCount).toBe(3);
     expect(llm.requests[0]!.maxTokens).toBeGreaterThanOrEqual(2000);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v3");
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v4");
     expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
     expect(JSON.stringify(llm.requests)).not.toContain("operations-after-capital-correction");
   });
