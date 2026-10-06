@@ -230,7 +230,12 @@ export interface ApprovedEconomicsScenario {
   oneObjectLaunch: LaunchBudgetRange | null;
   requestedUnitsLaunch: LaunchBudgetRange | null;
   /** Bounded adjacent alternatives for comparison; never chosen lead facts. */
-  nearbyLaunchCosts?: Array<Pick<LaunchBudgetRange, "units" | "totalMin" | "totalMax">>;
+  nearbyLaunchCosts?: Array<Pick<LaunchBudgetRange, "units" | "totalMin" | "totalMax"> & {
+    estimatedMonthlyIncome: number;
+    incomeGuaranteed: false;
+    remainingCapital: number | null;
+    capitalShortfall: number | null;
+  }>;
 }
 
 export interface ApprovedEconomicsContext {
@@ -298,7 +303,11 @@ export function buildApprovedEconomicsContext(input: {
         [requestedUnits - 1, requestedUnits, requestedUnits + 1]
           .map(units => calculateLaunchBudgetRange({ units, rentReference: reference }))
           .filter((launch): launch is LaunchBudgetRange => launch !== null)
-          .map(({ units, totalMin, totalMax }) => ({ units, totalMin, totalMax })),
+          .map(({ units, totalMin, totalMax }) => ({ units, totalMin, totalMax,
+            estimatedMonthlyIncome: calculateEconomicsEstimate(units)!.estimatedMonthlyIncome,
+            incomeGuaranteed: false as const,
+            remainingCapital: input.availableCapital == null ? null : Math.max(0, input.availableCapital - totalMax),
+            capitalShortfall: input.availableCapital == null ? null : Math.max(0, totalMin - input.availableCapital) })),
     })),
     limitations: [
       "Суммы являются утверждёнными ориентировочными сценариями, а не live-ценой конкретного объекта.",

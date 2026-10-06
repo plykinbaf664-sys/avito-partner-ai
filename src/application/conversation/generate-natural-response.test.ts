@@ -45,6 +45,23 @@ describe("natural response generation", () => {
     })).rejects.toMatchObject({ code: "RESPONSE_POLICY_UNKNOWN_KNOWLEDGE_ID" });
   });
 
+  it("grounds both launch and non-guaranteed income when comparing adjacent discussed scales", async () => {
+    const answerText = "На пять объектов ориентир запуска 700 000 ₽, на шесть — 830 000 ₽. При бюджете 1 200 000 ₽ оба варианта укладываются. Ориентир дохода — 100 000–120 000 ₽ в месяц, без гарантии; фактическая смета зависит от объекта.";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText, qualificationQuestion: "",
+      interpretedQuestionKind: "CLARIFICATION", usedKnowledgeEntryIds: ["guarantees-and-economics"] }), supportedReview]);
+    const lead = { ...createInitialLead("adjacent-income", "TEST", "synthetic", new Date()),
+      city: "Москва", startingUnits: 5, availableCapital: 1_200_000, availableCapitalConfirmed: true };
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead,
+      recentMessages: [{ direction: "INBOUND", content: "Сравните пять и шесть объектов: запуск и доход." }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
+        economicsContext: buildApprovedEconomicsContext({ city: "Москва", availableCapital: 1_200_000, requestedUnits: 5 }) },
+    });
+    expect(result.text).toBe(answerText);
+    expect(llm.callCount).toBe(2);
+  });
+
   it("never delivers a discarded optional interpretation without semantic review", async () => {
     const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Команда помогает выбрать объект.",
       qualificationQuestion: "", interpretedQuestionKind: "OTHER_TAXONOMY" })]);
@@ -59,7 +76,7 @@ describe("natural response generation", () => {
     const lead = { ...createInitialLead("financial-context", "TEST", "synthetic", new Date()),
       city: "Москва", startingUnits: 10, availableCapital: 1_200_000,
       availableCapitalConfirmed: true, capitalScope: "TOTAL_LIMIT" as const };
-    const answerText = "Запуск шести объектов — ориентировочно 830 000 ₽. Ваших 1 200 000 ₽ хватает на этот расчёт; фактическая смета зависит от объекта и собственника.";
+    const answerText = "Запуск шести объектов — ориентировочно 830 000 ₽. Ваших 1 200 000 ₽ хватает на этот расчёт. Для десяти ориентир 1 350 000 ₽ — на такой масштаб пока не хватает; фактическая смета зависит от объекта и собственника.";
     const llm = new FakeLLMProvider([JSON.stringify({ answerText, qualificationQuestion: "",
       interpretedQuestionKind: "BUSINESS_INFORMATION", nextInformationNeed: null }), supportedReview]);
     await createNaturalResponseGenerator({ llmProvider: llm })({ lead,

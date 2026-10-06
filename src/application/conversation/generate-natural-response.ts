@@ -119,7 +119,8 @@ function approvedEconomicsMoneyValues(plan: ConversationResponsePlan): Set<numbe
       scenario.oneObjectLaunch?.totalMax,
       scenario.requestedUnitsLaunch?.totalMin,
       scenario.requestedUnitsLaunch?.totalMax,
-      ...(scenario.nearbyLaunchCosts ?? []).flatMap(launch => [launch.totalMin, launch.totalMax]),
+      ...(scenario.nearbyLaunchCosts ?? []).flatMap(launch => [launch.totalMin, launch.totalMax,
+        launch.estimatedMonthlyIncome, launch.remainingCapital, launch.capitalShortfall]),
     ]),
     context.requestedUnitsIncome?.estimatedMonthlyIncome,
   ];
@@ -251,6 +252,11 @@ function validateResponsePolicy(
   const groundedText = `${draft} ${approvedFactText}`;
   const amounts = moneyValues(draft);
   const adaptedAmounts = moneyValues(answer);
+  // The exact same deterministic desired/minimum launch evidence supplied to
+  // the brain may be quoted while answering a different current calculation.
+  const financial = assessFinancialReadiness(lead);
+  const financialAmounts = [financial.launchBudgetRange.totalMin, financial.launchBudgetRange.totalMax,
+    financial.minimumLaunchBudgetRange.totalMin, financial.minimumLaunchBudgetRange.totalMax];
   const incomeDisclaimer = /не\s+гарант|гарант\p{L}*\s+(?:доход\p{L}*\s+)?нет|без\s+гарант/iu;
   const invalid = (reason = "RESPONSE_POLICY_VIOLATION", diagnosticCode = reason) => {
     const error = new Error(reason) as Error & { code: string };
@@ -387,6 +393,7 @@ function validateResponsePolicy(
   ) invalid("RESPONSE_POLICY_VIOLATION", "RESPONSE_POLICY_OVERLONG_CONFIRMATION");
   if (plan.economicsContext?.availableCapital !== null && plan.economicsContext?.availableCapital !== undefined) {
     const approvedUnitCounts = approvedEconomicsUnitCounts(plan);
+    if (lead.startingUnits != null) approvedUnitCounts.add(lead.startingUnits);
     const adaptedUnitCounts = referencedUnitCounts(answer);
     if (adaptedUnitCounts.some((units) => !approvedUnitCounts.has(units))) {
       invalid("RESPONSE_POLICY_VIOLATION", "RESPONSE_POLICY_UNAPPROVED_UNIT_COUNT");
@@ -401,6 +408,7 @@ function validateResponsePolicy(
   ];
   if (plan.contextualReference) {
     const allowed = allowedContextualMoneyValues(plan, recentMessages);
+    for (const amount of financialAmounts) allowed.add(amount);
     if ([...adaptedAmounts].some((amount) => !allowed.has(amount))) {
       invalid("RESPONSE_POLICY_VIOLATION", "RESPONSE_POLICY_UNGROUNDED_CONTEXTUAL_AMOUNT");
     }
@@ -408,6 +416,7 @@ function validateResponsePolicy(
     const groundedAmounts = new Set([
       ...amounts,
       ...approvedEconomicsMoneyValues(plan),
+      ...financialAmounts,
       ...moneyOccurrences(approvedFactText),
       ...[
         lead.availableCapital,

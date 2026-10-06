@@ -61,6 +61,16 @@ IDs explicitly. Adjacent scale totals are supplied by the calculator for natural
 comparisons, without committing either alternative to lead facts. Compact extraction
 explicitly distinguishes an ambiguous range from a chosen single starting scale.
 After this correction, 552 local tests in 43 files, typecheck, lint and build passed.
+The second live replay identified another missing comparison capability: the model
+could compare adjacent startup totals but the corresponding approved income total
+for the second option was absent from grounding. Adjacent options now carry both
+deterministic startup totals and non-guaranteed income estimates. This deficiency
+also has a failing-then-passing unit regression; the monetary guard stays intact.
+The guard also accepts the very same desired/minimum financial evidence sent to
+the brain, so a truthful comparison of a current six-object calculation with the
+older ten-object target is not falsely rejected. Adjacent options include the
+remaining capital and shortfall computed in code. Final local verification:
+553 tests in 43 files, typecheck, lint and build passed.
 
 ## Incident repair constraints
 
