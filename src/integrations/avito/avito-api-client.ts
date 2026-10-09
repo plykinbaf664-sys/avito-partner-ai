@@ -70,6 +70,8 @@ export interface AvitoMessage {
   direction: "in" | "out";
   type: string;
   text: string | null;
+  /** Chat-list bodies can be substituted by Avito access notices. */
+  origin?: "CHAT_PREVIEW" | "MESSAGE_HISTORY";
 }
 
 export class AvitoApiError extends Error {
@@ -213,6 +215,7 @@ export class AvitoApiClient {
           id: stringifyId(last.data.id), authorId: stringifyId(last.data.author_id),
           createdAtUnix: last.data.created, direction: last.data.direction,
           type: last.data.type, text: last.data.content.text ?? null,
+          origin: "CHAT_PREVIEW" as const,
         } } : {}),
       };
     });
@@ -242,6 +245,7 @@ export class AvitoApiClient {
       direction: message.direction,
       type: message.type,
       text: message.content.text ?? null,
+      origin: "MESSAGE_HISTORY" as const,
     }));
   }
 

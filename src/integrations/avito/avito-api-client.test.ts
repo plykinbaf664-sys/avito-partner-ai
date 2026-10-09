@@ -215,7 +215,7 @@ describe("Avito API client", () => {
     const client = new AvitoApiClient({ clientId: "id", clientSecret: "secret" }, fetcher);
     expect(await client.listChats()).toEqual([
       { id: "chat", updatedAtUnix: 1, lastMessage: { id: "preview", authorId: "456",
-        createdAtUnix: 1789296591, direction: "in", type: "text", text: "Тест" } },
+        createdAtUnix: 1789296591, direction: "in", type: "text", text: "Тест", origin: "CHAT_PREVIEW" } },
       { id: "invalid", updatedAtUnix: null },
     ]);
   });

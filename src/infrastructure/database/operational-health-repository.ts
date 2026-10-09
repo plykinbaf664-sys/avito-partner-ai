@@ -39,9 +39,10 @@ export class DrizzleOperationalHealthRepository implements OperationalHealthRepo
       WHERE component=${component} AND alert_lease_owner=${owner}`);
   }
   async backlog(at: Date) {
-    const [row] = await this.database.all<{pendingInbound:number;oldestPendingAt:number|null;failedInbound:number;failedOutbound:number;unresolvedOutbound:number}>(sql`
+    const [row] = await this.database.all<{pendingInbound:number;oldestPendingAt:number|null;failedInbound:number;failedOutbound:number;unresolvedOutbound:number;unverifiedInbound:number}>(sql`
       SELECT
       (SELECT count(*) FROM incoming_events WHERE upper(source)='AVITO' AND status IN ('RECEIVED','PROCESSING')) AS pendingInbound,
+      (SELECT count(*) FROM incoming_events WHERE upper(source)='AVITO' AND status='RECEIVED' AND error='AVITO_PREVIEW_UNVERIFIED') AS unverifiedInbound,
       (SELECT min(received_at) FROM incoming_events WHERE upper(source)='AVITO' AND status IN ('RECEIVED','PROCESSING')) AS oldestPendingAt,
       (SELECT count(*) FROM incoming_events WHERE upper(source)='AVITO' AND status='FAILED' AND received_at>=${at.getTime()-86_400_000}) AS failedInbound,
       (SELECT count(*) FROM messages m JOIN leads l ON l.id=m.lead_id WHERE upper(l.source)='AVITO'

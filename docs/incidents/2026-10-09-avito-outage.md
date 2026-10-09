@@ -12,6 +12,14 @@
   transport and failed validation. The response schema permits an empty default;
   the policy validator previously did not distinguish that malformed reply from
   an intentional `NO_REPLY`. This was a software defect.
+- The chat-list endpoint substituted a subscription/access notice for actual
+  message text while keeping a message-shaped preview. Our previous code treated
+  an authenticated response as proof of authentic message content. Three inbound
+  records and five supposed human messages contained this provider notice. The
+  three inbound records reached UNKNOWN/NO_REPLY, hiding the real client input.
+  A read-only API comparison confirmed the same notice in 99 of 151 current chat
+  previews and HTTP 402 on history. This is a provenance/ingestion defect, not a
+  problem to solve by prompting the model or matching Russian phrases.
 - Our release checks covered service uptime, SQLite and synthetic Qwen requests,
   but not continued Avito history/delivery health. Both application services
   remained active without restarts, and `/api/readiness` incorrectly returned
@@ -20,7 +28,8 @@
 
 At the initial audit snapshot, the day's inbound events were persisted and marked
 processed; two AI deliveries were FAILED (one empty reply and one HTTP 402).
-Seven manually authored messages were present. These counts do not establish
+Seven records were labeled human messages, a label subsequently shown to include
+provider notices. These counts do not establish
 that every unanswered customer message was visible through the restricted API.
 No customer text, names, phone numbers or credentials are included in this report.
 
@@ -32,11 +41,20 @@ No customer text, names, phone numbers or credentials are included in this repor
 - Add durable component observations in SQLite: polling, Messenger history,
   outbound delivery and application HTTP. Add honest business readiness and an
   operational section to the authorized Telegram `/status` command.
-- On known account-wide 402/401, persist authenticated inbound previews as CRM
-  leads/conversations/messages and keep accepted events RECEIVED without spending
-  processing attempts or LLM tokens. Skip follow-up generation while blocked.
+- Mark actual API chat-list bodies as `CHAT_PREVIEW` and message-history bodies
+  as `MESSAGE_HISTORY`. Only authoritative message content enters ingestion;
+  history replaces matching previews. An unverified preview preserves chat/lead
+  discovery in CRM, without storing its body as customer/manager history or
+  poisoning message idempotency. The incomplete polling cursor remains pinned
+  for recovery when history becomes available. Already accepted valid inputs
+  remain RECEIVED without spending processing attempts or LLM tokens on known
+  account-wide 402/401. Skip follow-up generation while blocked.
   Continue read probes with a 60-second failure interval; healthy polling retains
   its existing interval. A chat-specific 403 does not block every conversation.
+- A readable chat later in the same sweep cannot clear an access denial observed
+  earlier. Explicitly quarantined legacy preview references can acquire their
+  canonical payload from verified ingestion; ordinary processed duplicates
+  remain immutable.
 - Resume queued work after a successful Messenger read. A later persisted human
   reply suppresses the old AI outbound. Do not resurrect previously PROCESSED
   failed deliveries or replay the historical conversations handled manually.
@@ -47,6 +65,13 @@ No customer text, names, phone numbers or credentials are included in this repor
   and a recovery notification. Deliberately cancelled follow-ups do not count as
   unresolved delivery failures. Notifications contain operational codes/counts,
   never customer transcripts or credentials. No LLM calls are used by monitoring.
+- Archive the eight confirmed provider-notice records before excluding them
+  from conversation history. Quarantine the three affected incoming identities
+  for authoritative rehydration; preserve leads, facts and the LLM usage ledger.
+  Clear affected conversational notes, retaining structured memory and real raw
+  history. The one-off repair was dry-run against an in-memory production copy
+  with foreign-key checks. `/status` separately counts references awaiting real
+  Avito content. This repair does not match customer phrases in production.
 
 Relevant code: `generate-natural-response.ts`, `process-incoming-event.ts`,
 `avito-runtime-safety.ts`, `poll-avito-messages.ts`, `operational-health.ts`,
@@ -62,7 +87,11 @@ The empty-response regression and the readiness regression were first observed
 failing before the fixes. Added permanent SQLite tests cover denied ingestion,
 CRM visibility, zero processing attempts while blocked, recovery/idempotency,
 human supersession, alert concurrency/retry/recovery, stale polling, chat-specific
-403 isolation and intentionally cancelled follow-ups. Existing tests are retained.
+403 isolation, intentionally cancelled follow-ups, unverified preview rejection,
+legacy-reference hydration and sticky account denial across mixed chat results.
+The latter preview/hydration regressions also failed before their fixes.
+Existing behavioral assertions are retained; the API shape assertion additionally
+checks the new provenance field.
 
 Local full suite passed (567 tests before the final two operational cases);
 both additional cases passed their focused run. Typecheck, lint and production
@@ -72,6 +101,11 @@ economics question and a short referential follow-on through Test Chat Lab, with
 in-memory SQLite and fake delivery. Production provider smoke is synthetic;
 no test messages are sent to actual Avito clients. See the release addendum for
 the actual server results and rollout manifest.
+After ingestion-only corrections, reuse that successful live trajectory and
+replay its recorded Qwen outputs through the final pipeline, checking identical
+delivery, no fallback and duplicate idempotency. This avoids repeating paid
+behavioral calls; prompts, extraction/generation and business policies are
+unchanged between the live reference and final ingestion correction.
 
 ## Operations and limitations
 

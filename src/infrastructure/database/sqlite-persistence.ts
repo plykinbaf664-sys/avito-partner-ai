@@ -660,6 +660,18 @@ class DrizzleIncomingEventRepository implements IncomingEventRepository {
     if (!existing) {
       throw new Error("Incoming event registration conflict without stored event");
     }
+    // Only explicitly quarantined, unclaimed legacy previews can acquire a
+    // canonical body. A normal duplicate never rewrites a processed event.
+    if (event.source === "AVITO" && existing.status === "RECEIVED" &&
+        existing.error === "AVITO_PREVIEW_UNVERIFIED" && event.payload !== null &&
+        typeof event.payload === "object" && "normalizedInput" in event.payload) {
+      const hydrated = await this.database.update(schema.incomingEvents)
+        .set({ payload: event.payload, error: null, receivedAt: event.receivedAt })
+        .where(and(eq(schema.incomingEvents.id, existing.id), eq(schema.incomingEvents.status, "RECEIVED"),
+          eq(schema.incomingEvents.error, "AVITO_PREVIEW_UNVERIFIED")))
+        .returning();
+      return { event: hydrated[0] ?? (await this.findByIdentity(event.source, event.externalEventId))!, created: false };
+    }
     return { event: existing, created: false };
   }
 

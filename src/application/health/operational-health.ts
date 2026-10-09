@@ -15,7 +15,7 @@ export interface OperationalHealthRepository {
   claimAlert(component: HealthComponent, fingerprint: string, at: Date, options?: { recovery?: boolean }): Promise<string | null>;
   finishAlert(component: HealthComponent, owner: string, fingerprint: string, sent: boolean, at: Date): Promise<void>;
   backlog(at: Date): Promise<{ pendingInbound: number; oldestPendingAt: number | null; failedInbound: number;
-    failedOutbound: number; unresolvedOutbound: number }>;
+    failedOutbound: number; unresolvedOutbound: number; unverifiedInbound: number }>;
 }
 export interface OperationalStatus {
   ready: boolean;
@@ -53,6 +53,7 @@ export function formatOperationalStatus(status: OperationalStatus): string {
       ? "Avito вернул HTTP 402. Проверьте доступ к API мессенджера в подписке Avito; при активной опции обратитесь в поддержку Avito."
       : "",
     `Входящие в очереди: ${status.backlog.pendingInbound}; ошибки обработки: ${status.backlog.failedInbound}.`,
+    status.backlog.unverifiedInbound ? `Ожидают загрузки настоящего содержимого из Avito: ${status.backlog.unverifiedInbound}.` : "",
     `Ошибки доставки за сутки: ${status.backlog.failedOutbound}; без последующего ответа команды: ${status.backlog.unresolvedOutbound}.`,
     "Проверка без отправки тестовых сообщений клиентам; доступ на запись подтверждается только реальной успешной доставкой.",
   ].filter(Boolean).join("\n");

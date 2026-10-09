@@ -8,6 +8,7 @@ import { createIncomingEventAcceptor } from "./accept-incoming-event";
 import { createExternalConversationMessageRecorder } from "./record-external-message";
 import {
   incomingPartnerEventSchema,
+  ensureIncomingConversation,
   type IncomingPartnerEvent,
   type ProcessIncomingEventOptions,
   type ProcessIncomingEventResult,
@@ -16,6 +17,7 @@ import { AvitoApiError, type AvitoApiClient, type AvitoMessage } from "@/integra
 import { AvitoInboundChannel } from "@/integrations/avito/avito-inbound-channel";
 import { generateId } from "@/shared/id";
 import { externalErrorCode } from "../delivery/retry-policy";
+import { ACCESS_BLOCK_CODES } from "../health/operational-health";
 
 const PAGE_SIZE = 100;
 const MAX_OFFSET = 1_000;
@@ -95,6 +97,14 @@ export function createAvitoMessagePoller({
     const attempted = new Set<string>();
     const queued = new Map<string, IncomingPartnerEvent>();
     const chatsToCoalesce = new Set<string>();
+    let accessDeniedDuringSweep = false;
+    const reportHistory = async (code: string | null) => {
+      if (code !== null && ACCESS_BLOCK_CODES.has(code)) accessDeniedDuringSweep = true;
+      // A later readable chat does not prove recovery of an account restriction
+      // observed elsewhere in this same sweep.
+      if (accessDeniedDuringSweep && (code === null || !ACCESS_BLOCK_CODES.has(code))) return;
+      await observeHistoryResult?.(code);
+    };
     const queue = (input: IncomingPartnerEvent) => {
       queued.set(input.externalEventId, input);
     };
@@ -223,7 +233,7 @@ export function createAvitoMessagePoller({
               await assertLease();
               result.apiRequests += 1;
               const page = await client.listMessages(chat.id, { limit: PAGE_SIZE, offset: messageOffset });
-              await observeHistoryResult?.(null);
+              await reportHistory(null);
               result.fetched += page.length;
               for (const message of page) await considerMessage(message);
               // Messenger returns messages newest first. Read the entire boundary page,
@@ -239,7 +249,7 @@ export function createAvitoMessagePoller({
                 !(error instanceof Error && error.message === "AVITO_POLL_MESSAGE_PAGE_LIMIT")) throw error;
             result.historyErrors += 1;
             result.failed += 1;
-            await observeHistoryResult?.(error instanceof AvitoApiError ? error.code : "AVITO_POLL_MESSAGE_PAGE_LIMIT");
+            await reportHistory(error instanceof AvitoApiError ? error.code : "AVITO_POLL_MESSAGE_PAGE_LIMIT");
             logger.error("avito.poll.history_unavailable", { source: "AVITO", chatId: chat.id,
               code: error instanceof AvitoApiError ? error.code : "AVITO_POLL_MESSAGE_PAGE_LIMIT",
               httpStatus: error instanceof AvitoApiError ? error.status : null,
@@ -249,6 +259,17 @@ export function createAvitoMessagePoller({
           const inputs: IncomingPartnerEvent[] = [];
           for (const message of [...messages.values()].sort((a, b) => a.createdAtUnix - b.createdAtUnix)) {
             await assertLease();
+            if (message.origin === "CHAT_PREVIEW") {
+              // Authentication of the chat-list response does not authenticate
+              // its body: Avito replaces it with an access notice under 402.
+              // History overwrites matching previews above. Keep chat discovery
+              // durable, without poisoning message IDs or conversation memory.
+              await persistence.transaction(repositories => ensureIncomingConversation(repositories,
+                { source: "AVITO", externalLeadId: chat.id }, generateId, new Date(message.createdAtUnix * 1_000)));
+              result.ignored += 1;
+              logger.info("avito.poll.preview_unverified", { source: "AVITO", chatId: chat.id });
+              continue;
+            }
             if (message.direction === "out") {
               const recorded = await recordHumanMessage({
                 source: "AVITO",
@@ -324,7 +345,7 @@ export function createAvitoMessagePoller({
               limit: PAGE_SIZE,
               offset: 0,
             });
-            await observeHistoryResult?.(null);
+            await reportHistory(null);
             result.fetched += page.length;
             let discoveredNew = false;
             for (const message of [...page].sort(
@@ -381,7 +402,7 @@ export function createAvitoMessagePoller({
             if (discoveredNew) nextRoundChats.add(pendingChatId);
           } catch (error) {
             deferredChats.add(pendingChatId);
-            await observeHistoryResult?.(error instanceof AvitoApiError ? error.code : "AVITO_COALESCING_RECHECK_FAILED");
+            await reportHistory(error instanceof AvitoApiError ? error.code : "AVITO_COALESCING_RECHECK_FAILED");
             logger.error("avito.poll.coalescing_recheck_failed", {
               source: "AVITO",
               chatId: pendingChatId,
@@ -430,7 +451,7 @@ export function createAvitoMessagePoller({
       }
     } catch (error) {
       result.failed += 1;
-      if (error instanceof AvitoApiError) await observeHistoryResult?.(error.code);
+      if (error instanceof AvitoApiError) await reportHistory(error.code);
       logger.error("avito.poll.failed", {
         source: "AVITO",
         code: error instanceof AvitoApiError ? error.code :

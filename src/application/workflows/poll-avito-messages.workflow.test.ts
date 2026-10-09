@@ -358,6 +358,52 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     expect(h.client.sendTextMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("does not ingest an unverified API chat preview as customer text and uses real history after recovery", async () => {
+    const h = harness(persistence, undefined, 0, async () => {}, true);
+    h.client.listChats.mockResolvedValue([{ id: "chat", updatedAtUnix: null,
+      lastMessage: message("m1", { origin: "CHAT_PREVIEW", text: "Synthetic provider access notice, not customer content" }) }]);
+    h.client.listMessages.mockRejectedValue(new AvitoApiError("AVITO_MESSENGER_ACCESS_PAYMENT_REQUIRED", 402, false));
+    expect(await h.poll(current)).toMatchObject({ status: "FAIL", accepted: 0, processed: 0 });
+    expect(await persistence.incomingEvents.findByIdentity("AVITO", "m1")).toBeNull();
+    const lead = await persistence.leads.findByExternalIdentity("AVITO", "chat");
+    expect(await persistence.crm.findLeadSnapshot(lead!.id)).not.toBeNull();
+    expect(await persistence.messages.listByLeadId(lead!.id)).toHaveLength(0);
+    expect(h.extractMessage).not.toHaveBeenCalled();
+    h.client.listMessages.mockResolvedValue([message("m1", { origin: "MESSAGE_HISTORY" })]);
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", accepted: 1, processed: 1 });
+    const event = await persistence.incomingEvents.findByIdentity("AVITO", "m1");
+    expect((await persistence.messages.findByIncomingEventId(event!.id))!.content).toBe(message().text);
+    expect(h.client.sendTextMessage).toHaveBeenCalledOnce();
+  });
+
+  it("hydrates a quarantined legacy preview from authoritative history without replaying provider notices", async () => {
+    await persistence.incomingEvents.register({ id: "quarantined", source: "AVITO", externalEventId: "m1",
+      externalLeadId: "chat", payload: { unverifiedAvitoPreview: true }, status: "RECEIVED",
+      error: "AVITO_PREVIEW_UNVERIFIED", processingAttempts: 0, processingRetryable: null,
+      extraction: null, llmModel: null, llmInputTokens: null, llmOutputTokens: null, llmLatencyMs: null,
+      totalProcessingLatencyMs: null, receivedAt: start, processingStartedAt: null, processedAt: null });
+    expect((await persistence.operations.backlog(current)).unverifiedInbound).toBe(1);
+    const h = harness(persistence, undefined, 0, async () => {}, true);
+    h.client.listMessages.mockResolvedValue([message("m1", { origin: "MESSAGE_HISTORY" })]);
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", processed: 1 });
+    const event = await persistence.incomingEvents.findByIdentity("AVITO", "m1");
+    expect(event!.payload).toMatchObject({ normalizedInput: { text: message().text } });
+    expect((await persistence.operations.backlog(current)).unverifiedInbound).toBe(0);
+    expect(await h.poll(current)).toMatchObject({ processed: 0 });
+    expect(h.client.sendTextMessage).toHaveBeenCalledOnce();
+  });
+
+  it("does not clear an account restriction because another chat in the same sweep is readable", async () => {
+    const h = harness(persistence, undefined, 0, async () => {}, true);
+    h.client.listChats.mockResolvedValue([{ id: "denied", updatedAtUnix: null },
+      { id: "chat", updatedAtUnix: null, lastMessage: message() }]);
+    h.client.listMessages.mockRejectedValueOnce(new AvitoApiError("AVITO_MESSENGER_ACCESS_PAYMENT_REQUIRED", 402, false))
+      .mockResolvedValueOnce([message()]);
+    expect(await h.poll(current)).toMatchObject({ status: "FAIL", processed: 0 });
+    expect((await persistence.operations.list()).find(row => row.component === "AVITO_MESSENGER")!.state).toBe("BLOCKED");
+    expect(h.extractMessage).not.toHaveBeenCalled();
+  });
+
   it("continues after a denied chat and deduplicates a preview also returned in history", async () => {
     const h = harness();
     h.client.listChats.mockResolvedValue([

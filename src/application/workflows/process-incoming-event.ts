@@ -232,10 +232,10 @@ async function prepareClaimedEvent(
   return { claimed: true, recoveredStale: claim.recoveredStale, ...context };
 }
 
-/** Persist CRM/message context without claiming an LLM processing attempt. */
-export async function persistIncomingEventContext(
-  repositories: RepositoryContext, event: IncomingEvent,
-  input: z.output<typeof incomingPartnerEventSchema>, idGenerator: IdGenerator, now: Date,
+/** A discovered chat is CRM-visible even while its message body is unverified. */
+export async function ensureIncomingConversation(
+  repositories: RepositoryContext, input: Pick<IncomingPartnerEvent, "source" | "externalLeadId">,
+  idGenerator: IdGenerator, now: Date,
 ) {
   let lead = await repositories.leads.findByExternalIdentity(
     input.source,
@@ -270,6 +270,17 @@ export async function persistIncomingEventContext(
     await repositories.conversations.insert(conversation);
   }
 
+  return { lead, conversation };
+}
+
+/** Persist CRM/message context without claiming an LLM processing attempt. */
+export async function persistIncomingEventContext(
+  repositories: RepositoryContext, event: IncomingEvent,
+  input: z.output<typeof incomingPartnerEventSchema>, idGenerator: IdGenerator, now: Date,
+) {
+  const context = await ensureIncomingConversation(repositories, input, idGenerator, now);
+  const lead = context.lead;
+  let conversation = context.conversation;
   const existingMessage = await repositories.messages.findByIncomingEventId(
     event.id,
   );
