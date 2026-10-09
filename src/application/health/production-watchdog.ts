@@ -10,7 +10,12 @@ export async function runProductionWatchdog({ persistence, sender, now = new Dat
   await persistence.operations!.observe("APPLICATION_HTTP", httpOk ? "OK" : "BLOCKED", httpOk ? null : "APPLICATION_HTTP_UNAVAILABLE", now);
   const status = await readOperationalStatus(persistence, now);
   if (!sender) return { status, alerted: false, alertDelivery: "DISABLED" };
-  const fingerprint = createHash("sha256").update(JSON.stringify(status.issues.slice().sort())).digest("hex");
+  // Queue size and derived polling errors can change during one billing outage.
+  // Deduplicate by its blocking cause, while still reporting all current issues.
+  const blockingIssues = status.observations.filter(row => row.state === "BLOCKED")
+    .map(row => `${row.component}:${row.errorCode ?? "UNAVAILABLE"}`);
+  const fingerprint = createHash("sha256").update(JSON.stringify(
+    (blockingIssues.length ? blockingIssues : status.issues).slice().sort())).digest("hex");
   const recipients = await persistence.telegramManagerRecipients.listActive();
   if (!recipients.length) return { status, alerted: false, alertDelivery: "NO_RECIPIENTS" };
   const owner = await persistence.operations!.claimAlert("APPLICATION_HTTP", fingerprint, now, { recovery: status.ready });

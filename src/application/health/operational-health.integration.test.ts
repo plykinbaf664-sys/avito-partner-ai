@@ -46,6 +46,26 @@ describe("operational safety with real SQLite", () => {
     expect(process).toHaveBeenLastCalledWith(newer, undefined);
   });
 
+  it("keeps conversation clocks monotonic while old blocked inbound is retried after a newer human and client turn", async () => {
+    const safety = createAvitoRuntimeSafety(persistence, vi.fn(), () => at);
+    const accept = createIncomingEventAcceptor({ persistence, now: () => at });
+    await accept(input);
+    await safety.observeHistoryResult("AVITO_MESSENGER_ACCESS_PAYMENT_REQUIRED");
+    await expect(safety.processIncomingEvent(input)).rejects.toThrow("AVITO_CHANNEL_ACCESS_BLOCKED");
+    const humanAt = new Date(at.getTime()+60_000);
+    await createExternalConversationMessageRecorder({ persistence })({ source: "AVITO", externalLeadId: input.externalLeadId,
+      externalMessageId: "later-human", text: "Я отвечу на Ваш вопрос.", createdAt: humanAt });
+    const later = { ...input, externalEventId: "later-client", messageId: "later-client", receivedAt: new Date(at.getTime()+120_000) };
+    await accept(later);
+    await expect(safety.processIncomingEvent(later)).rejects.toThrow("AVITO_CHANNEL_ACCESS_BLOCKED");
+    await expect(safety.processIncomingEvent(input)).rejects.toThrow("AVITO_CHANNEL_ACCESS_BLOCKED");
+    const lead = await persistence.leads.findByExternalIdentity("AVITO", input.externalLeadId);
+    const conversation = await persistence.conversations.findOpenByLeadId(lead!.id);
+    expect(conversation!.updatedAt.getTime()).toBeGreaterThanOrEqual(later.receivedAt.getTime());
+    expect(conversation!.lastInboundAt).toEqual(later.receivedAt);
+    expect(conversation!.lastOutboundAt).toEqual(humanAt);
+  });
+
   it("reports a live process with a blocked Messenger as not ready and catches stale polling independently", async () => {
     await persistence.operations.observe("AVITO_POLLING", "OK", null, at);
     await persistence.operations.observe("AVITO_MESSENGER", "OK", null, at);
@@ -100,9 +120,11 @@ describe("operational safety with real SQLite", () => {
     expect(sender.sendMessage).toHaveBeenCalledOnce();
     expect(sender.sendMessage.mock.calls[0][1]).toContain("HTTP 402");
     expect(sender.sendMessage.mock.calls[0][1]).not.toContain(input.text);
+    for (let count=0;count<3;count++) await persistence.operations.observe("AVITO_POLLING", "DEGRADED", "AVITO_POLL_FAILED", new Date(at.getTime()+1_000));
     await run(new Date(at.getTime()+60_000));
     expect(sender.sendMessage).toHaveBeenCalledOnce();
     await persistence.operations.observe("AVITO_MESSENGER", "OK", null, new Date(at.getTime()+120_000));
+    await persistence.operations.observe("AVITO_POLLING", "OK", null, new Date(at.getTime()+120_000));
     expect((await run(new Date(at.getTime()+120_000))).alerted).toBe(true);
     expect(sender.sendMessage.mock.calls[1][1]).toContain("восстановлена");
     await run(new Date(at.getTime()+180_000));

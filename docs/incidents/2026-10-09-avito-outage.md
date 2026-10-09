@@ -63,6 +63,8 @@ No customer text, names, phone numbers or credentials are included in this repor
 - Resume queued work after a successful Messenger read. A later persisted human
   reply suppresses the old AI outbound. Do not resurrect previously PROCESSED
   failed deliveries or replay the historical conversations handled manually.
+  Retrying an older blocked inbound preserves monotonic conversation clocks,
+  including the latest inbound and human outbound timestamps.
 - Install a separate systemd timer/oneshot watchdog, independent of the polling
   process. Detect missing/stale polling, denied access, processing failures,
   unresolved delivery/queue backlog and application HTTP failure. Notify active
@@ -70,6 +72,8 @@ No customer text, names, phone numbers or credentials are included in this repor
   and a recovery notification. Deliberately cancelled follow-ups do not count as
   unresolved delivery failures. Notifications contain operational codes/counts,
   never customer transcripts or credentials. No LLM calls are used by monitoring.
+  Deduplicate one blocking incident by its cause rather than changing queue sizes
+  or derived polling symptoms; a new blocking cause still produces a new alert.
 - Archive the eight confirmed provider-notice records before excluding them
   from conversation history. Quarantine the three affected incoming identities
   for authoritative rehydration; preserve leads, facts and the LLM usage ledger.

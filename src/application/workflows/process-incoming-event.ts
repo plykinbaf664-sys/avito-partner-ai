@@ -345,10 +345,11 @@ export async function persistIncomingEventContext(
         conversation.lastFollowUpAt.getTime() > conversation.lastInboundAt.getTime())
         ? 0
         : conversation.followUpCount,
-    lastInboundAt: now,
+    lastInboundAt: new Date(Math.max(conversation.lastInboundAt?.getTime() ?? now.getTime(), now.getTime())),
     awaitingUserReply: false,
     followUpEligibleAt: null,
-    updatedAt: now,
+    updatedAt: new Date(Math.max(conversation.updatedAt.getTime(), now.getTime(),
+      conversation.lastOutboundAt?.getTime() ?? 0, conversation.lastInboundAt?.getTime() ?? 0)),
   };
   await repositories.conversations.update(conversation);
 
