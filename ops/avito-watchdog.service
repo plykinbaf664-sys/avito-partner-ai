@@ -1,0 +1,12 @@
+[Unit]
+Description=Avito Partner AI independent operational watchdog
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/avito-partner-ai
+ExecStart=/usr/bin/node --env-file=.env.local --import tsx scripts/watch-production.ts
+TimeoutStartSec=55
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true

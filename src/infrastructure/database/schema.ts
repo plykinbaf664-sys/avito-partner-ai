@@ -343,6 +343,20 @@ export const telegramBotUpdates = sqliteTable("telegram_bot_updates", {
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 
+export const operationalHealth = sqliteTable("operational_health", {
+  component: text("component").$type<import("@/application/health/operational-health").HealthComponent>().primaryKey(),
+  state: text("state").$type<"OK" | "DEGRADED" | "BLOCKED">().notNull(),
+  errorCode: text("error_code"),
+  checkedAt: integer("checked_at", { mode: "timestamp_ms" }).notNull(),
+  lastSuccessAt: integer("last_success_at", { mode: "timestamp_ms" }),
+  consecutiveFailures: integer("consecutive_failures").notNull().default(0),
+  alertFingerprint: text("alert_fingerprint"),
+  lastAlertAt: integer("last_alert_at", { mode: "timestamp_ms" }),
+  lastAlertAttemptAt: integer("last_alert_attempt_at", { mode: "timestamp_ms" }),
+  alertLeaseOwner: text("alert_lease_owner"),
+  alertLeaseUntil: integer("alert_lease_until", { mode: "timestamp_ms" }),
+});
+
 export const llmCalls = sqliteTable("llm_calls", {
   id: text("id").primaryKey(),
   requestId: text("request_id").notNull(),

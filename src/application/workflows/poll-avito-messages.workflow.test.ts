@@ -14,6 +14,7 @@ import { AvitoOutboundMessageProvider } from "@/integrations/avito/avito-outboun
 import { createIncomingEventProcessor } from "./process-incoming-event";
 import { createIncomingEventAcceptor } from "./accept-incoming-event";
 import { createAvitoMessagePoller } from "./poll-avito-messages";
+import { createAvitoRuntimeSafety } from "../health/avito-runtime-safety";
 
 const extraction: ExtractMessageResult = {
   extraction: {
@@ -69,6 +70,7 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     chatId?: string,
     coalescingDelayMs = 0,
     waitForCoalescing: (milliseconds: number) => Promise<void> = async () => {},
+    runtimeSafety = false,
   ) {
     const client = {
       getAuthenticatedAccount: vi.fn().mockResolvedValue({ id: "owner" }),
@@ -82,12 +84,14 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
       extractMessage, now: () => current, logger,
       outboundProvider: new AvitoOutboundMessageProvider(client as unknown as AvitoApiClient),
     });
+    const safety = createAvitoRuntimeSafety(database, processIncomingEvent, () => current);
     const poll = createAvitoMessagePoller({
       client,
       persistence: database,
       chatId,
       stateRepository: database.pollingStates,
-      processIncomingEvent,
+      processIncomingEvent: runtimeSafety ? safety.processIncomingEvent : processIncomingEvent,
+      observeHistoryResult: runtimeSafety ? safety.observeHistoryResult : undefined,
       clock: () => current,
       logger,
       coalescingDelayMs,
@@ -106,6 +110,38 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     expect(messages.map((m) => m.direction)).toEqual(["INBOUND", "OUTBOUND"]);
     expect(messages[1]).toMatchObject({ deliveryStatus: "SENT", externalMessageId: "out-1" });
     expect(h.client.sendTextMessage).toHaveBeenCalledWith("chat", expect.any(String));
+  });
+
+  it("durably defers a denied account without LLM calls and resumes exactly once after access recovery", async () => {
+    const h = harness(persistence, undefined, 0, async () => {}, true);
+    h.client.listChats.mockResolvedValue([{ id: "chat", updatedAtUnix: null, lastMessage: message() }]);
+    h.client.listMessages.mockRejectedValue(new AvitoApiError("AVITO_MESSENGER_ACCESS_PAYMENT_REQUIRED", 402, false));
+    expect(await h.poll(current)).toMatchObject({ status: "FAIL", previewAccepted: 1, processed: 0 });
+    expect(await persistence.incomingEvents.findByIdentity("AVITO", "m1")).toMatchObject({ status: "RECEIVED", processingAttempts: 0 });
+    const lead = await persistence.leads.findByExternalIdentity("AVITO", "chat");
+    expect(await persistence.crm.findLeadSnapshot(lead!.id)).not.toBeNull();
+    expect(h.extractMessage).not.toHaveBeenCalled();
+    expect(h.client.sendTextMessage).not.toHaveBeenCalled();
+    expect(await h.poll(current)).toMatchObject({ status: "FAIL", processed: 0 });
+    h.client.listMessages.mockResolvedValue([message()]);
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", processed: 1 });
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", processed: 0 });
+    expect(h.extractMessage).toHaveBeenCalledOnce();
+    expect(h.client.sendTextMessage).toHaveBeenCalledOnce();
+    expect((await persistence.messages.listByLeadId(lead!.id)).filter(row => row.direction === "INBOUND")).toHaveLength(1);
+  });
+
+  it("does not send a stale queued reply after a human answered during the outage", async () => {
+    const h = harness(persistence, undefined, 0, async () => {}, true);
+    h.client.listChats.mockResolvedValue([{ id: "chat", updatedAtUnix: null, lastMessage: message() }]);
+    h.client.listMessages.mockRejectedValue(new AvitoApiError("AVITO_MESSENGER_ACCESS_PAYMENT_REQUIRED", 402, false));
+    await h.poll(current);
+    h.client.listMessages.mockResolvedValue([message(), message("human", { authorId: "owner", direction: "out",
+      createdAtUnix: start.getTime()/1_000+2, text: "Я отвечу на Ваш вопрос." })]);
+    // One recorded human message and one completed suppressed inbound.
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", processed: 2 });
+    expect(h.client.sendTextMessage).not.toHaveBeenCalled();
+    expect(await persistence.incomingEvents.findByIdentity("AVITO", "m1")).toMatchObject({ status: "PROCESSED" });
   });
 
   it("isolates a manual chat, including recovery, without advancing the account cursor", async () => {

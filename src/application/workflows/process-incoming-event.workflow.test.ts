@@ -176,6 +176,22 @@ describe("incoming partner event workflow", () => {
     expect(llm.callCount).toBe(3);
   });
 
+  it("never persists or delivers an empty SEND_REPLY even from a custom response generator", async () => {
+    const outbound = new FakeOutboundProvider();
+    const processEvent = createIncomingEventProcessor({ persistence,
+      extractMessage: async () => extractionResult({ city: "Москва" }), outboundProvider: outbound,
+      generateNaturalResponse: async () => ({ text: "   ", replyAction: "SEND_REPLY", model: "fake",
+        inputTokens: 10, outputTokens: 1, nextInformationNeed: null, conversationAction: "ANSWER" }) });
+    const result = await processEvent(input("empty-reply", "Я из Москвы"));
+    expect(result.eventStatus).toBe("PROCESSED");
+    expect(result.metrics?.responseGenerationSource).toBe("FALLBACK_DRAFT");
+    const messages = await persistence.messages.listByLeadId(result.leadId!);
+    const replies = messages.filter(message => message.direction === "OUTBOUND");
+    expect(replies).toHaveLength(1);
+    expect(replies[0].content.trim().length).toBeGreaterThan(0);
+    expect(replies[0].deliveryStatus).toBe("SENT");
+  });
+
   it("extracts city, available capital, and launch timing from one message", async () => {
     const { processEvent } = createHarness([
       extractionReply({

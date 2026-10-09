@@ -25,6 +25,12 @@ describe("system health", () => {
     });
   });
 
+  it("does not claim sales readiness when Avito has no recent polling heartbeat", async () => {
+    persistence = await SqlitePersistence.createMigrated("file::memory:");
+    const result = await checkReadiness(persistence, { avitoEnabled: true, now: new Date("2026-10-09T15:00:00Z") });
+    expect(result.status).toBe("not_ready");
+  });
+
   it("reports an unmigrated database as unavailable", async () => {
     persistence = SqlitePersistence.create("file::memory:");
     await expect(checkReadiness(persistence)).resolves.toEqual({

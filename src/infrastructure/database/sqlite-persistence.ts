@@ -51,6 +51,8 @@ import { DrizzlePollingStateRepository } from "./polling-state-repository";
 import type { LlmCallRecord, LlmUsageRepository, LlmWorkflowOutcome } from "@/application/observability/llm-usage";
 import type { BotStatusReadRepository } from "@/application/analytics/bot-status";
 import { DrizzleBotStatusReadRepository } from "./bot-status-repository";
+import { DrizzleOperationalHealthRepository } from "./operational-health-repository";
+import type { OperationalHealthRepository } from "@/application/health/operational-health";
 
 type Database = LibSQLDatabase<typeof schema>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
@@ -840,6 +842,7 @@ function serializeRepository<T extends object>(
 }
 
 export class SqlitePersistence implements Persistence {
+  readonly operations: OperationalHealthRepository;
   readonly botStatus: BotStatusReadRepository;
   readonly llmUsage: LlmUsageRepository;
   readonly pollingStates: PollingStateRepository;
@@ -863,6 +866,7 @@ export class SqlitePersistence implements Persistence {
       this.serialize(operation);
     this.llmUsage = serializeRepository(new DrizzleLlmUsageRepository(database), serialize);
     this.pollingStates = serializeRepository(new DrizzlePollingStateRepository(database), serialize);
+    this.operations = serializeRepository(new DrizzleOperationalHealthRepository(database), serialize);
     this.leads = serializeRepository(repositories.leads, serialize);
     this.conversations = serializeRepository(repositories.conversations, serialize);
     this.messages = serializeRepository(repositories.messages, serialize);
@@ -952,6 +956,7 @@ export class SqlitePersistence implements Persistence {
         .from(schema.telegramManagerRecipients)
         .limit(1);
       await this.database.select({ id: schema.llmCalls.id }).from(schema.llmCalls).limit(1);
+      await this.database.select({ component: schema.operationalHealth.component }).from(schema.operationalHealth).limit(1);
     });
   }
 

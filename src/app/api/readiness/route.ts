@@ -14,7 +14,7 @@ export function createReadinessHandler(
       const config = readBaseEnvironment(environment);
       if (config.AVITO_CHANNEL_ENABLED) readInboundEnvironment(environment);
       persistence = SqlitePersistence.create(config.DATABASE_URL);
-      const result = await checkReadiness(persistence);
+      const result = await checkReadiness(persistence, { avitoEnabled: config.AVITO_CHANNEL_ENABLED });
       return Response.json(result, {
         status: result.status === "ok" ? 200 : 503,
       });

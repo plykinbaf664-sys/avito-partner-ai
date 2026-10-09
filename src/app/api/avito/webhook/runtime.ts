@@ -9,6 +9,7 @@ import { createRuntimeLlmProvider } from "@/integrations/llm/runtime-provider";
 import { AvitoApiClient } from "@/integrations/avito/avito-api-client";
 import { AvitoOutboundMessageProvider } from "@/integrations/avito/avito-outbound-message-provider";
 import { TelegramManagerNotificationProvider } from "@/integrations/telegram/telegram-manager-notification-provider";
+import { createAvitoRuntimeSafety } from "@/application/health/avito-runtime-safety";
 
 export function createRuntimeAvitoWebhook() {
   const avito = readAvitoChannelEnvironment(process.env);
@@ -36,7 +37,7 @@ export function createRuntimeAvitoWebhook() {
     persistence,
     extractMessage: createMessageExtractor({ llmProvider }),
     generateNaturalResponse: createNaturalResponseGenerator({ llmProvider: conversationProvider }),
-    outboundProvider: new AvitoOutboundMessageProvider(client),
+    outboundProvider: new AvitoOutboundMessageProvider(client, logger, persistence.operations),
     managerNotificationProvider,
     logger,
   });
@@ -44,6 +45,6 @@ export function createRuntimeAvitoWebhook() {
     enabled: true as const,
     client,
     accept: createIncomingEventAcceptor({ persistence, logger }),
-    processIncomingEvent,
+    processIncomingEvent: createAvitoRuntimeSafety(persistence, processIncomingEvent).processIncomingEvent,
   };
 }

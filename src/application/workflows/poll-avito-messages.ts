@@ -55,6 +55,7 @@ export function createAvitoMessagePoller({
   coalescingDelayMs = AVITO_INBOUND_COALESCE_MS,
   waitForCoalescing = (milliseconds: number) =>
     new Promise<void>((resolve) => setTimeout(resolve, milliseconds)),
+  observeHistoryResult,
 }: {
   client: Pick<AvitoApiClient, "getAuthenticatedAccount" | "listChats" | "listMessages">;
   persistence: Persistence;
@@ -68,6 +69,7 @@ export function createAvitoMessagePoller({
   clock?: () => Date;
   coalescingDelayMs?: number;
   waitForCoalescing?: (milliseconds: number) => Promise<void>;
+  observeHistoryResult?: (errorCode: string | null) => Promise<void>;
 }) {
   const chatId = requestedChatId === undefined ? undefined : z.string().trim().min(1).max(255).parse(requestedChatId);
   const accept = createIncomingEventAcceptor({ persistence, logger, now: clock });
@@ -221,6 +223,7 @@ export function createAvitoMessagePoller({
               await assertLease();
               result.apiRequests += 1;
               const page = await client.listMessages(chat.id, { limit: PAGE_SIZE, offset: messageOffset });
+              await observeHistoryResult?.(null);
               result.fetched += page.length;
               for (const message of page) await considerMessage(message);
               // Messenger returns messages newest first. Read the entire boundary page,
@@ -236,6 +239,7 @@ export function createAvitoMessagePoller({
                 !(error instanceof Error && error.message === "AVITO_POLL_MESSAGE_PAGE_LIMIT")) throw error;
             result.historyErrors += 1;
             result.failed += 1;
+            await observeHistoryResult?.(error instanceof AvitoApiError ? error.code : "AVITO_POLL_MESSAGE_PAGE_LIMIT");
             logger.error("avito.poll.history_unavailable", { source: "AVITO", chatId: chat.id,
               code: error instanceof AvitoApiError ? error.code : "AVITO_POLL_MESSAGE_PAGE_LIMIT",
               httpStatus: error instanceof AvitoApiError ? error.status : null,
@@ -320,6 +324,7 @@ export function createAvitoMessagePoller({
               limit: PAGE_SIZE,
               offset: 0,
             });
+            await observeHistoryResult?.(null);
             result.fetched += page.length;
             let discoveredNew = false;
             for (const message of [...page].sort(
@@ -376,6 +381,7 @@ export function createAvitoMessagePoller({
             if (discoveredNew) nextRoundChats.add(pendingChatId);
           } catch (error) {
             deferredChats.add(pendingChatId);
+            await observeHistoryResult?.(error instanceof AvitoApiError ? error.code : "AVITO_COALESCING_RECHECK_FAILED");
             logger.error("avito.poll.coalescing_recheck_failed", {
               source: "AVITO",
               chatId: pendingChatId,
@@ -424,6 +430,7 @@ export function createAvitoMessagePoller({
       }
     } catch (error) {
       result.failed += 1;
+      if (error instanceof AvitoApiError) await observeHistoryResult?.(error.code);
       logger.error("avito.poll.failed", {
         source: "AVITO",
         code: error instanceof AvitoApiError ? error.code :

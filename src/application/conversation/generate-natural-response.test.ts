@@ -13,6 +13,19 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it("repairs SEND_REPLY with an empty body instead of delivering an invalid Avito message", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({ replyAction: "SEND_REPLY", text: "", nextInformationNeed: null }),
+      JSON.stringify({ replyAction: "SEND_REPLY", text: "Здравствуйте! Помогу разобраться с запуском бизнеса на посуточной аренде.", nextInformationNeed: null })]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Здравствуйте, расскажите про предложение" }],
+      plan: { text: "Здравствуйте!", nextInformationNeed: null, asksUserQuestion: false,
+        knowledgeEntryIds: [], unresolvedQuestions: [], useNaturalAdaptation: true },
+    });
+    expect(result.replyAction).toBe("SEND_REPLY");
+    expect(result.text.trim().length).toBeGreaterThan(0);
+    expect(llm.requests[1]!.metadata?.stage).toBe("REPAIR");
+  });
+
   it("grounds affordable alternatives understood by the brain when auxiliary extraction supplies no calculation units", async () => {
     const lead = { ...createInitialLead("missing-calculation", "TEST", "synthetic", new Date()),
       city: "Москва", startingUnits: 10, availableCapital: 1_200_000, availableCapitalConfirmed: true };

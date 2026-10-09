@@ -33,7 +33,9 @@ async function main() {
       }
       // Schedule start-to-start, without adding the API/Claude duration to the
       // requested interval. Slow sweeps run sequentially without overlap.
-      const waitMs = Math.max(0, intervalMs - result.durationMs);
+      // Keep probing and persisting previews during an outage without hammering
+      // a denied Messenger endpoint every ten seconds.
+      const waitMs = Math.max(0, Math.max(intervalMs, result.status === "FAIL" ? 60_000 : 0) - result.durationMs);
       await delay(waitMs, undefined, { signal: stop.signal }).catch((error: unknown) => {
         if (!stop.signal.aborted) throw error;
       });

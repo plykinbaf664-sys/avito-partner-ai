@@ -6,9 +6,18 @@ import type {
 
 import { AvitoApiClient, AvitoApiError } from "./avito-api-client";
 import { silentLogger, type StructuredLogger } from "@/application/observability/structured-logger";
+import { ACCESS_BLOCK_CODES, type OperationalHealthRepository } from "@/application/health/operational-health";
 
 export class AvitoOutboundMessageProvider implements OutboundMessageProvider {
-  constructor(private readonly client: AvitoApiClient, private readonly logger: StructuredLogger = silentLogger) {}
+  constructor(private readonly client: AvitoApiClient, private readonly logger: StructuredLogger = silentLogger,
+    private readonly operations?: OperationalHealthRepository) {}
+
+  private async observe(code: string | null) {
+    try {
+      await this.operations?.observe("AVITO_OUTBOUND", code === null ? "OK" : ACCESS_BLOCK_CODES.has(code) ? "BLOCKED" : "DEGRADED", code, new Date());
+      if (code !== null && ACCESS_BLOCK_CODES.has(code)) await this.operations?.observe("AVITO_MESSENGER", "BLOCKED", code, new Date());
+    } catch { this.logger.error("operations.observation_failed", { source: "AVITO" }); }
+  }
 
   async deliver(message: OutboundDeliveryRequest): Promise<ProviderDeliveryResult> {
     if (message.source.toUpperCase() !== "AVITO") {
@@ -26,10 +35,12 @@ export class AvitoOutboundMessageProvider implements OutboundMessageProvider {
         message.externalRecipientId,
         message.text,
       );
+      await this.observe(null);
       this.logger.info("avito.outbound.sent", { ...fields, providerMessageId: externalId,
         latencyMs: Math.round(performance.now() - started) });
       return { status: "SENT", externalId };
     } catch (error) {
+      await this.observe(error instanceof AvitoApiError ? error.code : "AVITO_UNEXPECTED_ERROR");
       this.logger.error("avito.outbound.failed", { ...fields,
         errorCode: error instanceof AvitoApiError ? error.code : "AVITO_UNEXPECTED_ERROR",
         httpStatus: error instanceof AvitoApiError ? error.status : null,

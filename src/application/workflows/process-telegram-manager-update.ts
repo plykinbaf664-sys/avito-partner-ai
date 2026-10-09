@@ -6,6 +6,7 @@ import type { Persistence } from "../ports/repositories";
 import type { TelegramTextSender } from "@/integrations/telegram/telegram-bot-api-client";
 import { generateId, type IdGenerator } from "@/shared/id";
 import { formatBotStatus } from "../analytics/bot-status";
+import { formatOperationalStatus, readOperationalStatus } from "../health/operational-health";
 
 const telegramManagerUpdateSchema = z
   .object({
@@ -92,7 +93,8 @@ export function createTelegramManagerUpdateProcessor({
         result = "STATUS";
         responseText = current?.isActive && current.telegramUserId === String(message.from.id)
           ? "Уведомления о горячих лидах включены.\n\n" +
-            formatBotStatus(await persistence.botStatus.snapshot(clock()))
+            formatBotStatus(await persistence.botStatus.snapshot(clock())) +
+            (persistence.operations ? "\n\n" + formatOperationalStatus(await readOperationalStatus(persistence, clock())) : "")
           : "Уведомления выключены. Для подключения отправьте /start и код приглашения.";
         responseText += `\nChat ID: ${chatId}`;
       } else if (command === "/stop") {

@@ -228,6 +228,15 @@ async function prepareClaimedEvent(
     };
   }
 
+  const context = await persistIncomingEventContext(repositories, event, input, idGenerator, now);
+  return { claimed: true, recoveredStale: claim.recoveredStale, ...context };
+}
+
+/** Persist CRM/message context without claiming an LLM processing attempt. */
+export async function persistIncomingEventContext(
+  repositories: RepositoryContext, event: IncomingEvent,
+  input: z.output<typeof incomingPartnerEventSchema>, idGenerator: IdGenerator, now: Date,
+) {
   let lead = await repositories.leads.findByExternalIdentity(
     input.source,
     input.externalLeadId,
@@ -333,8 +342,6 @@ async function prepareClaimedEvent(
   await repositories.conversations.update(conversation);
 
   return {
-    claimed: true,
-    recoveredStale: claim.recoveredStale,
     inboundSequence,
     lead,
     conversation,
@@ -1226,6 +1233,7 @@ export function createIncomingEventProcessor({
         const canUseAdaptiveResponse =
           responseLlm !== null &&
           responseLlm.replyAction !== "NO_REPLY" &&
+          responseLlm.text.trim().length > 0 &&
           responseLlm.nextInformationNeed === transactionNextInformationNeed;
         const transactionOutboundText = canUseAdaptiveResponse
           ? responseLlm!.text
@@ -1247,6 +1255,7 @@ export function createIncomingEventProcessor({
           responseLlm?.replyAction === "NO_REPLY" ||
           (phoneFulfillsManagerStep && !transactionDecision.shouldHandoffToManager);
         const shouldSendOutbound = !responseSuppressed && !noAiReply;
+        if (shouldSendOutbound && !transactionOutboundText.trim()) throw new RetryableInfrastructureError("EMPTY_OUTBOUND_DRAFT");
         const responseGenerationSource: NonNullable<ProcessIncomingEventMetrics["responseGenerationSource"]> = responseSuppressed
           ? "SUPPRESSED"
           : noAiReply
@@ -1505,7 +1514,8 @@ export function createIncomingEventProcessor({
       await settleUsage(completed.outOfOrderIgnored || completed.responseSuppressed ? "SUPPRESSED" :
         completed.responseGenerationSource === "NO_REPLY" ? "NO_REPLY" :
         completed.responseGenerationSource === "FALLBACK_DRAFT" ? "FALLBACK" : "USED");
-      if (completed.responseGenerationSource === "FALLBACK_DRAFT" && responseLlm) responseFailureCode = "RESPONSE_NOT_USED_AFTER_STATE_UPDATE";
+      if (completed.responseGenerationSource === "FALLBACK_DRAFT" && responseLlm) responseFailureCode =
+        responseLlm.text.trim() ? "RESPONSE_NOT_USED_AFTER_STATE_UPDATE" : "RESPONSE_POLICY_EMPTY_REPLY";
 
       if (completed.outOfOrderIgnored) {
         logger.info("event.out_of_order_ignored", {

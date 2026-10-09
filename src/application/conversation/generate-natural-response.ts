@@ -293,6 +293,9 @@ function validateResponsePolicy(
     return;
   }
   if (conversationAction === "NO_REPLY") invalid("RESPONSE_POLICY_VIOLATION", "RESPONSE_POLICY_CONFLICTING_REPLY_ACTION");
+  // SEND_REPLY is a delivery contract, never an encoding of intentional silence.
+  // Empty model output must use the existing repair/fallback path before persistence.
+  if (text.trim().length === 0) invalid("RESPONSE_POLICY_VIOLATION", "RESPONSE_POLICY_EMPTY_REPLY");
   if (
     plan.conversationRepairRequired &&
     conversationAction !== "REPAIR"

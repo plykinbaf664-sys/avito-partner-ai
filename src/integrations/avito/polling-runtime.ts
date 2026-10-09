@@ -11,6 +11,7 @@ import { createRuntimeLlmProvider } from "@/integrations/llm/runtime-provider";
 import { TelegramManagerNotificationProvider } from "@/integrations/telegram/telegram-manager-notification-provider";
 import { AvitoApiClient } from "./avito-api-client";
 import { AvitoOutboundMessageProvider } from "./avito-outbound-message-provider";
+import { createAvitoRuntimeSafety } from "@/application/health/avito-runtime-safety";
 
 export async function createRuntimeAvitoPolling(options: { chatId?: string } = {}) {
   const avito = readAvitoChannelEnvironment(process.env);
@@ -29,7 +30,7 @@ export async function createRuntimeAvitoPolling(options: { chatId?: string } = {
     clientSecret: avito.clientSecret,
   });
   const naturalResponseGenerator = createNaturalResponseGenerator({ llmProvider: conversationProvider });
-  const outboundProvider = new AvitoOutboundMessageProvider(client, logger);
+  const outboundProvider = new AvitoOutboundMessageProvider(client, logger, persistence.operations);
   const managerNotificationProvider = telegram.enabled
     ? new TelegramManagerNotificationProvider(
         { botToken: telegram.botToken!, logger },
@@ -44,21 +45,25 @@ export async function createRuntimeAvitoPolling(options: { chatId?: string } = {
     managerNotificationProvider,
     logger,
   });
+  const safety = createAvitoRuntimeSafety(persistence, processIncomingEvent);
+  const poll = createAvitoMessagePoller({ client, persistence, chatId: options.chatId,
+    stateRepository: persistence.pollingStates, processIncomingEvent: safety.processIncomingEvent,
+    observeHistoryResult: safety.observeHistoryResult, logger });
+  const followUps = createDueFollowUpsProcessor({ persistence, outboundProvider,
+    generateNaturalResponse: naturalResponseGenerator, logger });
   return {
-    pollAvitoMessages: createAvitoMessagePoller({
-      client,
-      persistence,
-      chatId: options.chatId,
-      stateRepository: persistence.pollingStates,
-      processIncomingEvent,
-      logger,
-    }),
-    processDueFollowUps: createDueFollowUpsProcessor({
-      persistence,
-      outboundProvider,
-      generateNaturalResponse: naturalResponseGenerator,
-      logger,
-    }),
+    pollAvitoMessages: async (now: Date) => {
+      const result = await poll(now);
+      if (result.status !== "BUSY") await persistence.operations.observe("AVITO_POLLING",
+        result.status === "PASS" ? "OK" : "DEGRADED", result.status === "PASS" ? null : "AVITO_POLL_FAILED", new Date());
+      return result;
+    },
+    processDueFollowUps: async (now: Date) => {
+      if ((await persistence.operations.list()).some(row => row.component === "AVITO_MESSENGER" && row.state === "BLOCKED")) {
+        return { scanned: 0, created: [], sent: [], failed: [], skipped: 0 };
+      }
+      return followUps(now);
+    },
     deliverPendingManagerNotifications: managerNotificationProvider
       ? createPendingManagerNotificationDelivery({
           persistence,

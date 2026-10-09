@@ -154,6 +154,7 @@ export interface RepositoryContext {
 }
 
 export interface Persistence extends RepositoryContext {
+  operations?: import("../health/operational-health").OperationalHealthRepository;
   llmUsage?: import("../observability/llm-usage").LlmUsageRepository;
   transaction<T>(
     operation: (repositories: RepositoryContext) => Promise<T>,

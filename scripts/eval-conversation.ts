@@ -35,6 +35,14 @@ async function main() {
 
   const scenarios = [
     {
+      id: "inbound-delivery-smoke",
+      criteria: "На первый вопрос нового клиента ответить про стоимость запуска двух объектов в Москве: ориентир 310 000 рублей, услуга запуска 50 000 один раз, аренда, расчётный залог и подготовка отдельно. На контекстное 'что для этого надо от меня' объяснить участие партнёра, не просить уточнить уже понятный вопрос и не повторять всю экономику без причины. Никаких гарантий дохода и придуманных обязательных действий. Оба ответа содержательные, не пустые.",
+      steps: [
+        { actor: "USER", text: "Здравствуйте! Интересует запуск двух объектов в Москве. Сколько потребуется на запуск?" },
+        { actor: "USER", text: "А что для этого надо от меня?" },
+      ],
+    },
+    {
       id: "financial-scale-recovery",
       seedFinancialIncident: true,
       criteria: "Капитал 1 200 000 рублей подтверждён, Москва, прежнее желание десять объектов. После рекомендации доступного меньшего запуска короткое '5,6' относится к числу объектов: ответить по существу, не утверждать, что 1 200 000 меньше 830 000. Запуск пяти стоит около 700 000, шести около 830 000, не 50 тысяч за каждый объект. Глобальный отказ недопустим. Не повторять известный бюджет, город или вопрос о масштабе. После явного выбора шести и телефона, при уже подтверждённых остальных бизнес-фактах один handoff. Не придумывать гарантии дохода или срок звонка.",
@@ -305,6 +313,12 @@ async function main() {
               source: result.snapshot.lastProcessing?.responseGenerationSource,
               failure: result.snapshot.lastProcessing?.responseFailureCode,
               qualification: result.snapshot.qualification.status });
+            if (scenario.id === "inbound-delivery-smoke") {
+              assert.equal(result.snapshot.lastProcessing?.responseGenerationSource, "LLM");
+              assert.equal(result.snapshot.lastProcessing?.responseFailureCode, null);
+              assert((result.snapshot.lastProcessing?.outboundMessage?.trim().length ?? 0) > 0,
+                "A useful reply must reach fake delivery for each substantive inbound");
+            }
           }
         }
         const snapshot = await lab.snapshot(sessionId);
