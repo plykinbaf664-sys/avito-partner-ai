@@ -404,6 +404,37 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     expect(h.extractMessage).not.toHaveBeenCalled();
   });
 
+  it("checks Messenger access even when all chats are outside the inbound window", async () => {
+    const h = harness(persistence, undefined, 0, async () => {}, true);
+    h.client.listChats.mockResolvedValue([{ id: "old", updatedAtUnix: 1 }]);
+    h.client.listMessages.mockRejectedValue(new AvitoApiError("AVITO_MESSENGER_ACCESS_PAYMENT_REQUIRED", 402, false));
+    expect(await h.poll(current)).toMatchObject({ status: "FAIL", checkedChats: 0, historyErrors: 1 });
+    expect(h.client.listMessages).toHaveBeenCalledExactlyOnceWith("old", { limit: 1, offset: 0 });
+    expect(h.extractMessage).not.toHaveBeenCalled();
+    expect((await persistence.operations.list()).find(row => row.component === "AVITO_MESSENGER")!.state).toBe("BLOCKED");
+    expect(await h.poll(current)).toMatchObject({ status: "FAIL" });
+    expect((await persistence.pollingStates.initialize(key, current)).lastCompletedAt).toBeNull();
+  });
+
+  it("hydrates an old pending reference even after the ordinary polling window moved past its chat", async () => {
+    const initial = harness();
+    initial.client.listChats.mockResolvedValue([]);
+    current = new Date(start.getTime()+60*60_000);
+    await initial.poll(current);
+    await persistence.incomingEvents.register({ id: "old-reference", source: "AVITO", externalEventId: "m1",
+      externalLeadId: "chat", payload: { unverifiedAvitoPreview: true }, status: "RECEIVED",
+      error: "AVITO_PREVIEW_UNVERIFIED", processingAttempts: 0, processingRetryable: null,
+      extraction: null, llmModel: null, llmInputTokens: null, llmOutputTokens: null, llmLatencyMs: null,
+      totalProcessingLatencyMs: null, receivedAt: start, processingStartedAt: null, processedAt: null });
+    const h = harness(persistence, undefined, 0, async () => {}, true);
+    h.client.listChats.mockResolvedValue([{ id: "chat", updatedAtUnix: start.getTime()/1_000,
+      lastMessage: message("m1", { origin: "CHAT_PREVIEW" }) }]);
+    h.client.listMessages.mockResolvedValue([message("m1", { origin: "MESSAGE_HISTORY" })]);
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", processed: 1 });
+    expect(await persistence.incomingEvents.findByIdentity("AVITO", "m1")).toMatchObject({ status: "PROCESSED" });
+    expect(h.client.sendTextMessage).toHaveBeenCalledOnce();
+  });
+
   it("continues after a denied chat and deduplicates a preview also returned in history", async () => {
     const h = harness();
     h.client.listChats.mockResolvedValue([

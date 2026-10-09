@@ -48,6 +48,7 @@ describe("operational safety with real SQLite", () => {
 
   it("reports a live process with a blocked Messenger as not ready and catches stale polling independently", async () => {
     await persistence.operations.observe("AVITO_POLLING", "OK", null, at);
+    await persistence.operations.observe("AVITO_MESSENGER", "OK", null, at);
     expect((await readOperationalStatus(persistence, at)).ready).toBe(true);
     await persistence.operations.observe("AVITO_MESSENGER", "BLOCKED", "AVITO_MESSENGER_ACCESS_PAYMENT_REQUIRED", at);
     expect((await readOperationalStatus(persistence, at)).issues).toContain("AVITO_MESSENGER:AVITO_MESSENGER_ACCESS_PAYMENT_REQUIRED");
@@ -55,6 +56,14 @@ describe("operational safety with real SQLite", () => {
     await persistence.operations.observe("AVITO_MESSENGER", "OK", null, new Date(at.getTime()+1_000));
     await persistence.operations.observe("AVITO_MESSENGER", "BLOCKED", "AVITO_FORBIDDEN", at);
     expect((await persistence.operations.list()).find(row => row.component === "AVITO_MESSENGER")!.state).toBe("OK");
+  });
+
+  it("requires recent Messenger evidence instead of treating a live empty sweep as proof of access", async () => {
+    await persistence.operations.observe("AVITO_POLLING", "OK", null, at);
+    expect((await readOperationalStatus(persistence, at)).issues).toContain("AVITO_MESSENGER_UNVERIFIED");
+    await persistence.operations.observe("AVITO_MESSENGER", "OK", null, at);
+    await persistence.operations.observe("AVITO_POLLING", "OK", null, new Date(at.getTime()+6*60_000));
+    expect((await readOperationalStatus(persistence, new Date(at.getTime()+6*60_000))).issues).toContain("AVITO_MESSENGER_STALE");
   });
 
   it("does not suspend every conversation because one chat returns forbidden", async () => {
@@ -102,6 +111,7 @@ describe("operational safety with real SQLite", () => {
 
   it("does not announce recovery before any incident and retries failed alert delivery", async () => {
     await persistence.operations.observe("AVITO_POLLING", "OK", null, at);
+    await persistence.operations.observe("AVITO_MESSENGER", "OK", null, at);
     await persistence.telegramManagerRecipients.upsertAuthorized({ id: "manager", telegramChatId: "synthetic-chat",
       telegramUserId: "synthetic-manager", username: null, firstName: null, isActive: true, authorizedAt: at, createdAt: at, updatedAt: at });
     const sender = { sendMessage: vi.fn().mockResolvedValueOnce({ status: "FAILED", retryable: true, errorCode: "NETWORK_ERROR" })

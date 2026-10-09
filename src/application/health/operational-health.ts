@@ -35,6 +35,9 @@ export async function readOperationalStatus(persistence: Persistence, at: Date):
   const issues: string[] = [];
   const polling = observations.find(row => row.component === "AVITO_POLLING");
   if (!polling || at.getTime() - polling.checkedAt.getTime() > POLLING_STALE_MS) issues.push("AVITO_POLLING_STALE");
+  const messenger = observations.find(row => row.component === "AVITO_MESSENGER");
+  if (!messenger) issues.push("AVITO_MESSENGER_UNVERIFIED");
+  else if (at.getTime() - messenger.checkedAt.getTime() > POLLING_STALE_MS) issues.push("AVITO_MESSENGER_STALE");
   for (const row of observations) {
     if (row.state === "BLOCKED" || row.state === "DEGRADED" && row.consecutiveFailures >= 3) {
       issues.push(`${row.component}:${row.errorCode ?? "UNAVAILABLE"}`);

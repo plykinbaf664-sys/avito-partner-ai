@@ -77,6 +77,8 @@ export function createAvitoMessagePoller({
   const accept = createIncomingEventAcceptor({ persistence, logger, now: clock });
   const recordHumanMessage = createExternalConversationMessageRecorder({ persistence, logger });
   const channel = new AvitoInboundChannel();
+  let lastAccessCheckAt = Number.NEGATIVE_INFINITY;
+  let knownAccessBlocked = false;
 
   return async function pollAvitoMessages(now: Date): Promise<AvitoPollResult> {
     if (!Number.isFinite(now.getTime())) throw new Error("INVALID_POLL_TIME");
@@ -97,12 +99,21 @@ export function createAvitoMessagePoller({
     const attempted = new Set<string>();
     const queued = new Map<string, IncomingPartnerEvent>();
     const chatsToCoalesce = new Set<string>();
+    const pendingChatSince = new Map<string, number>();
+    let historyRequests = 0;
+    let accessProbeChatId: string | null = null;
     let accessDeniedDuringSweep = false;
     const reportHistory = async (code: string | null) => {
-      if (code !== null && ACCESS_BLOCK_CODES.has(code)) accessDeniedDuringSweep = true;
+      lastAccessCheckAt = clock().getTime();
+      if (code !== null && ACCESS_BLOCK_CODES.has(code)) {
+        accessDeniedDuringSweep = true;
+        knownAccessBlocked = true;
+      }
       // A later readable chat does not prove recovery of an account restriction
       // observed elsewhere in this same sweep.
       if (accessDeniedDuringSweep && (code === null || !ACCESS_BLOCK_CODES.has(code))) return;
+      if (knownAccessBlocked && code !== null && !ACCESS_BLOCK_CODES.has(code)) return;
+      if (code === null) knownAccessBlocked = false;
       await observeHistoryResult?.(code);
     };
     const queue = (input: IncomingPartnerEvent) => {
@@ -146,6 +157,8 @@ export function createAvitoMessagePoller({
       }
       // Reload only after acquiring the lease: another poll may have just completed.
       const state = await stateRepository.initialize(key, now);
+      if (persistence.operations && (await persistence.operations.list()).some(
+        row => row.component === "AVITO_MESSENGER" && row.state === "BLOCKED")) knownAccessBlocked = true;
       const since = Math.max(state.startedAt.getTime(),
         (state.lastCompletedAt?.getTime() ?? state.startedAt.getTime()) - OVERLAP_MS);
       logger.info("avito.poll.window", { source: "AVITO", accountId: account.id,
@@ -160,6 +173,10 @@ export function createAvitoMessagePoller({
       );
       for (const event of pending) {
         const stored = storedInputSchema.safeParse(event.payload);
+        if (stored.success || event.error === "AVITO_PREVIEW_UNVERIFIED") {
+          pendingChatSince.set(event.externalLeadId, Math.min(
+            pendingChatSince.get(event.externalLeadId) ?? since, event.receivedAt.getTime() - OVERLAP_MS));
+        }
         if (stored.success && (!chatId || stored.data.normalizedInput.externalLeadId === chatId)) {
           queue({
             ...stored.data.normalizedInput,
@@ -179,9 +196,11 @@ export function createAvitoMessagePoller({
           seenChats.add(chat.id);
           result.chats += 1;
           if (chatId && chat.id !== chatId) continue;
+          accessProbeChatId ??= chat.id;
+          const chatSince = Math.min(since, pendingChatSince.get(chat.id) ?? since);
           // Never stop chat pagination based on ordering of the chat list.
           const latestTime = Math.max(chat.updatedAtUnix ?? 0, chat.lastMessage?.createdAtUnix ?? 0);
-          if (latestTime > 0 && latestTime * 1_000 < since) {
+          if (latestTime > 0 && latestTime * 1_000 < chatSince) {
             result.skippedOldChats += 1;
             continue;
           }
@@ -189,7 +208,7 @@ export function createAvitoMessagePoller({
           const messages = new Map<string, AvitoMessage>();
           const considerMessage = async (message: AvitoMessage) => {
             if (
-              message.createdAtUnix * 1_000 < since ||
+              message.createdAtUnix * 1_000 < chatSince ||
               message.authorId === "0" ||
               message.type === "system"
             ) {
@@ -232,13 +251,14 @@ export function createAvitoMessagePoller({
             for (let messageOffset = 0; messageOffset <= MAX_OFFSET; messageOffset += PAGE_SIZE) {
               await assertLease();
               result.apiRequests += 1;
+              historyRequests += 1;
               const page = await client.listMessages(chat.id, { limit: PAGE_SIZE, offset: messageOffset });
               await reportHistory(null);
               result.fetched += page.length;
               for (const message of page) await considerMessage(message);
               // Messenger returns messages newest first. Read the entire boundary page,
               // including every message with an equal timestamp.
-              if (page.length < PAGE_SIZE || page.every((message) => message.createdAtUnix * 1_000 < since)) {
+              if (page.length < PAGE_SIZE || page.every((message) => message.createdAtUnix * 1_000 < chatSince)) {
                 messagesComplete = true;
                 break;
               }
@@ -325,6 +345,24 @@ export function createAvitoMessagePoller({
       }
       if (!chatsComplete) throw new Error("AVITO_POLL_CHAT_PAGE_LIMIT");
 
+      // No fresh chats is not evidence of Messenger access. A bounded read-only
+      // canary is enabled by production observability and throttled to one minute.
+      if (observeHistoryResult && historyRequests === 0 && accessProbeChatId !== null &&
+          clock().getTime() - lastAccessCheckAt >= 60_000) {
+        await assertLease();
+        result.apiRequests += 1;
+        try {
+          await client.listMessages(accessProbeChatId, { limit: 1, offset: 0 });
+          await reportHistory(null);
+        } catch (error) {
+          if (!(error instanceof AvitoApiError)) throw error;
+          result.historyErrors += 1;
+          result.failed += 1;
+          await reportHistory(error.code);
+          logger.error("avito.poll.access_probe_failed", { source: "AVITO", code: error.code, httpStatus: error.status });
+        }
+      }
+
       // A customer can send several short messages while the first one is being
       // discovered. Re-read only affected chats after a short quiet period,
       // then process the durable events as one logical user turn.
@@ -339,6 +377,7 @@ export function createAvitoMessagePoller({
         const nextRoundChats = new Set<string>();
         for (const pendingChatId of roundChats) {
           await assertLease();
+          const coalescingSince = Math.min(since, pendingChatSince.get(pendingChatId) ?? since);
           try {
             result.apiRequests += 1;
             const page = await client.listMessages(pendingChatId, {
@@ -352,7 +391,7 @@ export function createAvitoMessagePoller({
               (left, right) => left.createdAtUnix - right.createdAtUnix,
             )) {
               if (
-                message.createdAtUnix * 1_000 < since ||
+                message.createdAtUnix * 1_000 < coalescingSince ||
                 message.authorId === "0" ||
                 message.type === "system" ||
                 message.type !== "text" ||
@@ -442,6 +481,9 @@ export function createAvitoMessagePoller({
         }
       }
 
+      // Do not move the recovery boundary during a known account denial merely
+      // because this throttled cycle had no history read to attempt.
+      if (knownAccessBlocked && result.failed === 0) result.failed += 1;
       if (result.failed === 0) {
         await assertLease();
         if (!await stateRepository.complete(key, owner, clock(),

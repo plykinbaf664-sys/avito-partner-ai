@@ -55,6 +55,11 @@ No customer text, names, phone numbers or credentials are included in this repor
   earlier. Explicitly quarantined legacy preview references can acquire their
   canonical payload from verified ingestion; ordinary processed duplicates
   remain immutable.
+- Empty sweeps perform a throttled read-only Messenger canary (at most once per
+  minute), and readiness requires recent Messenger evidence. Known account denial
+  keeps the recovery cursor pinned even between canary attempts. Recoverable
+  events force history loading for their chat even if it is older than the normal
+  polling window, including enough overlap to recover later human replies.
 - Resume queued work after a successful Messenger read. A later persisted human
   reply suppresses the old AI outbound. Do not resurrect previously PROCESSED
   failed deliveries or replay the historical conversations handled manually.
@@ -72,6 +77,9 @@ No customer text, names, phone numbers or credentials are included in this repor
   history. The one-off repair was dry-run against an in-memory production copy
   with foreign-key checks. `/status` separately counts references awaiting real
   Avito content. This repair does not match customer phrases in production.
+  The incident cursor is rewound to the first confirmed failing history request,
+  retaining normal event/message deduplication, to recover masked chats that had
+  no inbound reference as well.
 
 Relevant code: `generate-natural-response.ts`, `process-incoming-event.ts`,
 `avito-runtime-safety.ts`, `poll-avito-messages.ts`, `operational-health.ts`,
@@ -106,6 +114,14 @@ replay its recorded Qwen outputs through the final pipeline, checking identical
 delivery, no fallback and duplicate idempotency. This avoids repeating paid
 behavioral calls; prompts, extraction/generation and business policies are
 unchanged between the live reference and final ingestion correction.
+
+The first guarded promotion was automatically rolled back: the deployment check
+found that the poller's already-advanced cursor skipped every chat and therefore
+could not establish Messenger health or hydrate old references. The authoritative
+preview repair had completed and remained archived; no live DB was restored.
+Two additional polling regressions and a readiness evidence regression first
+failed, then passed after adding the canary and reference-driven history scan.
+This failed promotion is not reported as a successful release.
 
 ## Operations and limitations
 
