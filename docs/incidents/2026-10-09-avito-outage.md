@@ -163,3 +163,75 @@ Rollback stops the new watchdog, restores the previous build/revision/config and
 restarts the application and poller. It retains the additive table and all new
 customer data; never restore the old live database merely to roll back code.
 Rolling back code cannot resolve Avito's external 402.
+
+## Release addendum: verified production result
+
+Final application/build revision: `1908e7187343bfdfd2abd08d4c983cdeb4d2a694`.
+Promotion completed at approximately 00:02 Moscow time, 10 October 2026
+(`2026-10-09T21:02Z`). All four isolated Linux candidate checks passed:
+typecheck, 44 test files / 576 tests, lint and production build. The final clock
+and incident-deduplication regressions were also observed RED before their fixes.
+
+The one live Qwen two-turn Test Chat Lab trajectory produced two fake Avito
+deliveries, no fallback, and no extra delivery or LLM call on duplicate input.
+It covered approved startup economics and a short referential follow-on about
+partner participation. Eight real Qwen calls, including the evaluator, used
+11,779 uncached input tokens, 5,672 output tokens, 17,327 cache-creation tokens
+and 11,276 cache-read tokens. Median call latency was 9,939 ms; p90 14,378.6 ms.
+The configured-tariff estimate was USD 0.008077, not a provider invoice.
+Later ingestion/operational corrections were checked with the same recorded
+trajectory: seven replayed model stages, two deliveries, no fallback, duplicate
+idempotency PASS, and zero additional API calls. Conversational prompts,
+extraction/generation, provider and business policy code were unchanged.
+
+Two synthetic production-server calls at approximately 23:48 Moscow time
+confirmed `provider=qwen`, `model=qwen3.8-flash`, SUCCESS:
+
+| Call | Uncached input | Output | Cache creation | Cache read | Latency |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 28 | 49 | 2,043 | 0 | 4,313 ms |
+| 2 | 28 | 73 | 0 | 2,043 | 1,778 ms |
+
+Combined configured-tariff estimate: USD 0.000507. The final operational-only
+promotion reused this successful smoke after verifying unchanged provider/config;
+it did not repeat paid calls. No Claude calls were observed in the new production
+usage ledger. The final blocked polling observation generated no production LLM
+calls, as intended.
+
+Post-promotion observations:
+
+- Application and poller active, zero restarts; watchdog timer active. The
+  watchdog oneshot finishes successfully and is normally inactive between runs.
+- `/api/health`: HTTP 200; SQLite integrity: `ok`.
+- `/api/readiness`: HTTP 503 with explicit
+  `AVITO_MESSENGER_ACCESS_PAYMENT_REQUIRED`, derived polling degradation and the
+  waiting-inbound backlog. This is an unresolved external dependency failure,
+  not healthy customer delivery.
+- Three valid, authoritative inbound records remain RECEIVED with zero processing
+  attempts. No unverified references remain. No unresolved historical outbound
+  failures remain; two original FAILED delivery records are retained for audit.
+- Zero remaining confirmed provider-notice messages; zero conversation timestamp
+  regressions after the final monotonic-clock correction.
+- The operational alert reached two active authorized Telegram recipients.
+  Final watchdog observations were THROTTLED for the existing incident; changing
+  secondary symptoms did not resend it. Periodic incident reminders remain enabled.
+
+The eight original provider-notice records were archived before repair in
+`/opt/avito-partner-ai-backups/qwen-migration-20261009-203649/` alongside the
+original consistent database backup. No actual customer message was deleted.
+The final release's separate backup and manifest are:
+
+```text
+/opt/avito-partner-ai-backups/qwen-migration-20261009-210217/operational-release.json
+```
+
+Exact rollback on the production server, to the previous working protected build
+`2ca973d2300fcaa3010592efe81634b3c9192ab7`:
+
+```sh
+python3 /root/operational-release.py rollback /opt/avito-partner-ai-backups/qwen-migration-20261009-210217/operational-release.json
+```
+
+Customer delivery remains unverified and blocked by Avito HTTP 402. After support
+restores access, inspect the automatic recovery and first actual SENT delivery;
+do not treat a successful history read or synthetic Qwen request as proof of it.
