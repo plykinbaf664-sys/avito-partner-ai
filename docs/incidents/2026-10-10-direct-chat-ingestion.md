@@ -94,3 +94,77 @@ financial fallback: validation required another economic rejection on a later
 question from a NO_FIT lead. It was not an absent delivery and did not cause this
 incident. This release does not claim to correct that conversational-quality
 issue; it requires a separate regression and a focused conversation change.
+
+## Release addendum: verified result
+
+Application/build revision: `6136f194ce5662195c62b65fee0585c24befde3d`.
+Production promotion completed on 11 October at approximately 01:48 Moscow time
+(`2026-10-10T22:48Z`). Both local and isolated Linux checks passed: typecheck,
+44 test files / 581 tests, lint and production build. The successful recorded
+Qwen trajectory replay checked seven model stages, two fake deliveries and
+duplicate idempotency, with zero new paid evaluation calls.
+
+Before promotion the candidate's actual API adapter, using production-server
+networking, returned 154 customer conversations including both direct chats and
+the requested conversation. All four requested messages came from authoritative
+history. The increase from the earlier 153-chat audit was concurrent real traffic;
+the original old/new comparison was 151 versus 153. These checks sent no customer
+messages and called no model.
+
+Promotion created a consistent database/build/config backup and retained the
+previous revision `9fff0f624ecefaa85eb772c98fb9b77b78a1d62b`. The manifest is:
+
+```text
+/opt/avito-partner-ai-backups/qwen-migration-20261010-224804/operational-release.json
+```
+
+Two real Qwen production-server smoke calls succeeded:
+
+| Call | Uncached input | Output | Cache creation | Cache read | Latency |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1 | 28 | 53 | 2,043 | 0 | 2,147 ms |
+| 2 | 28 | 56 | 0 | 2,043 | 1,513 ms |
+
+Both used `provider=qwen`, `model=qwen3.8-flash`; combined configured-tariff cost
+estimate USD 0.000501. No hidden Claude fallback was observed.
+
+Recovery first passed against a separate consistent production DB copy with
+foreign-key checks: two human messages, two inbound events, no model calls or
+outbound sends. During the actual recovery, the poller/watchdog were briefly
+paused, an additional `pre-direct-chat-recovery.db` backup was saved beside the
+manifest, fresh authoritative human history was imported, and the two missing
+customer events were accepted. The ordinary pending-reference scan then processed
+both events. Their two Qwen extraction calls succeeded and their workflow outcomes
+were SUPPRESSED because the manager had already replied. Extraction's combined
+configured-tariff estimate was USD 0.001242. No generation, historical outbound
+resend, broad cursor rewind, handoff or customer test message was performed.
+
+Post-release observations:
+
+- Application/poller active, zero restarts since promotion; watchdog timer active,
+  successful oneshot result. Prior four exits remain a historical audit finding.
+- Health/readiness both HTTP 200, database integrity `ok`, no operational issues.
+- Pending/unverified/failed inbound and failed/unresolved outbound counts all zero.
+- Actual polling logs explicitly contain `chatTypes=[u2i,u2u]`; recent cycles PASS,
+  154 visible chats, zero history/processing errors. No new error logs were observed
+  during the post-promotion observation window.
+- The recovered lead is visible in CRM: two USER messages and two MANAGER messages,
+  both incoming events PROCESSED, zero stale AI replies. The next client turn is
+  eligible for normal AI processing; its future delivery is not claimed as tested.
+- The database audit found all five manager handoffs SENT and all eight Telegram
+  recipient deliveries SENT. No new live handoff test was sent.
+
+Prompts, qualification/economics policies, provider config, secrets, networking
+and schema were not changed. The additional report commit changes documentation
+only and does not require another build or restart.
+
+Exact emergency rollback on the production server:
+
+```sh
+python3 /root/operational-release.py rollback /opt/avito-partner-ai-backups/qwen-migration-20261010-224804/operational-release.json
+```
+
+Rollback retains all newly imported customer data and the additive existing
+schema, restoring the previous application/build/config. It also restores the
+old chat-discovery defect; use it only for a critical release regression, never
+restore the old live database to roll back code.
