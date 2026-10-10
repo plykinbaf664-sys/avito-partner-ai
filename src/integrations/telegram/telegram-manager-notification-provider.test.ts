@@ -144,7 +144,7 @@ async function seedNotification(
       qualificationCompleted: true,
       followUpEligibleAt: null,
       followUpCount: 0,
-      lastFollowUpAt: null,
+      lastFollowUpAt: null, followUpAnchorAt: null, missedAt: null,
       nextInboundSequence: 1,
       lastAppliedInboundSequence: 1,
       createdAt: timestamp,

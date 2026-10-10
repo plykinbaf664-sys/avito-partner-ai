@@ -73,7 +73,7 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
     qualificationCompleted: false,
     followUpEligibleAt: followUpEligibleAt(sentAt),
     followUpCount: 0,
-    lastFollowUpAt: null,
+    lastFollowUpAt: null, followUpAnchorAt: null, missedAt: null,
     nextInboundSequence: 0,
     lastAppliedInboundSequence: 0,
     createdAt: sentAt,
@@ -84,22 +84,22 @@ function conversation(overrides: Partial<Conversation> = {}): Conversation {
 }
 
 describe("qualification follow-up policy", () => {
-  it("does not become eligible at 1 hour 59 minutes", () => {
+  it("does not become eligible at 23 hours 59 minutes", () => {
     expect(
       evaluateFollowUpEligibility(
         conversation(),
         lead(),
-        new Date("2026-09-01T11:59:00.000Z"),
+        new Date("2026-09-02T09:59:00.000Z"),
       ),
     ).toEqual({ eligible: false, reason: "NOT_DUE" });
   });
 
-  it("becomes eligible exactly after 2 hours", () => {
+  it("becomes eligible exactly after 24 hours", () => {
     expect(
       evaluateFollowUpEligibility(
         conversation(),
         lead(),
-        new Date("2026-09-01T12:00:00.000Z"),
+        new Date("2026-09-02T10:00:00.000Z"),
       ),
     ).toEqual({ eligible: true, reason: "ELIGIBLE" });
   });
@@ -142,10 +142,10 @@ describe("qualification follow-up policy", () => {
     ).toBe(false);
   });
 
-  it("forbids a second qualification follow-up", () => {
+  it("forbids more than two qualification follow-ups", () => {
     expect(
       evaluateFollowUpEligibility(
-        conversation({ followUpCount: 1 }),
+        conversation({ followUpCount: 3 }),
         lead(),
         new Date("2026-09-02T12:00:00.000Z"),
       ),

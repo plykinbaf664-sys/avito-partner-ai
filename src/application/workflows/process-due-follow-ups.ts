@@ -1,7 +1,7 @@
 import { assessInformationNeeds } from "@/domain/conversation/information-needs";
 import { PARTNER_KNOWLEDGE_BASE } from "@/domain/knowledge/knowledge-base";
 import { settleLlmUsage, type LlmUsageTotals } from "../observability/llm-usage";
-import { readConversationalNotes } from "../conversation/conversation-context";
+import { readConversationalNotes, mergeConversationalNotes } from "../conversation/conversation-context";
 import type { ConversationResponsePlan } from "@/domain/conversation/conversation-response";
 import {
   qualificationObjectiveForInformationNeed,
@@ -11,6 +11,8 @@ import type { InformationNeed } from "@/domain/conversation/information-needs";
 import {
   buildQualificationFollowUp,
   evaluateFollowUpEligibility,
+  FOLLOW_UP_POLICY,
+  nextSilenceDeadline,
 } from "@/domain/follow-up/follow-up-policy";
 import { hasConfirmedPhone } from "@/domain/qualification/qualification-policy";
 import type { Lead } from "@/domain/lead/lead";
@@ -21,7 +23,7 @@ import type {
   NaturalResponseGenerator,
 } from "../conversation/generate-natural-response";
 import { createOutboundMessageDelivery } from "../delivery/deliver-outbound-message";
-import { canRetryExternalDelivery } from "../delivery/retry-policy";
+import { canRetryExternalDelivery, externalErrorCode } from "../delivery/retry-policy";
 import {
   silentLogger,
   type StructuredLogger,
@@ -32,8 +34,8 @@ import type { Persistence } from "../ports/repositories";
 const QUALIFIED_STATUSES = ["QUALIFIED", "PRIORITY", "HOT", "WARM"] as const;
 
 function followUpDeduplicationKey(conversation: Conversation): string {
-  const stage = conversation.lastOutboundAt?.getTime() ?? conversation.updatedAt.getTime();
-  return `qualification-follow-up:${conversation.id}:${stage}`;
+  const anchor = conversation.followUpAnchorAt ?? conversation.lastOutboundAt ?? conversation.updatedAt;
+  return `qualification-follow-up:${conversation.id}:${anchor.getTime()}:${conversation.followUpCount + 1}`;
 }
 
 function buildFollowUpPlan(
@@ -141,14 +143,21 @@ export function createDueFollowUpsProcessor({
           });
           return null;
         }
+        if (conversation.followUpCount === FOLLOW_UP_POLICY.maximumQualificationFollowUps) {
+          await repositories.conversations.update({ ...conversation, missedAt: now,
+            awaitingUserReply: false, followUpEligibleAt: null, updatedAt: now });
+          logger.info("conversation.missed", { leadId: lead.id, conversationId: conversation.id,
+            followUpCount: conversation.followUpCount });
+          return null;
+        }
         const deduplicationKey = followUpDeduplicationKey(conversation);
         const existing =
           await repositories.messages.findByDeduplicationKey(deduplicationKey);
         if (existing) {
-          return canRetryExternalDelivery({
+          return existing.deliveryStatus === "SENT" || canRetryExternalDelivery({
             attempts: existing.deliveryAttempts,
             retryable: existing.deliveryRetryable,
-          }) && existing.deliveryStatus !== "SENT"
+          })
             ? {
                 conversation,
                 lead,
@@ -189,6 +198,7 @@ export function createDueFollowUpsProcessor({
         );
         let selectedInformationNeed = prepared.plan!.nextInformationNeed;
         let noReply = false;
+        let conversationNotes: string | undefined;
         if (generateNaturalResponse) {
           try {
             const natural = await generateNaturalResponse({
@@ -198,10 +208,11 @@ export function createDueFollowUpsProcessor({
               conversationMemory: readConversationalNotes(prepared.conversation.summary),
               plan: prepared.plan!,
               triggerType: "FOLLOW_UP_DUE",
-              silenceMs: prepared.conversation.lastOutboundAt
+              followUpStage: prepared.conversation.followUpCount + 1,
+              silenceMs: (prepared.conversation.followUpAnchorAt ?? prepared.conversation.lastOutboundAt)
                 ? Math.max(
                     0,
-                    now.getTime() - prepared.conversation.lastOutboundAt.getTime(),
+                    now.getTime() - (prepared.conversation.followUpAnchorAt ?? prepared.conversation.lastOutboundAt)!.getTime(),
                   )
                 : undefined,
               recentMessages: prepared.history.map(({ direction, actor, content }) => ({
@@ -211,16 +222,22 @@ export function createDueFollowUpsProcessor({
               })),
             });
             generationUsage = natural.llmUsage;
+            conversationNotes = natural.conversationMemory;
             noReply = natural.replyAction === "NO_REPLY";
             content = natural.text;
             selectedInformationNeed = natural.nextInformationNeed;
+            if (!noReply && !content.trim()) throw Object.assign(new Error("EMPTY_FOLLOW_UP"), { code: "EMPTY_FOLLOW_UP" });
           } catch (error) {
             generationFallback = true;
+            // Proactive messages require a reliable conversational decision.
+            // Fail closed: never spam neutral fallback text or mark a lead
+            // MISSED as if two useful messages had been delivered.
+            noReply = true;
             if (error instanceof Error && "llmUsage" in error) generationUsage = error.llmUsage as LlmUsageTotals;
             logger.error("follow_up.generation_fallback", {
               leadId: prepared.lead.id,
               conversationId: prepared.conversation.id,
-              fallbackReason: error instanceof Error ? error.message : "UNKNOWN",
+              fallbackReason: externalErrorCode(error),
             });
           }
         }
@@ -235,10 +252,11 @@ export function createDueFollowUpsProcessor({
                 current.lastOutboundAt?.getTime() !== prepared.conversation.lastOutboundAt?.getTime()) return false;
             // Consume this silence decision, without claiming a message was sent.
             // A new inbound schedules its own episode through the ordinary workflow.
-            await repositories.conversations.update({ ...current, followUpEligibleAt: null, updatedAt: now });
+            await repositories.conversations.update({ ...current, followUpEligibleAt: null, awaitingUserReply: false,
+              summary: mergeConversationalNotes(current.summary, conversationNotes), updatedAt: now });
             return true;
           });
-          await settleUsage(consumed ? "NO_REPLY" : "SUPPRESSED");
+          await settleUsage(consumed ? generationFallback ? "FALLBACK" : "NO_REPLY" : "SUPPRESSED");
           continue;
         }
 
@@ -255,6 +273,10 @@ export function createDueFollowUpsProcessor({
           );
           if (
             !evaluateFollowUpEligibility(conversation, lead, now).eligible ||
+            conversation.followUpAnchorAt?.getTime() !== prepared.conversation.followUpAnchorAt?.getTime() ||
+            conversation.lastOutboundAt?.getTime() !== prepared.conversation.lastOutboundAt?.getTime() ||
+            conversation.nextInboundSequence !== prepared.conversation.nextInboundSequence ||
+            conversation.followUpCount !== prepared.conversation.followUpCount ||
             history.some(
               (message) =>
                 message.direction === "OUTBOUND" &&
@@ -296,6 +318,7 @@ export function createDueFollowUpsProcessor({
           if (!inserted) return null;
           await repositories.conversations.update({
             ...conversation,
+            summary: mergeConversationalNotes(conversation.summary, conversationNotes),
             pendingInformationNeed: selectedInformationNeed,
             updatedAt: now,
           });
@@ -321,6 +344,9 @@ export function createDueFollowUpsProcessor({
           conversation &&
           lead &&
           evaluateFollowUpEligibility(conversation, lead, now).eligible &&
+          conversation.followUpAnchorAt?.getTime() === prepared.conversation.followUpAnchorAt?.getTime() &&
+          conversation.nextInboundSequence === prepared.conversation.nextInboundSequence &&
+          conversation.followUpCount === prepared.conversation.followUpCount &&
           !history.some(
             (message) =>
               message.direction === "INBOUND" &&
@@ -370,11 +396,17 @@ export function createDueFollowUpsProcessor({
             delivered.conversationId,
           );
           if (!conversation) return;
+          if (conversation.followUpAnchorAt?.getTime() !== prepared.conversation.followUpAnchorAt?.getTime() ||
+              conversation.nextInboundSequence !== prepared.conversation.nextInboundSequence) return;
+          const sentAt = delivered.sentAt ?? now;
+          const anchor = conversation.followUpAnchorAt ?? prepared.conversation.lastOutboundAt ?? sentAt;
+          const count = Math.max(conversation.followUpCount, prepared.conversation.followUpCount + 1);
           await repositories.conversations.update({
             ...conversation,
             lastOutboundAt: delivered.sentAt ?? now,
-            followUpEligibleAt: null,
-            followUpCount: Math.max(conversation.followUpCount, 1),
+            followUpAnchorAt: anchor,
+            followUpEligibleAt: nextSilenceDeadline(anchor, count, sentAt),
+            followUpCount: count,
             lastFollowUpAt: delivered.sentAt ?? now,
             updatedAt: delivered.sentAt ?? now,
           });
@@ -394,7 +426,9 @@ export function createDueFollowUpsProcessor({
             const conversation = await repositories.conversations.findById(
               delivered.conversationId,
             );
-            if (!conversation) return;
+            if (!conversation ||
+                conversation.followUpAnchorAt?.getTime() !== prepared.conversation.followUpAnchorAt?.getTime() ||
+                conversation.nextInboundSequence !== prepared.conversation.nextInboundSequence) return;
             await repositories.conversations.update({
               ...conversation,
               followUpEligibleAt: null,
@@ -402,7 +436,8 @@ export function createDueFollowUpsProcessor({
             });
           });
         }
-        logger.error("follow_up.failed", {
+        if (delivered.lastDeliveryErrorCode?.startsWith("CANCELLED_")) await settleUsage("SUPPRESSED");
+        logger[delivered.lastDeliveryErrorCode?.startsWith("CANCELLED_") ? "info" : "error"]("follow_up.failed", {
           leadId: delivered.leadId,
           conversationId: delivered.conversationId,
           messageId: delivered.id,

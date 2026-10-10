@@ -37,7 +37,7 @@ export function createRuntimeAvitoWebhook() {
     persistence,
     extractMessage: createMessageExtractor({ llmProvider }),
     generateNaturalResponse: createNaturalResponseGenerator({ llmProvider: conversationProvider }),
-    outboundProvider: new AvitoOutboundMessageProvider(client, logger, persistence.operations),
+    outboundProvider: new AvitoOutboundMessageProvider(client, logger, persistence.operations, persistence),
     managerNotificationProvider,
     logger,
   });

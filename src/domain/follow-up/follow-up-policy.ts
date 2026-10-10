@@ -2,8 +2,8 @@ import type { Conversation } from "../conversation/conversation";
 import type { Lead } from "../lead/lead";
 
 export const FOLLOW_UP_POLICY = Object.freeze({
-  delayMs: 2 * 60 * 60 * 1_000,
-  maximumQualificationFollowUps: 1,
+  delayMs: 24 * 60 * 60 * 1_000,
+  maximumQualificationFollowUps: 2,
 });
 
 export interface FollowUpEligibility {
@@ -16,6 +16,7 @@ export interface FollowUpEligibility {
     | "TERMINAL_LEAD"
     | "USER_REPLIED"
     | "ALREADY_FOLLOWED_UP"
+    | "MISSED"
     | "NO_OUTBOUND_MESSAGE";
 }
 
@@ -23,12 +24,20 @@ export function followUpEligibleAt(lastOutboundAt: Date): Date {
   return new Date(lastOutboundAt.getTime() + FOLLOW_UP_POLICY.delayMs);
 }
 
+/** Normally 24/48/72h from the same anchor. After delayed delivery allow a full
+ * day to respond, rather than sending catch-up reminders together. */
+export function nextSilenceDeadline(anchor: Date, sentCount: number, lastSent: Date): Date {
+  return new Date(Math.max(anchor.getTime() + (sentCount + 1) * FOLLOW_UP_POLICY.delayMs,
+    lastSent.getTime() + FOLLOW_UP_POLICY.delayMs));
+}
+
 export function evaluateFollowUpEligibility(
   conversation: Conversation,
   lead: Lead,
   now: Date,
 ): FollowUpEligibility {
-  if (conversation.followUpCount >= FOLLOW_UP_POLICY.maximumQualificationFollowUps) {
+  if (conversation.missedAt) return { eligible: false, reason: "MISSED" };
+  if (conversation.followUpCount > FOLLOW_UP_POLICY.maximumQualificationFollowUps) {
     return { eligible: false, reason: "ALREADY_FOLLOWED_UP" };
   }
   if (

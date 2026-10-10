@@ -226,7 +226,9 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     ]);
     h.extractMessage.mockImplementation(async ({ recentMessages }) => {
       expect(recentMessages?.some((item: { actor?: string }) => item.actor === "MANAGER")).toBe(true);
-      return extractionWithFacts({ phoneNumber: "+79049163020", phoneConfirmed: true });
+      const extracted = extractionWithFacts({ phoneNumber: "+79049163020", phoneConfirmed: true });
+      return { ...extracted, extraction: { ...extracted.extraction,
+        signals: { ...extracted.extraction.signals, previousQuestionResponse: "ANSWERED" } } };
     });
 
     expect(await h.poll(current)).toMatchObject({ status: "PASS", accepted: 1, processed: 2 });

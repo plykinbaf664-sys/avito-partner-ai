@@ -6,6 +6,7 @@ import { generateId, type IdGenerator } from "@/shared/id";
 import { silentLogger, type StructuredLogger } from "../observability/structured-logger";
 import type { Persistence } from "../ports/repositories";
 import { createInitialLead } from "./process-incoming-event";
+import { followUpEligibleAt } from "@/domain/follow-up/follow-up-policy";
 
 export interface ExternalConversationMessageInput {
   source: string;
@@ -65,6 +66,8 @@ export function createExternalConversationMessageRecorder({
           followUpEligibleAt: null,
           followUpCount: 0,
           lastFollowUpAt: null,
+          followUpAnchorAt: null,
+          missedAt: null,
           nextInboundSequence: 0,
           lastAppliedInboundSequence: 0,
           createdAt: input.createdAt,
@@ -86,11 +89,14 @@ export function createExternalConversationMessageRecorder({
         };
       }
       const messages = await repositories.messages.listByConversationId(conversation.id);
+      const supersedesCurrent = (!conversation.lastOutboundAt || input.createdAt >= conversation.lastOutboundAt) &&
+        (!conversation.lastInboundAt || input.createdAt >= conversation.lastInboundAt);
       for (const pending of messages.filter(
         (message) =>
+          supersedesCurrent &&
           message.direction === "OUTBOUND" &&
           message.deliveryStatus === "PENDING" &&
-          message.deduplicationKey?.startsWith(`qualification-follow-up:${conversation!.id}:`),
+          message.actor === "AI",
       )) {
         await repositories.messages.update({
           ...pending,
@@ -122,11 +128,19 @@ export function createExternalConversationMessageRecorder({
         conversation.lastOutboundAt.getTime() > input.createdAt.getTime()
         ? conversation.lastOutboundAt
         : input.createdAt;
+      const canContinue = supersedesCurrent && !conversation.qualificationCompleted &&
+        !["NO_FIT", "HANDOFF", "CLOSED"].includes(lead.qualificationStatus) &&
+        lead.handoffAt === null && lead.buyingIntent !== "DECLINED";
       await repositories.conversations.update({
         ...conversation,
         lastOutboundAt: latestOutboundAt,
-        awaitingUserReply: false,
-        followUpEligibleAt: null,
+        ...(supersedesCurrent ? {
+          awaitingUserReply: canContinue,
+          followUpEligibleAt: canContinue ? followUpEligibleAt(latestOutboundAt) : null,
+          followUpAnchorAt: canContinue ? latestOutboundAt : null,
+          followUpCount: 0, lastFollowUpAt: null, missedAt: null,
+          pendingInformationNeed: null,
+        } : {}),
         updatedAt:
           conversation.updatedAt.getTime() > input.createdAt.getTime()
             ? conversation.updatedAt

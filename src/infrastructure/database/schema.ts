@@ -162,6 +162,8 @@ export const conversations = sqliteTable(
     }),
     followUpCount: integer("follow_up_count").notNull().default(0),
     lastFollowUpAt: integer("last_follow_up_at", { mode: "timestamp_ms" }),
+    followUpAnchorAt: integer("follow_up_anchor_at", { mode: "timestamp_ms" }),
+    missedAt: integer("missed_at", { mode: "timestamp_ms" }),
     nextInboundSequence: integer("next_inbound_sequence").notNull().default(0),
     lastAppliedInboundSequence: integer("last_applied_inbound_sequence")
       .notNull()

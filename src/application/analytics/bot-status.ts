@@ -18,6 +18,7 @@ export interface BotStatusSnapshot {
   failedHandoffs: number;
   pendingInboundEvents: number;
   failedInboundEvents: number;
+  missedDialogs?: number;
 }
 
 export interface BotStatusReadRepository {
@@ -60,6 +61,7 @@ export function formatBotStatus(snapshot: BotStatusSnapshot): string {
     `📊 Статистика Avito\n${generatedAt} МСК`,
     ...periods,
     ["Сейчас",
+      `Без ответа после двух напоминаний (MISSED): ${snapshot.missedDialogs ?? 0}`,
       `Готовы к передаче, нет телефона: ${snapshot.awaitingPhone}`,
       `Передачи: в очереди ${snapshot.pendingHandoffs}, с ошибкой ${snapshot.failedHandoffs}`,
       `Входящие: в обработке ${snapshot.pendingInboundEvents}, с ошибкой ${snapshot.failedInboundEvents}`,

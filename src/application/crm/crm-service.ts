@@ -76,6 +76,8 @@ function toRecord(snapshot: CrmLeadSnapshot): CrmLeadRecord {
     managerNotificationErrorCode:
       managerNotification?.lastDeliveryErrorCode ?? null,
     conversationState: conversation?.state ?? null,
+    engagementStatus: conversation?.missedAt ? "MISSED" : "ACTIVE",
+    missedAt: conversation?.missedAt ?? null,
   };
 }
 
@@ -118,11 +120,11 @@ export function createCrmService(persistence: Persistence) {
       };
     },
 
-    async getLead(leadId: string): Promise<CrmLeadDetails | null> {
+    async getLead(leadId: string, options: { includeUnqualified?: boolean } = {}): Promise<CrmLeadDetails | null> {
       const snapshot = await persistence.crm.findLeadSnapshot(leadId);
       if (!snapshot) return null;
       const record = toRecord(snapshot);
-      if (!isCrmQualifiedStatus(record.qualificationStatus)) return null;
+      if (!options.includeUnqualified && !isCrmQualifiedStatus(record.qualificationStatus) && record.engagementStatus !== "MISSED") return null;
       const messages = await persistence.messages.listRecentByLeadId(
         leadId,
         100,

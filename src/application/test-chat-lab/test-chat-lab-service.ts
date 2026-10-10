@@ -119,7 +119,7 @@ export function createTestChatLabService({
         currentNextStep: null,
         replyAction: "NO_REPLY",
         handoff: { decision: "NONE", notificationStatus: null, notificationId: null },
-        followUp: { eligibleAt: null, lastFollowUpAt: null, followUpCount: 0, awaitingUserReply: false },
+        followUp: { eligibleAt: null, anchorAt: null, missedAt: null, lastFollowUpAt: null, followUpCount: 0, awaitingUserReply: false },
         lastProcessing,
       };
     }
@@ -158,6 +158,8 @@ export function createTestChatLabService({
       followUp: {
         eligibleAt: iso(conversation?.followUpEligibleAt),
         lastFollowUpAt: iso(conversation?.lastFollowUpAt),
+        anchorAt: iso(conversation?.followUpAnchorAt),
+        missedAt: iso(conversation?.missedAt),
         followUpCount: conversation?.followUpCount ?? 0,
         awaitingUserReply: conversation?.awaitingUserReply ?? false,
       },

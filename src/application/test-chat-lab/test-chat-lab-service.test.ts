@@ -341,7 +341,7 @@ describe("isolated Test Chat Lab workflow", () => {
       qualificationCompleted: false,
       followUpEligibleAt: null,
       followUpCount: 0,
-      lastFollowUpAt: null,
+      lastFollowUpAt: null, followUpAnchorAt: null, missedAt: null,
       nextInboundSequence: 0,
       lastAppliedInboundSequence: 0,
       createdAt: at(0),
@@ -461,11 +461,13 @@ describe("isolated Test Chat Lab workflow", () => {
     expect(notifications.requests).toHaveLength(0);
   });
 
-  it("uses the real follow-up workflow when virtual time advances and sends at most one follow-up", async () => {
+  it("uses the real follow-up workflow at 24/48h and marks silence at 72h", async () => {
+    const errors: unknown[] = [];
     const llm = new FakeLLMProvider([
       extractionReply(),
       naturalReply("Подскажите, в каком городе рассматриваете запуск?", "CITY"),
-      naturalReply("Вернусь к нашему вопросу о запуске: актуально обсудить формат?", null),
+      naturalReply("Можем подробнее разобрать, какие задачи партнёр берёт на себя при запуске.", null),
+      naturalReply("Могу помочь сравнить небольшой старт с дальнейшим расширением.", null),
     ]);
     const outbound = new FakeOutboundProvider();
     const lab = createTestChatLabService({
@@ -473,20 +475,47 @@ describe("isolated Test Chat Lab workflow", () => {
       llmProvider: llm,
       outboundProvider: outbound,
       managerNotificationProvider: new FakeManagerNotificationProvider(),
+      logger: { info() {}, error(event, fields) { errors.push({ event, fields }); } },
     });
 
     await lab.clientMessage("session-2", "Хочу разобраться с запуском.", at(0), "client-1");
     const before = await lab.snapshot("session-2");
     expect(before.followUp.eligibleAt).not.toBeNull();
 
-    const after = await lab.advanceTime("session-2", at(2));
+    const after = await lab.advanceTime("session-2", at(24));
     expect(after.followUp?.sent).toBe(1);
     expect(after.snapshot.followUp.followUpCount).toBe(1);
     expect(outbound.requests).toHaveLength(2);
 
-    const second = await lab.advanceTime("session-2", at(4));
+    const second = await lab.advanceTime("session-2", at(24.1));
     expect(second.followUp?.sent).toBe(0);
     expect(outbound.requests).toHaveLength(2);
+    const final = await lab.advanceTime("session-2", at(48));
+    expect(errors).toEqual([]);
+    expect(final.followUp?.sent).toBe(1);
+    expect(outbound.requests).toHaveLength(3);
+    const missed = await lab.advanceTime("session-2", at(72));
+    expect(missed.followUp?.sent).toBe(0);
+    expect((missed.snapshot.conversation as { missedAt: Date }).missedAt).toEqual(at(72));
+  });
+
+  it("does not restart qualification when the client acknowledges a pending manager action", async () => {
+    const llm = new FakeLLMProvider([
+      extractionReply({}, {}, "CONFIRMATION"),
+      JSON.stringify({ replyAction: "NO_REPLY", text: "", nextInformationNeed: null, awaitingUserReply: false }),
+    ]);
+    const outbound = new FakeOutboundProvider();
+    const lab = createTestChatLabService({ persistence, llmProvider: llm, outboundProvider: outbound,
+      managerNotificationProvider: new FakeManagerNotificationProvider() });
+    await lab.managerMessage("manager-owned-action", "Я уточню условия и завтра сам Вам напишу. От Вас пока ничего не требуется.", at(0), "promise");
+    const result = await lab.clientMessage("manager-owned-action", "Хорошо, буду ждать.", at(0.01), "ack");
+    expect(result.snapshot.replyAction).toBe("NO_REPLY");
+    expect(outbound.requests).toHaveLength(0);
+    expect(result.snapshot.followUp.eligibleAt).toBeNull();
+    const calls = llm.callCount;
+    await lab.advanceTime("manager-owned-action", at(72));
+    expect(llm.callCount).toBe(calls);
+    expect((await lab.snapshot("manager-owned-action")).followUp.missedAt).toBeNull();
   });
 
   it("does not replay an explained business overview when the client answers with a city", async () => {

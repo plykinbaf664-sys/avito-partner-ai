@@ -30,7 +30,7 @@ export async function createRuntimeAvitoPolling(options: { chatId?: string } = {
     clientSecret: avito.clientSecret,
   });
   const naturalResponseGenerator = createNaturalResponseGenerator({ llmProvider: conversationProvider });
-  const outboundProvider = new AvitoOutboundMessageProvider(client, logger, persistence.operations);
+  const outboundProvider = new AvitoOutboundMessageProvider(client, logger, persistence.operations, persistence);
   const managerNotificationProvider = telegram.enabled
     ? new TelegramManagerNotificationProvider(
         { botToken: telegram.botToken!, logger },

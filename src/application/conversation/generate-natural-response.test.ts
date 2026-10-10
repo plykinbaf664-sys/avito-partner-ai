@@ -452,7 +452,7 @@ describe("natural response generation", () => {
     expect(result.text).toContain("3–4");
     expect(llm.callCount).toBe(3);
     expect(llm.requests[0]!.maxTokens).toBeGreaterThanOrEqual(2000);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v5");
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v6");
     expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
     expect(JSON.stringify(llm.requests)).not.toContain("operations-after-capital-correction");
   });

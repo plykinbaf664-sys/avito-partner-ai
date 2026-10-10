@@ -4,6 +4,7 @@ import { RetryableInfrastructureError } from "../errors/infrastructure-error";
 import type { IncomingPartnerEvent, ProcessIncomingEventOptions, ProcessIncomingEventResult } from "../workflows/process-incoming-event";
 import { incomingPartnerEventSchema, persistIncomingEventContext } from "../workflows/process-incoming-event";
 import { generateId } from "@/shared/id";
+import { hasLaterManagerMessage } from "../delivery/outbound-obsolescence";
 
 export function createAvitoRuntimeSafety(persistence: Persistence, process: (
   input: IncomingPartnerEvent, options?: ProcessIncomingEventOptions,
@@ -27,8 +28,9 @@ export function createAvitoRuntimeSafety(persistence: Persistence, process: (
       }
       const lead = await persistence.leads.findByExternalIdentity(input.source, input.externalLeadId);
       const history = lead ? await persistence.messages.listByLeadId(lead.id) : [];
-      const managerAnsweredLater = history.some(message => message.direction === "OUTBOUND" &&
-        message.actor === "MANAGER" && input.receivedAt !== undefined && message.createdAt.getTime() >= input.receivedAt.getTime());
+      const inbound = history.find(message => message.direction === "INBOUND" && message.externalMessageId === input.messageId);
+      const managerAnsweredLater = inbound ? hasLaterManagerMessage(history, inbound) : history.some(message =>
+        message.actor === "MANAGER" && input.receivedAt !== undefined && message.createdAt > input.receivedAt);
       return process(input, managerAnsweredLater ? { ...options, suppressOutbound: true } : options);
     },
   };

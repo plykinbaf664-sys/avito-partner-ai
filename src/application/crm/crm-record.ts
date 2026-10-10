@@ -11,6 +11,8 @@ export const crmLeadFilters = [
   "hot",
   "qualified",
   "handoff",
+  "missed",
+  "inbox",
 ] as const;
 
 export const crmQualifiedStatuses = [
@@ -68,6 +70,8 @@ export interface CrmLeadRecord {
   managerNotificationRetryable: boolean | null;
   managerNotificationErrorCode: string | null;
   conversationState: Conversation["state"] | null;
+  engagementStatus: "ACTIVE" | "MISSED";
+  missedAt: Date | null;
 }
 
 export interface CrmLeadDetails extends CrmLeadRecord {

@@ -39,6 +39,7 @@ import { recordPreferredContactTime } from "../../domain/lead/preferred-contact-
 import type { Message } from "../../domain/message/message";
 import type { ManagerNotification } from "../../domain/notification/manager-notification";
 import { followUpEligibleAt } from "../../domain/follow-up/follow-up-policy";
+import { hasLaterManagerMessage } from "../delivery/outbound-obsolescence";
 import {
   createManagerSummary,
   type ManagerSummary,
@@ -261,6 +262,8 @@ export async function ensureIncomingConversation(
       followUpEligibleAt: null,
       followUpCount: 0,
       lastFollowUpAt: null,
+      followUpAnchorAt: null,
+      missedAt: null,
       nextInboundSequence: 0,
       lastAppliedInboundSequence: 0,
       createdAt: now,
@@ -348,6 +351,8 @@ export async function persistIncomingEventContext(
     lastInboundAt: new Date(Math.max(conversation.lastInboundAt?.getTime() ?? now.getTime(), now.getTime())),
     awaitingUserReply: false,
     followUpEligibleAt: null,
+    followUpAnchorAt: null,
+    missedAt: null,
     updatedAt: new Date(Math.max(conversation.updatedAt.getTime(), now.getTime(),
       conversation.lastOutboundAt?.getTime() ?? 0, conversation.lastInboundAt?.getTime() ?? 0)),
   };
@@ -937,6 +942,8 @@ export function createIncomingEventProcessor({
       const latestOutbound = history.findLast(
         (message) => message.direction === "OUTBOUND",
       );
+      const currentInbound = history.find(message => message.incomingEventId === registration.event.id);
+      const humanAlreadyAnswered = currentInbound ? hasLaterManagerMessage(history, currentInbound) : false;
       // Callback preference is optional conversational context, not a
       // qualification field. Keep a concrete slot, or a semantic answer to
       // the immediately preceding scheduling question, visible in CRM.
@@ -971,7 +978,9 @@ export function createIncomingEventProcessor({
         extracted.extraction.facts.phoneConfirmed;
       const phoneFulfillsManagerStep = phoneReceived &&
         latestOutbound?.actor === "MANAGER" &&
-        /(?:телефон|номер|позвон|связ)/iu.test(latestOutbound.content);
+        extracted.extraction.intent !== "QUESTION" && extracted.extraction.intent !== "COMPLAINT" &&
+        !extracted.extraction.signals.requiresSubstantiveAnswer && extracted.extraction.signals.questions.length === 0 &&
+        extracted.extraction.signals.previousQuestionResponse === "ANSWERED";
       const phoneFulfillsRecentStep = phoneReceived && (
         currentConversation.pendingInformationNeed === "PHONE_NUMBER" ||
         phoneFulfillsManagerStep
@@ -1075,13 +1084,19 @@ export function createIncomingEventProcessor({
             allowedNextQuestions: [],
             allowedQualificationMoves: [],
           }
-        : responsePlan;
+        : latestOutbound?.actor === "MANAGER"
+          // The brain reconciles a human-led exchange. An incomplete CRM must
+          // not force a reply or a question after a pending manager action.
+          // currentTurnRequiresAnswer still forbids silence on a new question.
+          ? { ...responsePlan, qualificationProgressExpected: false }
+          : responsePlan;
       let responseLlm: Awaited<ReturnType<NaturalResponseGenerator>> | null =
         null;
       let responseFailureCode: string | null = null;
       let responseFailureUsage: LlmUsageTotals | undefined;
       if (
         !options.suppressOutbound &&
+        !humanAlreadyAnswered &&
         responseGenerationPlan.useNaturalAdaptation &&
         generateNaturalResponse &&
         !phoneFulfillsRecentStep
@@ -1256,8 +1271,11 @@ export function createIncomingEventProcessor({
             ? "Спрашиваю, чтобы лучше понять вашу ситуацию и предложить подходящий вариант, а не просто заполнить анкету. Если сейчас важнее другой вопрос, давайте сначала разберём его."
             : transactionResponsePlan.text;
 
+        const committedHistory = await repositories.messages.listByLeadId(storedLead.id);
+        const committedInbound = committedHistory.find(message => message.incomingEventId === registration.event.id);
         const responseSuppressed =
           options.suppressOutbound === true ||
+          (committedInbound ? hasLaterManagerMessage(committedHistory, committedInbound) : false) ||
           (prepared.inboundSequence !== null &&
             prepared.inboundSequence < storedConversation.nextInboundSequence);
         // The conversation generator validates whether this turn needs an
@@ -1469,7 +1487,7 @@ export function createIncomingEventProcessor({
         const updatedConversation: Conversation = {
           ...storedConversation,
           state: nextState,
-          summary: JSON.stringify(updatedConversationMemory),
+          summary: responseSuppressed ? storedConversation.summary : JSON.stringify(updatedConversationMemory),
           pendingInformationNeed: responseSuppressed
             ? storedConversation.pendingInformationNeed
             : qualificationCompleted
@@ -1477,7 +1495,7 @@ export function createIncomingEventProcessor({
               : transactionNextInformationNeed,
           awaitingUserReply: responseSuppressed
             ? storedConversation.awaitingUserReply
-            : shouldSendOutbound && transactionNextInformationNeed !== null,
+            : shouldSendOutbound && (responseLlm?.awaitingUserReply ?? transactionNextInformationNeed !== null),
           qualificationCompleted,
           followUpEligibleAt: responseSuppressed
             ? storedConversation.followUpEligibleAt
@@ -1595,13 +1613,23 @@ export function createIncomingEventProcessor({
               if (!conversation) {
                 throw new Error("Delivered message conversation was not found");
               }
+              // A new turn/manual response during transport owns the next step.
+              const deliveredHistory = await repositories.messages.listByLeadId(conversation.leadId);
+              const answeredInbound = deliveredHistory.find(message => message.incomingEventId === registration.event.id);
+              if (conversation.nextInboundSequence !== completed.conversation.nextInboundSequence ||
+                  answeredInbound && hasLaterManagerMessage(deliveredHistory, answeredInbound) ||
+                  conversation.lastOutboundAt && delivered.sentAt && conversation.lastOutboundAt > delivered.sentAt) return conversation;
               const awaitingUserReply =
-                completed.asksUserQuestion &&
+                (responseLlm?.awaitingUserReply ?? completed.asksUserQuestion) &&
                 !conversation.qualificationCompleted;
               const updated: Conversation = {
                 ...conversation,
                 lastOutboundAt: delivered.sentAt,
                 awaitingUserReply,
+                followUpAnchorAt: awaitingUserReply ? delivered.sentAt : null,
+                followUpCount: 0,
+                lastFollowUpAt: null,
+                missedAt: null,
                 followUpEligibleAt:
                   awaitingUserReply && delivered.sentAt
                     ? followUpEligibleAt(delivered.sentAt)
@@ -1612,6 +1640,8 @@ export function createIncomingEventProcessor({
               return updated;
             },
           );
+        } else if (delivered.lastDeliveryErrorCode?.startsWith("CANCELLED_")) {
+          await settleUsage("SUPPRESSED");
         }
       }
       if (managerNotificationProvider && completed.managerNotificationId) {

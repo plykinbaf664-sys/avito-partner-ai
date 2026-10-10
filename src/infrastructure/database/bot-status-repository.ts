@@ -17,6 +17,7 @@ interface StatusRow {
   failed_handoffs: number;
   pending_inbound: number;
   failed_inbound: number;
+  missed_dialogs: number;
 }
 
 export class DrizzleBotStatusReadRepository implements BotStatusReadRepository {
@@ -75,7 +76,9 @@ export class DrizzleBotStatusReadRepository implements BotStatusReadRepository {
         (SELECT count(*) FROM incoming_events WHERE upper(source) = 'AVITO'
           AND received_at <= ${until} AND status IN ('RECEIVED', 'PROCESSING')) AS pending_inbound,
         (SELECT count(*) FROM incoming_events WHERE upper(source) = 'AVITO'
-          AND received_at <= ${until} AND status = 'FAILED') AS failed_inbound
+          AND received_at <= ${until} AND status = 'FAILED') AS failed_inbound,
+        (SELECT count(DISTINCT c.lead_id) FROM conversations c JOIN avito_leads l ON l.id = c.lead_id
+          WHERE c.closed_at IS NULL AND c.missed_at IS NOT NULL AND c.missed_at <= ${until}) AS missed_dialogs
       FROM periods p
     `);
     const totals = rows[0];
@@ -90,6 +93,7 @@ export class DrizzleBotStatusReadRepository implements BotStatusReadRepository {
       awaitingPhone: totals.awaiting_phone, pendingHandoffs: totals.pending_handoffs,
       failedHandoffs: totals.failed_handoffs, pendingInboundEvents: totals.pending_inbound,
       failedInboundEvents: totals.failed_inbound,
+      missedDialogs: totals.missed_dialogs,
     };
   }
 }

@@ -14,6 +14,10 @@ export interface Conversation {
   followUpEligibleAt: Date | null;
   followUpCount: number;
   lastFollowUpAt: Date | null;
+  /** Last non-reminder team message: reminders never move this anchor. */
+  followUpAnchorAt: Date | null;
+  /** Recoverable silence outcome, independent of business qualification. */
+  missedAt: Date | null;
   nextInboundSequence: number;
   lastAppliedInboundSequence: number;
   createdAt: Date;

@@ -163,6 +163,8 @@ export interface TestChatLabSnapshot {
   };
   followUp: {
     eligibleAt: string | null;
+    anchorAt: string | null;
+    missedAt: string | null;
     lastFollowUpAt: string | null;
     followUpCount: number;
     awaitingUserReply: boolean;

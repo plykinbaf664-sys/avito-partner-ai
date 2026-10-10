@@ -12,6 +12,7 @@ import {
 } from "../observability/structured-logger";
 import type { OutboundMessageProvider } from "../ports/channels";
 import type { Persistence } from "../ports/repositories";
+import { outboundCancellationReason } from "./outbound-obsolescence";
 
 export interface DeliverOutboundMessageDependencies {
   persistence: Persistence;
@@ -44,6 +45,18 @@ export function createOutboundMessageDelivery({
 
     const lead = await persistence.leads.findById(message.leadId);
     if (!lead) throw new Error("Outbound message lead was not found");
+    // Final local fence also protects retries of a draft prepared before a
+    // manager intervention. A channel request already in flight cannot be recalled.
+    const history = await persistence.messages.listByConversationId(message.conversationId);
+    const cancellationReason = outboundCancellationReason(message, history);
+    if (cancellationReason) {
+      const cancelled: Message = { ...message, deliveryStatus: "FAILED", deliveryRetryable: false,
+        lastDeliveryErrorCode: cancellationReason };
+      await persistence.messages.update(cancelled);
+      logger.info("outbound.suppressed", { leadId: lead.id, conversationId: message.conversationId,
+        messageId, reason: cancellationReason });
+      return cancelled;
+    }
     const attempts = message.deliveryAttempts + 1;
 
     try {
@@ -68,14 +81,15 @@ export function createOutboundMessageDelivery({
           : {
               ...message,
               deliveryStatus: "FAILED",
-              deliveryAttempts: attempts,
+              deliveryAttempts: result.attempted === false ? message.deliveryAttempts : attempts,
               deliveryRetryable:
                 result.retryable && attempts < MAX_EXTERNAL_DELIVERY_ATTEMPTS,
               lastDeliveryErrorCode: sanitizeExternalErrorCode(result.errorCode),
             };
       await persistence.messages.update(updated);
-      logger[result.status === "SENT" ? "info" : "error"](
-        result.status === "SENT" ? "outbound.sent" : "outbound.failed",
+      const suppressed = result.status === "FAILED" && result.errorCode.startsWith("CANCELLED_");
+      logger[result.status === "SENT" || suppressed ? "info" : "error"](
+        result.status === "SENT" ? "outbound.sent" : suppressed ? "outbound.suppressed" : "outbound.failed",
         {
           leadId: message.leadId,
           conversationId: message.conversationId,

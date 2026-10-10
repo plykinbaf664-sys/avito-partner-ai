@@ -182,7 +182,8 @@ class DrizzleConversationRepository implements ConversationRepository {
           lte(schema.conversations.followUpEligibleAt, now),
           eq(schema.conversations.awaitingUserReply, true),
           eq(schema.conversations.qualificationCompleted, false),
-          eq(schema.conversations.followUpCount, 0),
+          lte(schema.conversations.followUpCount, 2),
+          isNull(schema.conversations.missedAt),
         ),
       )
       .orderBy(asc(schema.conversations.followUpEligibleAt))
@@ -272,7 +273,7 @@ class DrizzleMessageRepository implements MessageRepository {
       .select()
       .from(schema.messages)
       .where(eq(schema.messages.conversationId, conversationId))
-      .orderBy(schema.messages.createdAt);
+      .orderBy(asc(schema.messages.createdAt), asc(sql<number>`rowid`));
   }
 
   async listByLeadId(leadId: string): Promise<Message[]> {
@@ -291,7 +292,7 @@ class DrizzleMessageRepository implements MessageRepository {
       .select()
       .from(schema.messages)
       .where(eq(schema.messages.conversationId, conversationId))
-      .orderBy(desc(schema.messages.createdAt))
+      .orderBy(desc(schema.messages.createdAt), desc(sql<number>`rowid`))
       .limit(Math.max(1, Math.min(100, limit)));
     return rows.reverse();
   }
@@ -310,9 +311,12 @@ class DrizzleMessageRepository implements MessageRepository {
 function crmLeadWhere(
   query: Pick<CrmLeadListQuery, "filter" | "search">,
 ): SQL | undefined {
-  const conditions: SQL[] = [
-    inArray(schema.leads.qualificationStatus, crmQualifiedStatuses),
-  ];
+  const missed = sql`exists(select 1 from ${schema.conversations}
+    where ${schema.conversations.leadId} = ${schema.leads.id}
+      and ${schema.conversations.closedAt} is null and ${schema.conversations.missedAt} is not null)`;
+  const qualified = inArray(schema.leads.qualificationStatus, crmQualifiedStatuses);
+  const conditions: SQL[] = query.filter === "inbox" ? [] :
+    [query.filter === "missed" ? missed : query.filter === "all" ? or(qualified, missed)! : qualified];
   if (query.search) {
     const search = `%${query.search}%`;
     const searchCondition = or(
@@ -335,6 +339,8 @@ function crmLeadWhere(
       conditions.push(isNotNull(schema.leads.handoffAt));
       break;
     case "all":
+    case "missed":
+    case "inbox":
       break;
   }
   return conditions.length === 0 ? undefined : and(...conditions);

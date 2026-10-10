@@ -36,7 +36,7 @@ export default async function CrmLeadPage({
   await requireCrmPageAccess();
   const { leadId } = await params;
   if (!/^[A-Za-z0-9_-]{1,100}$/.test(leadId)) notFound();
-  const record = await withCrmService((service) => service.getLead(leadId));
+  const record = await withCrmService((service) => service.getLead(leadId, { includeUnqualified: true }));
   if (!record) notFound();
   const summary = record.managerSummary;
 
@@ -82,6 +82,7 @@ export default async function CrmLeadPage({
             <Field label="Причина" value={record.qualificationReason ?? ""} />
             <Field label="Осталось выяснить" value={record.missingCriticalFacts.map((need) => informationNeedLabels[need] ?? need).join(", ")} />
             <Field label="Состояние диалога" value={record.conversationState ?? ""} />
+            <Field label="Активность" value={record.engagementStatus === "MISSED" ? `MISSED · ${dateTime(record.missedAt!)}` : "Активный"} />
             <Field label="Handoff" value={handoffLabel(record)} />
             <Field label="Дата передачи" value={dateTime(record.handoffAt)} />
             <Field label="Telegram" value={notificationLabel(record)} />

@@ -119,6 +119,128 @@ describe("due qualification follow-ups workflow", () => {
     text,
   });
 
+  it("sends two reminders at 24/48 hours, marks MISSED at 72, and resumes the same conversation", async () => {
+    const { processEvent, processDue, outboundProvider } = harness([extractionReply(), extractionReply({ city: "Москва" })]);
+    const first = await processEvent(input("silence-start", "Здравствуйте"));
+    expect((await processDue(new Date("2026-09-02T09:59:59Z"))).sent).toHaveLength(0);
+    expect((await processDue(new Date("2026-09-02T10:00:00Z"))).sent).toHaveLength(1);
+    expect((await processDue(new Date("2026-09-02T10:00:00Z"))).sent).toHaveLength(0);
+    expect((await processDue(new Date("2026-09-03T09:59:59Z"))).sent).toHaveLength(0);
+    expect((await processDue(new Date("2026-09-03T10:00:00Z"))).sent).toHaveLength(1);
+    expect((await processDue(new Date("2026-09-04T09:59:59Z"))).sent).toHaveLength(0);
+    await processDue(new Date("2026-09-04T10:00:00Z"));
+    expect(outboundProvider.requests).toHaveLength(2);
+    expect(await persistence.conversations.findById(first.conversationId!)).toMatchObject({
+      followUpCount: 2, missedAt: new Date("2026-09-04T10:00:00Z"), followUpEligibleAt: null,
+    });
+    currentTime = new Date("2026-09-05T10:00:00Z");
+    const resumed = await processEvent(input("silence-return", "Я в Москве"));
+    expect(resumed.conversationId).toBe(first.conversationId);
+    expect(await persistence.conversations.findById(first.conversationId!)).toMatchObject({
+      missedAt: null, followUpCount: 0, followUpEligibleAt: new Date("2026-09-06T10:00:00Z"),
+    });
+  });
+
+  it("suppresses an AI draft when a human intervenes during generation, then handles the next inbound", async () => {
+    const outbound = new FakeOutboundProvider();
+    const record = createExternalConversationMessageRecorder({ persistence, generateId: () => `human-race-${++nextId}` });
+    let turns = 0;
+    const requests: Parameters<NaturalResponseGenerator>[0][] = [];
+    const processEvent = createIncomingEventProcessor({ persistence,
+      extractMessage: createMessageExtractor({ llmProvider: new FakeLLMProvider([extractionReply(), extractionReply()]) }),
+      outboundProvider: outbound, now: () => currentTime,
+      generateNaturalResponse: async request => {
+        requests.push(request);
+        if (++turns === 1) {
+          currentTime = new Date("2026-09-01T10:00:02Z");
+          await record({ source: "follow-up-test", externalLeadId: "lead-1", externalMessageId: "human-race",
+            text: "Обсудим условия здесь. Что Вас прежде всего интересует?", createdAt: currentTime });
+        }
+        return { text: "Помогу разобраться в запуске.", model: "fake", inputTokens: 1, outputTokens: 1,
+          nextInformationNeed: null, awaitingUserReply: true };
+      },
+    });
+    await processEvent(input("human-race-start", "Расскажите об участии партнёра"));
+    expect(outbound.requests).toHaveLength(0);
+    currentTime = new Date("2026-09-01T10:01:00Z");
+    const next = await processEvent(input("human-race-next", "Что нужно делать лично?"));
+    expect(outbound.requests).toHaveLength(1);
+    expect(requests[1]!.recentMessages.some(m => m.actor === "MANAGER")).toBe(true);
+    expect(await persistence.conversations.findById(next.conversationId!)).toMatchObject({
+      awaitingUserReply: true, followUpEligibleAt: new Date("2026-09-02T10:01:00Z"),
+    });
+  });
+
+  it("does not send a reminder based on the old goal when a human intervenes during generation", async () => {
+    const { processEvent } = harness([extractionReply()]);
+    const first = await processEvent(input("follow-up-human-race", "Здравствуйте"));
+    const outbound = new FakeOutboundProvider();
+    const record = createExternalConversationMessageRecorder({ persistence });
+    const due = createDueFollowUpsProcessor({ persistence, outboundProvider: outbound,
+      generateNaturalResponse: async () => {
+        await record({ source: "follow-up-test", externalLeadId: "lead-1", externalMessageId: "new-human-goal",
+          createdAt: new Date("2026-09-02T10:00:01Z"), text: "Я уточню условия и сам Вам напишу." });
+        return { text: "Устаревшее напоминание", model: "fake", inputTokens: 1, outputTokens: 1, nextInformationNeed: null };
+      } });
+    expect((await due(new Date("2026-09-02T10:00:00Z"))).sent).toHaveLength(0);
+    expect(outbound.requests).toHaveLength(0);
+    expect(await persistence.conversations.findById(first.conversationId!)).toMatchObject({
+      followUpCount: 0, followUpAnchorAt: new Date("2026-09-02T10:00:01Z"),
+    });
+  });
+
+  it("answers a new client turn after a manager message even when their timestamps are equal", async () => {
+    await createExternalConversationMessageRecorder({ persistence })({ source: "follow-up-test", externalLeadId: "lead-1",
+      externalMessageId: "same-second-manager", text: "Что интересует в запуске?", createdAt: currentTime });
+    const { processEvent } = harness([extractionReply()]);
+    const result = await processEvent(input("same-second-user", "Какие мои задачи?"));
+    const history = await persistence.messages.listByConversationId(result.conversationId!);
+    expect(history.filter(m => m.actor === "AI" && m.deliveryStatus === "SENT")).toHaveLength(1);
+  });
+
+  it("does not reset a live silence episode when old human history is ingested", async () => {
+    const { processEvent } = harness([extractionReply()]);
+    const first = await processEvent(input("historical-human", "Здравствуйте"));
+    const before = await persistence.conversations.findById(first.conversationId!);
+    await createExternalConversationMessageRecorder({ persistence })({ source: "follow-up-test", externalLeadId: "lead-1",
+      externalMessageId: "old-human", text: "Ранее обсуждали запуск.", createdAt: new Date("2026-08-31T10:00:00Z") });
+    expect(await persistence.conversations.findById(first.conversationId!)).toMatchObject({
+      followUpEligibleAt: before!.followUpEligibleAt, followUpAnchorAt: before!.followUpAnchorAt,
+      awaitingUserReply: before!.awaitingUserReply, lastOutboundAt: before!.lastOutboundAt,
+    });
+  });
+
+  it("reconciles an already SENT reminder after restart without resending or losing the next deadline", async () => {
+    const { processEvent, processDue, outboundProvider } = harness([extractionReply()]);
+    const first = await processEvent(input("restart-after-send", "Здравствуйте"));
+    const before = await persistence.conversations.findById(first.conversationId!);
+    const dueAt = new Date("2026-09-02T10:00:00Z");
+    await processDue(dueAt);
+    // Crash window: the message's SENT result is durable, episode advancement is not.
+    await persistence.conversations.update(before!);
+    await processDue(dueAt);
+    expect(outboundProvider.requests).toHaveLength(1);
+    expect(await persistence.conversations.findById(first.conversationId!)).toMatchObject({
+      followUpCount: 1, followUpEligibleAt: new Date("2026-09-03T10:00:00Z"),
+    });
+  });
+
+  it("spaces delayed reminders by a day and does not mark failed delivery as MISSED", async () => {
+    const { processEvent, processDue } = harness([extractionReply()]);
+    const first = await processEvent(input("delayed-episode", "Здравствуйте"));
+    await processDue(new Date("2026-09-04T10:00:00Z"));
+    expect((await processDue(new Date("2026-09-04T10:01:00Z"))).sent).toHaveLength(0);
+    expect(await persistence.conversations.findById(first.conversationId!)).toMatchObject({
+      followUpCount: 1, missedAt: null, followUpEligibleAt: new Date("2026-09-05T10:00:00Z"),
+    });
+    const failed = createDueFollowUpsProcessor({ persistence, outboundProvider: new FakeOutboundProvider([
+      { status: "FAILED", retryable: false, errorCode: "ACCESS_DENIED" },
+    ]) });
+    await failed(new Date("2026-09-05T10:00:00Z"));
+    await failed(new Date("2026-09-06T10:00:00Z"));
+    expect(await persistence.conversations.findById(first.conversationId!)).toMatchObject({ followUpCount: 1, missedAt: null });
+  });
+
   it("provides approved knowledge, conversational memory and workflow identity to follow-up generation", async () => {
     const { processEvent } = harness([extractionReply()]);
     const first = await processEvent(input("follow-up-context", "Здравствуйте"));
@@ -133,7 +255,7 @@ describe("due qualification follow-ups workflow", () => {
         return { text: "Если появятся вопросы, помогу с расчётом запуска.", model: "fake", inputTokens: 1,
           outputTokens: 1, nextInformationNeed: null };
       } });
-    await processDue(new Date("2026-09-01T12:00:00.000Z"));
+    await processDue(new Date("2026-09-02T10:00:00.000Z"));
     expect(requests).toHaveLength(1);
     expect(requests[0]!.llmContext).toMatchObject({ operation: "FOLLOW_UP", conversationId: first.conversationId,
       leadId: first.leadId, source: "follow-up-test" });
@@ -141,16 +263,51 @@ describe("due qualification follow-ups workflow", () => {
     expect(requests[0]!.conversationMemory).toContain("вопрос о масштабе уже обсуждали");
   });
 
-  it("sends once at 2 hours and remains idempotent", async () => {
+  it("preserves the new human silence episode when pre-send refresh cancels the old reminder", async () => {
+    const { processEvent } = harness([extractionReply()]);
+    const first = await processEvent(input("pre-send-human-episode", "Здравствуйте"));
+    const record = createExternalConversationMessageRecorder({ persistence });
+    const due = createDueFollowUpsProcessor({ persistence, outboundProvider: { deliver: async () => {
+      await record({ source: "follow-up-test", externalLeadId: "lead-1", externalMessageId: "human-before-post",
+        text: "Что нужно уточнить перед запуском?", createdAt: new Date("2026-09-02T10:00:01Z") });
+      return { status: "FAILED", retryable: false, errorCode: "CANCELLED_BY_HUMAN_MESSAGE", attempted: false };
+    } } });
+    await due(new Date("2026-09-02T10:00:00Z"));
+    expect(await persistence.conversations.findById(first.conversationId!)).toMatchObject({
+      followUpCount: 0, followUpEligibleAt: new Date("2026-09-03T10:00:01Z"),
+    });
+  });
+
+  it.each(["EMPTY", "ERROR"])("does not send unreliable proactive %s output or classify it as customer silence", async mode => {
+    const { processEvent } = harness([extractionReply()]);
+    const first = await processEvent(input(`unreliable-${mode}`, "Здравствуйте"));
+    let calls = 0;
+    const outbound = new FakeOutboundProvider();
+    const due = createDueFollowUpsProcessor({ persistence, outboundProvider: outbound,
+      generateNaturalResponse: async () => {
+        calls++;
+        if (mode === "ERROR") throw Object.assign(new Error("Provider unavailable"), { code: "LLM_UNAVAILABLE" });
+        return { replyAction: "SEND_REPLY", text: "", model: "fake", inputTokens: 1, outputTokens: 1, nextInformationNeed: null };
+      } });
+    await due(new Date("2026-09-02T10:00:00Z"));
+    await due(new Date("2026-09-03T10:00:00Z"));
+    expect(calls).toBe(1);
+    expect(outbound.requests).toHaveLength(0);
+    expect(await persistence.conversations.findById(first.conversationId!)).toMatchObject({
+      followUpCount: 0, missedAt: null, followUpEligibleAt: null,
+    });
+  });
+
+  it("sends the first reminder at 24 hours and remains idempotent", async () => {
     const { processEvent, processDue, outboundProvider } = harness([
       extractionReply(),
     ]);
     const first = await processEvent(input("event-1", "Здравствуйте"));
 
-    currentTime = new Date("2026-09-01T11:59:00.000Z");
+    currentTime = new Date("2026-09-02T09:59:00.000Z");
     expect((await processDue(currentTime)).created).toHaveLength(0);
 
-    currentTime = new Date("2026-09-01T12:00:00.000Z");
+    currentTime = new Date("2026-09-02T10:00:00.000Z");
     const due = await processDue(currentTime);
     const repeated = await processDue(currentTime);
     const messages = await persistence.messages.listByConversationId(
@@ -165,7 +322,7 @@ describe("due qualification follow-ups workflow", () => {
     expect(await persistence.conversations.findById(first.conversationId!)).toMatchObject({
       followUpCount: 1,
       lastFollowUpAt: currentTime,
-      followUpEligibleAt: null,
+      followUpEligibleAt: new Date("2026-09-03T10:00:00.000Z"),
     });
   });
 
@@ -179,8 +336,8 @@ describe("due qualification follow-ups workflow", () => {
         generations++;
         return { replyAction: "NO_REPLY", text: "", model: "fake", inputTokens: 1, outputTokens: 1, nextInformationNeed: null };
       } });
-    const result = await due(new Date("2026-09-01T12:00:00.000Z"));
-    await due(new Date("2026-09-01T12:01:00.000Z"));
+    const result = await due(new Date("2026-09-02T10:00:00.000Z"));
+    await due(new Date("2026-09-02T10:01:00.000Z"));
     expect(result.created).toHaveLength(0);
     expect(outbound.requests).toHaveLength(0);
     expect(generations).toBe(1);
@@ -191,13 +348,13 @@ describe("due qualification follow-ups workflow", () => {
     const { processEvent } = harness([extractionReply(), extractionReply({ city: "Москва" })]);
     const first = await processEvent(input("follow-up-old-episode", "Здравствуйте"));
     const due = createDueFollowUpsProcessor({ persistence, generateNaturalResponse: async () => {
-      currentTime = new Date("2026-09-01T12:00:01.000Z");
+      currentTime = new Date("2026-09-02T10:00:01.000Z");
       await processEvent(input("follow-up-new-episode", "Я в Москве"));
       return { replyAction: "NO_REPLY", text: "", model: "fake", inputTokens: 1, outputTokens: 1, nextInformationNeed: null };
     } });
-    expect((await due(new Date("2026-09-01T12:00:00.000Z"))).created).toHaveLength(0);
+    expect((await due(new Date("2026-09-02T10:00:00.000Z"))).created).toHaveLength(0);
     expect(await persistence.conversations.findById(first.conversationId!)).toMatchObject({
-      followUpEligibleAt: new Date("2026-09-01T14:00:01.000Z"), followUpCount: 0 });
+      followUpEligibleAt: new Date("2026-09-03T10:00:01.000Z"), followUpCount: 0 });
   });
 
   it("cancels a due follow-up when Dmitry continues the conversation", async () => {
@@ -219,13 +376,13 @@ describe("due qualification follow-ups workflow", () => {
       createdAt: currentTime,
     });
 
-    currentTime = new Date("2026-09-01T12:00:00.000Z");
+    currentTime = new Date("2026-09-02T10:00:00.000Z");
     expect((await processDue(currentTime)).created).toHaveLength(0);
     expect(outboundProvider.requests).toHaveLength(0);
     const conversation = await persistence.conversations.findOpenByLeadId(
       (await persistence.leads.findByExternalIdentity("follow-up-test", "lead-1"))!.id,
     );
-    expect(conversation?.followUpEligibleAt).toBeNull();
+    expect(conversation?.followUpEligibleAt).toEqual(new Date("2026-09-02T11:30:00.000Z"));
   });
 
   it("deduplicates parallel scheduler invocations", async () => {
@@ -235,7 +392,7 @@ describe("due qualification follow-ups workflow", () => {
     const first = await processEvent(
       input("event-parallel-scheduler", "Р—РґСЂР°РІСЃС‚РІСѓР№С‚Рµ"),
     );
-    currentTime = new Date("2026-09-01T12:00:00.000Z");
+    currentTime = new Date("2026-09-02T10:00:00.000Z");
 
     await Promise.all([processDue(currentTime), processDue(currentTime)]);
     const messages = await persistence.messages.listByConversationId(
@@ -250,7 +407,7 @@ describe("due qualification follow-ups workflow", () => {
     ).toHaveLength(1);
   });
 
-  it("does not send the old follow-up after an inbound reply before 2 hours", async () => {
+  it("does not send the old follow-up after an inbound reply before 24 hours", async () => {
     const { processEvent, processDue } = harness([
       extractionReply(),
       extractionReply({ budget: 200_000, budgetConfirmed: true }),
@@ -269,10 +426,10 @@ describe("due qualification follow-ups workflow", () => {
       extractionReply({ launchTiming: "WITHIN_MONTH" }),
     ]);
     const first = await processEvent(input("event-1", "Есть 200 тысяч"));
-    currentTime = new Date("2026-09-01T12:00:00.000Z");
+    currentTime = new Date("2026-09-02T10:00:00.000Z");
     await processDue(currentTime);
 
-    currentTime = new Date("2026-09-01T13:00:00.000Z");
+    currentTime = new Date("2026-09-02T11:00:00.000Z");
     const resumed = await processEvent(input("event-2", "Хочу начать через месяц"));
     const messages = await persistence.messages.listByConversationId(
       first.conversationId!,
@@ -324,7 +481,7 @@ describe("due qualification follow-ups workflow", () => {
       generateId,
     });
     const first = await processEvent(input("event-failed-follow-up", "Здравствуйте"));
-    currentTime = new Date("2026-09-01T12:00:00.000Z");
+    currentTime = new Date("2026-09-02T10:00:00.000Z");
 
     const failed = await processDue(currentTime);
     const conversation = await persistence.conversations.findById(
@@ -373,7 +530,7 @@ describe("due qualification follow-ups workflow", () => {
       generateId: () => "natural-follow-up-" + (++nextId),
     });
 
-    currentTime = new Date("2026-09-01T12:00:00.000Z");
+    currentTime = new Date("2026-09-02T10:00:00.000Z");
     const due = await processDue(currentTime);
 
     expect(due.sent).toHaveLength(1);
@@ -386,7 +543,7 @@ describe("due qualification follow-ups workflow", () => {
   it("rechecks state after selection and skips when an inbound arrived", async () => {
     const { processEvent } = harness([extractionReply()]);
     const first = await processEvent(input("event-race", "Здравствуйте"));
-    currentTime = new Date("2026-09-01T12:00:00.000Z");
+    currentTime = new Date("2026-09-02T10:00:00.000Z");
     const originalList =
       persistence.conversations.listDueFollowUps.bind(
         persistence.conversations,

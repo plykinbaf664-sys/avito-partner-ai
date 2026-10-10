@@ -21,7 +21,7 @@ describe("Telegram bot status aggregates", () => {
     await db.conversations.insert({ id: `c-${id}`, leadId: id, state: "QUALIFYING", summary: null,
       pendingInformationNeed: null, lastInboundAt: first, lastOutboundAt: null,
       awaitingUserReply: false, qualificationCompleted: false, followUpEligibleAt: null,
-      followUpCount: 0, lastFollowUpAt: null, nextInboundSequence: 0, lastAppliedInboundSequence: 0,
+      followUpCount: 0, lastFollowUpAt: null, followUpAnchorAt: null, missedAt: null, nextInboundSequence: 0, lastAppliedInboundSequence: 0,
       createdAt, updatedAt: createdAt, closedAt: null });
     if (first) await message(`first-${id}`, id, first);
   }

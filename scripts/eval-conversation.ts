@@ -35,6 +35,26 @@ async function main() {
 
   const scenarios = [
     {
+      id: "team-manager-pending-action",
+      criteria: "Менеджер обещал сам написать завтра, следующий ход на стороне команды. Не отправлять клиенту follow-up, не перезапускать анкету и не просить телефон. Подтверждение ожидания допускает NO_REPLY или короткое подтверждение, но не новый квалификационный вопрос, не новую презентацию и не технический fallback. Никакого MISSED за ожидание обещанного действия менеджера.",
+      steps: [
+        { actor: "MANAGER", text: "Я уточню условия по объекту и завтра сам Вам напишу. От Вас сейчас ничего не требуется." },
+        { actor: "USER", text: "Хорошо, буду ждать." },
+      ],
+    },
+    {
+      id: "team-silence-recovery",
+      criteria: "MANAGER и AI ведут один разговор: короткое «а сколько надо?» после вопроса менеджера про часы означает время, ответить про 3–4 часа в день. Не повторять запрошенный ранее телефон/бюджет ради CRM; согласованные действия менеджера не отменять. Два ненавязчивых follow-up после открытого вопроса менеджера должны быть разными полезными продолжениями по теме запуска, без выдуманного согласия клиента и повторной анкеты. После возобновления и номера один handoff, затем содержательный ответ о стоимости одного объекта в Москве (ориентир 180 000 ₽, включая единовременные 50 000 ₽, расчётный залог и подготовку), без повторного запроса номера. Содержательные AI-ответы должны пройти через LLM без технического fallback.",
+      steps: [
+        { actor: "USER", text: "Москва, есть 400 тысяч на запуск, хочу основной бизнес и начать в ближайшие дни. Отдельно оплачиваю аренду, залог, подготовку и текущие расходы. Готов ездить на просмотры и заключать договоры." },
+        { actor: "MANAGER", text: "Для старта нужно Ваше участие: просмотры и договор аренды. Сколько часов в день сможете уделять запуску?" },
+        { actor: "USER", text: "А сколько надо?" },
+        { actor: "MANAGER", text: "Если хотите сначала разобраться подробнее, напишите, какой вопрос о запуске остался самым важным для Вас." },
+        { actor: "USER", text: "Да, готов запускаться, время выделю. Мой номер +79991234567" },
+        { actor: "USER", text: "А расходы на старт одной квартиры в Москве у меня какие?" },
+      ],
+    },
+    {
       id: "inbound-delivery-smoke",
       criteria: "На первый вопрос нового клиента ответить про стоимость запуска двух объектов в Москве: ориентир 310 000 рублей, услуга запуска 50 000 один раз, аренда, расчётный залог и подготовка отдельно. На контекстное 'что для этого надо от меня' объяснить участие партнёра, не просить уточнить уже понятный вопрос и не повторять всю экономику без причины. Никаких гарантий дохода и придуманных обязательных действий. Оба ответа содержательные, не пустые.",
       steps: [
@@ -113,7 +133,7 @@ async function main() {
     },
     {
       id: "follow-up-silence",
-      criteria: "После молчания допустим один ненавязчивый follow-up или NO_REPLY, но без выдуманных согласий. Новый вопрос о необходимом времени требует ответа про 3–4 часа в день.",
+      criteria: "Через 24 часа допустим один ненавязчивый follow-up или NO_REPLY, но без выдуманных согласий. Повторный запуск того же этапа не отправляет ещё одно сообщение. Новый вопрос о необходимом времени требует ответа про 3–4 часа в день.",
       steps: [
         { actor: "USER", text: "Москва, хочу понять, как это работает." },
         { actor: "USER", text: "Сколько времени в день потребуется от меня?" },
@@ -268,7 +288,7 @@ async function main() {
             id: conversationId, leadId: lead.id, state: "QUALIFYING", summary: null,
             pendingInformationNeed: null, lastInboundAt: at, lastOutboundAt: at,
             awaitingUserReply: true, qualificationCompleted: false,
-            followUpEligibleAt: null, followUpCount: 0, lastFollowUpAt: null,
+            followUpEligibleAt: null, followUpCount: 0, lastFollowUpAt: null, followUpAnchorAt: null, missedAt: null,
             nextInboundSequence: 0, lastAppliedInboundSequence: 0,
             createdAt: at, updatedAt: at, closedAt: null,
           });
@@ -284,18 +304,47 @@ async function main() {
           });
         }
         for (const [index, step] of steps.entries()) {
+          if (scenario.id === "team-manager-pending-action" && index === 1) {
+            const due = await lab.advanceTime(sessionId, new Date("2026-10-04T09:00:00Z"));
+            assert.equal(due.followUp?.sent, 0, "Pending manager action does not require a customer reminder");
+            assert.equal(due.snapshot.followUp.eligibleAt, null);
+            assert.equal(due.snapshot.followUp.missedAt, null);
+          }
+          if (scenario.id === "team-silence-recovery" && index === 4) {
+            for (const hours of [24, 48]) {
+              const due = new Date(Date.parse("2026-10-03T09:03:00Z") + hours * 3_600_000);
+              const reminder = await lab.advanceTime(sessionId, due);
+              assert.equal(reminder.followUp?.sent, 1, `One contextual reminder at ${hours}h`);
+              assert.equal((await lab.advanceTime(sessionId, due)).followUp?.sent, 0, "Stage is idempotent");
+            }
+            const callsBeforeMissed = usageRecords.size;
+            const missed = await lab.advanceTime(sessionId, new Date("2026-10-06T09:03:00Z"));
+            assert(missed.snapshot.followUp.missedAt, "Two delivered reminders and continued silence become MISSED");
+            assert.equal(usageRecords.size, callsBeforeMissed, "MISSED does not spend LLM tokens");
+          }
           if (scenario.id === "follow-up-silence" && index === 1) {
-            const first = await lab.advanceTime(sessionId, new Date("2026-10-03T11:00:00Z"));
-            assert((first.followUp?.sent ?? 0) <= 1, "At most one follow-up per silence episode");
-            const second = await lab.advanceTime(sessionId, new Date("2026-10-03T11:01:00Z"));
+            const first = await lab.advanceTime(sessionId, new Date("2026-10-04T09:00:00Z"));
+            assert((first.followUp?.sent ?? 0) <= 1, "At most one follow-up per stage");
+            const second = await lab.advanceTime(sessionId, new Date("2026-10-04T09:01:00Z"));
             assert.equal(second.followUp?.created, 0, "Follow-up must not repeat");
           }
           const at = new Date(Date.parse("2026-10-03T09:00:00Z") +
-            (scenario.id === "follow-up-silence" && index === 1 ? 122 * 60_000 : index * 60_000));
+            (scenario.id === "team-silence-recovery" && index >= 4 ? 72 * 3_600_000 : 0) +
+            (scenario.id === "team-manager-pending-action" && index === 1 ? 24 * 3_600_000 : 0) +
+            (scenario.id === "follow-up-silence" && index === 1 ? (24 * 60 + 2) * 60_000 : index * 60_000));
           const result = step.actor === "MANAGER"
             ? await lab.managerMessage(sessionId, step.text, at, `turn-${index}`)
             : await lab.clientMessage(sessionId, step.text, at, `turn-${index}`);
           if (step.actor === "USER") {
+            if (scenario.id === "team-manager-pending-action") {
+              assert.equal(result.snapshot.lastProcessing?.responseFailureCode, null);
+              assert.equal(result.snapshot.followUp.awaitingUserReply, false);
+            }
+            if (scenario.id === "team-silence-recovery") {
+              assert.equal(result.snapshot.lastProcessing?.responseFailureCode, null);
+              if (index !== 4) assert.equal(result.snapshot.lastProcessing?.responseGenerationSource, "LLM");
+              if (index >= 4) assert.equal(result.snapshot.followUp.missedAt, null, "New input resumes engagement");
+            }
             const persistedLead = await persistence.leads.findByExternalIdentity("TEST_CHAT_LAB", sessionId);
             assert(persistedLead && await persistence.crm.findLeadSnapshot(persistedLead.id),
               "Every valid inbound must be accessible through the CRM repository");
@@ -322,6 +371,10 @@ async function main() {
           }
         }
         const snapshot = await lab.snapshot(sessionId);
+        if (scenario.id === "team-silence-recovery") {
+          assert.equal(snapshot.phone, "+79991234567");
+          assert.equal(notifications.requests.length, 1, "Recovered qualified phone hands off once");
+        }
         if (scenario.id === "phone-handoff-continuation" || scenario.id === "ready-contact-after-follow-on-request" || scenario.id === "ready-profile-contextual-next-step" || scenario.id === "financial-scale-recovery") {
           assert.equal(snapshot.phone, "+79991234567");
           assert.equal(notifications.requests.length, 1, "Qualified phone must hand off exactly once");

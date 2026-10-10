@@ -76,7 +76,7 @@ function conversation(leadId: string): Conversation {
     qualificationCompleted: true,
     followUpEligibleAt: null,
     followUpCount: 0,
-    lastFollowUpAt: null,
+    lastFollowUpAt: null, followUpAnchorAt: null, missedAt: null,
     nextInboundSequence: 1,
     lastAppliedInboundSequence: 1,
     createdAt: now,
@@ -209,5 +209,21 @@ describe("local CRM read model", () => {
     expect(csv).toContain('"Могу уделять 3 часа в день"');
     expect(csv).toContain('"ADDITIONAL_INCOME"');
     expect(csv).not.toContain("systemPrompt");
+  });
+
+  it("exposes MISSED separately from qualification, includes it in CSV, and keeps all ingested leads accessible", async () => {
+    await persistence.leads.insert(lead(2, { qualificationStatus: "QUALIFYING" }));
+    await persistence.conversations.insert({ ...conversation("lead-2"), qualificationCompleted: false,
+      state: "QUALIFYING", missedAt: now });
+    await persistence.leads.insert(lead(3, { qualificationStatus: "NEW" }));
+    const service = createCrmService(persistence);
+    const missed = await service.listLeads({ filter: "missed" });
+    expect(missed.records.map(record => record.leadId)).toEqual(["lead-2"]);
+    expect(missed.records[0]).toMatchObject({ engagementStatus: "MISSED", missedAt: now });
+    expect(missed.records[0]!.qualificationStatus).not.toBe("NO_FIT");
+    expect((await service.getLead("lead-2"))?.engagementStatus).toBe("MISSED");
+    expect(createCrmCsv(await service.exportLeads())).toContain('"MISSED"');
+    expect((await service.listLeads({ filter: "inbox" })).total).toBe(2);
+    expect((await service.getLead("lead-3", { includeUnqualified: true }))?.leadId).toBe("lead-3");
   });
 });

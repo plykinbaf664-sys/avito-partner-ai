@@ -7,10 +7,12 @@ import type {
 import { AvitoApiClient, AvitoApiError } from "./avito-api-client";
 import { silentLogger, type StructuredLogger } from "@/application/observability/structured-logger";
 import { ACCESS_BLOCK_CODES, type OperationalHealthRepository } from "@/application/health/operational-health";
+import type { Persistence } from "@/application/ports/repositories";
+import { refreshBeforeAvitoOutbound } from "./refresh-before-outbound";
 
 export class AvitoOutboundMessageProvider implements OutboundMessageProvider {
   constructor(private readonly client: AvitoApiClient, private readonly logger: StructuredLogger = silentLogger,
-    private readonly operations?: OperationalHealthRepository) {}
+    private readonly operations?: OperationalHealthRepository, private readonly persistence?: Persistence) {}
 
   private async observe(code: string | null) {
     try {
@@ -31,6 +33,13 @@ export class AvitoOutboundMessageProvider implements OutboundMessageProvider {
     const fields = { source: "AVITO", conversationId: message.conversationId,
       chatId: message.externalRecipientId };
     try {
+      if (this.persistence) {
+        const cancelled = await refreshBeforeAvitoOutbound(this.client, this.persistence, message, this.logger);
+        if (cancelled) {
+          this.logger.info("avito.outbound.suppressed", { ...fields, reason: cancelled });
+          return { status: "FAILED", retryable: false, errorCode: cancelled, attempted: false };
+        }
+      }
       const externalId = await this.client.sendTextMessage(
         message.externalRecipientId,
         message.text,
