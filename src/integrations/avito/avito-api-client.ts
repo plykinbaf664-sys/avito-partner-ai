@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 const AVITO_API_BASE_URL = "https://api.avito.ru";
+export const AVITO_CUSTOMER_CHAT_TYPES = ["u2i", "u2u"] as const;
 const externalIdSchema = z.union([
   z.string().min(1).max(255),
   z.number().int().nonnegative(),
@@ -194,6 +195,9 @@ export class AvitoApiClient {
     const params = new URLSearchParams({
       limit: String(Math.max(1, Math.min(100, options.limit ?? 50))),
       offset: String(Math.max(0, options.offset ?? 0)),
+      // Avito's omitted default does not include direct user conversations.
+      // Both are customer channels; a2u contains Avito service conversations.
+      chat_types: AVITO_CUSTOMER_CHAT_TYPES.join(","),
     });
     if (options.unreadOnly !== undefined) {
       params.set("unread_only", String(options.unreadOnly));

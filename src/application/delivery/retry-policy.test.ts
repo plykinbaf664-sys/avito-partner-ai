@@ -5,9 +5,16 @@ import {
   isRetryableExternalError,
   MAX_EXTERNAL_DELIVERY_ATTEMPTS,
   sanitizeExternalErrorCode,
+  externalErrorCode,
 } from "./retry-policy";
 
 describe("external delivery retry policy", () => {
+  it("extracts nested database codes without logging queries, parameters or raw messages", () => {
+    const error = new Error("SQL and private parameters", { cause:
+      Object.assign(new Error("database private details"), { code: "SQLITE_BUSY" }) });
+    expect(externalErrorCode(error)).toBe("SQLITE_BUSY");
+    expect(externalErrorCode(new Error("private text"))).toBe("Error");
+  });
   it("retries temporary failures within the bounded attempt limit", () => {
     expect(canRetryExternalDelivery({ attempts: 1, retryable: true })).toBe(true);
     expect(

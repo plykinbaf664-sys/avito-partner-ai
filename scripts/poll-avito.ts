@@ -1,6 +1,7 @@
 import { parseArgs } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
 import { createRuntimeAvitoPolling } from "../src/integrations/avito/polling-runtime";
+import { externalErrorCode } from "../src/application/delivery/retry-policy";
 
 async function main() {
   const { values } = parseArgs({ options: {
@@ -47,8 +48,9 @@ async function main() {
   }
 }
 
-main().catch(() => {
+main().catch((error: unknown) => {
   // Provider exception bodies can contain personal data: never print raw errors.
   console.error("AVITO_POLLING=FAIL reason=RUNTIME_OR_CONFIGURATION_ERROR");
+  console.error(JSON.stringify({ level: "error", event: "avito.worker.failed", errorCode: externalErrorCode(error) }));
   process.exitCode = 1;
 });

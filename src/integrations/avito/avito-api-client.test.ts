@@ -219,4 +219,22 @@ describe("Avito API client", () => {
       { id: "invalid", updatedAtUnix: null },
     ]);
   });
+
+  it("explicitly requests both item and direct customer chats on every page", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ access_token: "test-token", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(Response.json({ id: 123 }))
+      .mockImplementation(async url => {
+        const query = new URL(String(url)).searchParams;
+        return Response.json({ chats: query.get("chat_types") === "u2i,u2u"
+          ? [{ id: "u2u-direct-customer", updated: 1791647275 }] : [] });
+      });
+    const client = new AvitoApiClient({ clientId: "id", clientSecret: "secret" }, fetcher);
+    expect(await client.listChats({ limit: 100, offset: 100, unreadOnly: false }))
+      .toEqual([{ id: "u2u-direct-customer", updatedAtUnix: 1791647275 }]);
+    const query = new URL(String(fetcher.mock.calls.at(-1)![0])).searchParams;
+    expect(query.get("offset")).toBe("100");
+    expect(query.get("unread_only")).toBe("false");
+    expect(query.get("chat_types")).toBe("u2i,u2u");
+  });
 });

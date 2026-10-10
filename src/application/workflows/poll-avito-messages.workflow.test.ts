@@ -112,6 +112,57 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     expect(h.client.sendTextMessage).toHaveBeenCalledWith("chat", expect.any(String));
   });
 
+  it("reports a lease-release failure without escaping the poll or duplicating a delivered reply", async () => {
+    const h = harness();
+    const repository = persistence.pollingStates;
+    const poll = createAvitoMessagePoller({ client: h.client, persistence, processIncomingEvent: h.processIncomingEvent,
+      clock: () => current, coalescingDelayMs: 0, logger: h.logger,
+      stateRepository: { initialize: (...args) => repository.initialize(...args), acquire: (...args) => repository.acquire(...args),
+        renew: (...args) => repository.renew(...args), complete: (...args) => repository.complete(...args),
+        release: vi.fn().mockRejectedValueOnce(new Error("private query and parameters", {
+          cause: Object.assign(new Error("private details"), { code: "SQLITE_BUSY" }),
+        })).mockImplementation((...args: Parameters<typeof repository.release>) => repository.release(...args)) },
+    });
+    await expect(poll(current)).resolves.toMatchObject({ status: "FAIL", processed: 1 });
+    expect(h.logger.error).toHaveBeenCalledWith("avito.poll.lease_release_failed", expect.objectContaining({ errorCode: "SQLITE_BUSY" }));
+    current = new Date(current.getTime() + 11 * 60_000);
+    await expect(poll(current)).resolves.toMatchObject({ status: "PASS" });
+    expect(h.client.sendTextMessage).toHaveBeenCalledOnce();
+    expect(h.extractMessage).toHaveBeenCalledOnce();
+  });
+
+  it("recovers missed direct-chat history already handled by a human and answers only the next client turn", async () => {
+    const h = harness(persistence, undefined, 0, async () => {}, true);
+    const directChat = "u2u-direct-customer";
+    const first = message("direct-first", { origin: "MESSAGE_HISTORY", text: "Здравствуйте, можно подробнее?" });
+    const city = message("direct-city", { origin: "MESSAGE_HISTORY", text: "Нижний Новгород", createdAtUnix: first.createdAtUnix + 3 });
+    const human = (id: string, time: number, text: string) => message(id, {
+      authorId: "owner", direction: "out", origin: "MESSAGE_HISTORY", createdAtUnix: time, text,
+    });
+    const history = [first, human("direct-human-city", first.createdAtUnix + 2, "Какой город рассматриваете?"),
+      city, human("direct-human-budget", first.createdAtUnix + 4, "Какой бюджет планируете?")];
+    h.client.listChats.mockResolvedValue([{ id: directChat, updatedAtUnix: first.createdAtUnix + 4, lastMessage: history.at(-1)! }]);
+    h.client.listMessages.mockResolvedValue(history.slice().reverse());
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", accepted: 2 });
+    expect(h.client.sendTextMessage).not.toHaveBeenCalled();
+    const lead = await persistence.leads.findByExternalIdentity("AVITO", directChat);
+    expect(lead).not.toBeNull();
+    expect(await persistence.crm.findLeadSnapshot(lead!.id)).not.toBeNull();
+    expect((await persistence.messages.listByLeadId(lead!.id)).filter(m => m.actor === "MANAGER")).toHaveLength(2);
+
+    current = new Date(current.getTime() + 10_000);
+    const next = message("direct-budget", { origin: "MESSAGE_HISTORY", createdAtUnix: current.getTime() / 1000 - 1, text: "На запуск есть 500 тысяч" });
+    h.client.listChats.mockResolvedValue([{ id: directChat, updatedAtUnix: next.createdAtUnix, lastMessage: { ...next, origin: "CHAT_PREVIEW" } }]);
+    h.client.listMessages.mockResolvedValue([next, ...history.slice().reverse()]);
+    h.extractMessage.mockResolvedValue(extractionWithFacts({ city: "Нижний Новгород", availableCapital: 500_000, availableCapitalConfirmed: true }));
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", accepted: 1 });
+    expect(h.client.sendTextMessage).toHaveBeenCalledOnce();
+    expect(h.client.sendTextMessage).toHaveBeenLastCalledWith(directChat, expect.any(String));
+    await h.poll(current);
+    expect(h.client.sendTextMessage).toHaveBeenCalledOnce();
+    expect(h.extractMessage).toHaveBeenCalledTimes(3);
+  });
+
   it("durably defers a denied account without LLM calls and resumes exactly once after access recovery", async () => {
     const h = harness(persistence, undefined, 0, async () => {}, true);
     h.client.listChats.mockResolvedValue([{ id: "chat", updatedAtUnix: null, lastMessage: message() }]);

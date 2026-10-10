@@ -17,6 +17,7 @@ import {
 } from "drizzle-orm";
 import { drizzle, type LibSQLDatabase } from "drizzle-orm/libsql";
 import { migrate } from "drizzle-orm/libsql/migrator";
+import { setTimeout as delay } from "node:timers/promises";
 
 import type {
   ConversationRepository,
@@ -57,6 +58,15 @@ import type { OperationalHealthRepository } from "@/application/health/operation
 type Database = LibSQLDatabase<typeof schema>;
 type Transaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type DatabaseExecutor = Database | Transaction;
+
+function isSqliteBusy(error: unknown): boolean {
+  let cause = error;
+  for (let depth = 0; depth < 6 && cause instanceof Error; depth += 1) {
+    if ("code" in cause && /^(?:SQLITE_BUSY|SQLITE_LOCKED)(?:_[A-Z_]+)?$/u.test(String(cause.code))) return true;
+    cause = cause.cause;
+  }
+  return false;
+}
 
 class DrizzleLlmUsageRepository implements LlmUsageRepository {
   constructor(private readonly database: DatabaseExecutor) {}
@@ -914,7 +924,17 @@ export class SqlitePersistence implements Persistence {
     });
     await previous;
     try {
-      return await operation();
+      // The queue serializes this connection only. Application, poller and
+      // watchdog use independent connections/processes to the same SQLite file.
+      // Retry only SQLite lock contention; Drizzle rolls back failed transactions
+      // before rejection. LLM calls and delivery remain outside transactions.
+      for (let attempt = 0; ; attempt += 1) {
+        try { return await operation(); }
+        catch (error) {
+          if (!isSqliteBusy(error) || attempt >= 6) throw error;
+          await delay(25 * 2 ** attempt);
+        }
+      }
     } finally {
       release();
     }

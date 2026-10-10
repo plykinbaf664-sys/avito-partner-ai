@@ -13,7 +13,7 @@ import {
   type ProcessIncomingEventOptions,
   type ProcessIncomingEventResult,
 } from "./process-incoming-event";
-import { AvitoApiError, type AvitoApiClient, type AvitoMessage } from "@/integrations/avito/avito-api-client";
+import { AVITO_CUSTOMER_CHAT_TYPES, AvitoApiError, type AvitoApiClient, type AvitoMessage } from "@/integrations/avito/avito-api-client";
 import { AvitoInboundChannel } from "@/integrations/avito/avito-inbound-channel";
 import { generateId } from "@/shared/id";
 import { externalErrorCode } from "../delivery/retry-policy";
@@ -162,6 +162,7 @@ export function createAvitoMessagePoller({
       const since = Math.max(state.startedAt.getTime(),
         (state.lastCompletedAt?.getTime() ?? state.startedAt.getTime()) - OVERLAP_MS);
       logger.info("avito.poll.window", { source: "AVITO", accountId: account.id,
+        chatTypes: [...AVITO_CUSTOMER_CHAT_TYPES],
         chatId: chatId ?? null,
         startedAt: state.startedAt.toISOString(),
         lastCompletedAt: state.lastCompletedAt?.toISOString() ?? null,
@@ -498,10 +499,19 @@ export function createAvitoMessagePoller({
         source: "AVITO",
         code: error instanceof AvitoApiError ? error.code :
           error instanceof Error && error.message.startsWith("AVITO_POLL_") ? error.message : "POLLING_ERROR",
+        errorCode: externalErrorCode(error),
         retryable: error instanceof AvitoApiError ? error.retryable : true,
       });
     } finally {
-      if (acquired && key) await stateRepository.release(key, owner);
+      if (acquired && key) {
+        try { await stateRepository.release(key, owner); }
+        catch (error) {
+          // A cleanup failure must not mask the actual poll outcome or terminate
+          // the continuous worker. The owned lease remains bounded by its TTL.
+          result.failed += 1;
+          logger.error("avito.poll.lease_release_failed", { source: "AVITO", errorCode: externalErrorCode(error) });
+        }
+      }
       if (result.failed > 0) result.status = "FAIL";
       result.durationMs = Math.round(performance.now() - started);
       logger.info("avito.poll.completed", { ...result, source: "AVITO" });

@@ -43,8 +43,10 @@ export function isRetryableExternalError(error: unknown): boolean {
 }
 
 export function externalErrorCode(error: unknown): string {
-  if (error instanceof Error && "code" in error) {
-    return sanitizeExternalErrorCode(error.code);
+  let cause = error;
+  for (let depth = 0; depth < 6 && cause instanceof Error; depth += 1) {
+    if ("code" in cause) return sanitizeExternalErrorCode(cause.code);
+    cause = cause.cause;
   }
   return error instanceof Error
     ? sanitizeExternalErrorCode(error.name)
