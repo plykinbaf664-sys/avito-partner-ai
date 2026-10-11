@@ -56,6 +56,8 @@ Backup/rollback manifest: `/opt/avito-partner-ai-backups/qwen-migration-20261010
 
 Это доступность provider/cache, а не оценка качества полноценного клиентского диалога; качество проверено двумя указанными multi-turn eval и regression suite. Полный расширенный платный eval не повторяли.
 
+При дополнительном наблюдении после выпуска зарегистрирован один `AVITO_POLL_LEASE_LOST`, затем BUSY на оставшейся lease. Подтверждены один worker и отсутствие PROCESSING inbound. Polling остановлен, освобождена только захваченная ранее lease через owner compare-and-swap, worker запущен снова. Первые пять последующих циклов PASS (279–459 ms), новых ошибок нет, lease освобождается, operational state вернулся OK и readiness 200. События/сообщения клиентов не менялись. Причина первоначальной потери ownership не установлена: это не заявляется исправленным кодовым дефектом; приватное свидетельство сохранено в `/root/.config/avito-partner-ai/team-release-lease-observation.json`. Lease/repository код этим выпуском не менялся. Это отдельный эксплуатационный риск, который нельзя скрывать за успешными behavioral eval.
+
 Откат на предыдущую рабочую Qwen-версию `7b898f5fe8585d002da983830b518615ce0449af`:
 
 ```powershell
