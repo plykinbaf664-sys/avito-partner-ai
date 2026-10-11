@@ -22,8 +22,18 @@
 
 Четыре новых проверки показали RED до исправления: повторные предупреждения при changing symptoms/hours; ложное восстановление на DEGRADED; blackout после failed cleanup; non-idempotent same-owner acquire. После исправления focused suite PASS. Дополнительно защищены same-worker overlap, fencing другого owner и совместимость уже объявленного legacy incident. Старые regressions не удалены и не ослаблены.
 
-LLM/prompts/business logic/networking/env не меняются. Новых платных поведенческих прогонов не требуется: предыдущие две реальные траектории будут воспроизведены на release candidate без API calls.
+LLM/prompts/business logic/networking/env не меняются. Новые платные поведенческие прогоны не запускались: предыдущие две реальные траектории воспроизведены на окончательном Linux candidate без API calls (17 recorded calls, 6 fake deliveries, 1 handoff).
 
 ## Выпуск
 
-Linux checks, deployment revision, health и rollback point будут записаны после guarded rollout. Независимый watchdog остаётся включённым; реальные неисправности не скрываются, подробная диагностика сохраняется в journal и `/status`.
+Выпущен `807a3c289a7657f0885a49678319a3d81e1d104e`. Linux: typecheck, 45 файлов / 603 tests, lint, build PASS. Avito read-only smoke PASS, включая direct chats; клиентам и менеджерам тестовые сообщения не отправлялись.
+
+Backup/rollback manifest: `/opt/avito-partner-ai-backups/qwen-migration-20261011-090503/operational-release.json`. Env, схема и бизнес-данные не менялись. На planned shutdown проверено отсутствие живого polling worker и PROCESSING inbound; оставшихся lease не оказалось (cleared=0). Сохранён rollback на `0a08dd8fea4ac1787e39f612e258211f71e52df5` без восстановления старой БД.
+
+После выпуска: health/readiness HTTP 200; все operational components OK; pending/failed/unresolved inbound/outbound 0; первые 7 polling cycles PASS (384–727 ms), новых ошибок нет, lease освобождается. Watchdog с production sender вернул THROTTLED при здоровом состоянии — лишних Telegram notifications не отправлено. Синтетический production Qwen smoke: 2 SUCCESS (`qwen/qwen3.8-flash`), latency 2685/1961 ms, второй вызов cache read 2043 tokens; общая тарифная оценка $0.000496, без клиентских outbound.
+
+Независимый watchdog остаётся включённым; реальные неисправности не скрываются, подробная диагностика сохраняется в journal и `/status`. При новом настоящем инциденте после завершённого восстановления будет новое предупреждение: это требуемый переход, а не напоминание об уже открытом сбое.
+
+```powershell
+ssh -i C:\Users\User\.ssh\avito_codex root@200.169.177.129 "python3 /root/operational-release.py rollback /opt/avito-partner-ai-backups/qwen-migration-20261011-090503/operational-release.json"
+```
