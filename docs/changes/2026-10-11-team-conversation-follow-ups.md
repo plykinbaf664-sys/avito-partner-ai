@@ -43,4 +43,23 @@ Provider/model/env и selective AWG/Anthropic networking не меняются. 
 
 ## Production
 
-Результат guarded rollout и rollback manifest будут добавлены после проверки Linux candidate и promotion. Rollback сохраняет новые клиентские данные и дополнительные колонки; восстановление старой БД не требуется.
+Выпущен `9ca6b031ab3de6e9d5e0e598923e8de2611dbd34`. Linux candidate: typecheck, 45 файлов / 597 tests, lint, build PASS. На окончательном Linux-коде повторены записи двух свежих успешных Qwen eval: 17 recorded calls, 0 новых API calls, 6 fake deliveries, 1 handoff. Чтение реального Avito: 154 chats, включая 2 direct chats; authoritative history PASS, без внешних сообщений.
+
+Backup/rollback manifest: `/opt/avito-partner-ai-backups/qwen-migration-20261010-235904/operational-release.json`. Migration 0014 применена; SQLite quick_check OK. App, polling, watchdog active. После перезапуска health/readiness HTTP 200, issues пусты, pending/failed/unresolved inbound/outbound — 0; свежий успешный polling heartbeat подтверждён.
+
+Два синтетических вызова реального production provider `qwen/qwen3.8-flash` PASS (клиентам ничего не отправляли):
+
+| Вызов | Uncached input | Output | Cache creation | Cache read | Latency | Оценка USD |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1 | 28 | 56 | 2 043 | 0 | 2 327 ms | 0.000439 |
+| 2 | 28 | 50 | 0 | 2 043 | 1 947 ms | 0.000060 |
+
+Это доступность provider/cache, а не оценка качества полноценного клиентского диалога; качество проверено двумя указанными multi-turn eval и regression suite. Полный расширенный платный eval не повторяли.
+
+Откат на предыдущую рабочую Qwen-версию `7b898f5fe8585d002da983830b518615ce0449af`:
+
+```powershell
+ssh -i C:\Users\User\.ssh\avito_codex root@200.169.177.129 "python3 /root/operational-release.py rollback /opt/avito-partner-ai-backups/qwen-migration-20261010-235904/operational-release.json"
+```
+
+Rollback сохраняет новые клиентские данные и дополнительные колонки; восстановление старой БД не требуется. Перенос расписаний миграцией автоматически не обращается, чтобы не возродить старые напоминания массово. Документация может синхронизироваться отдельным commit без перезапуска собранного application code.
