@@ -131,6 +131,50 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     expect(h.extractMessage).toHaveBeenCalledOnce();
   });
 
+  it("reacquires its own unexpired lease after failed cleanup without a ten-minute polling blackout", async () => {
+    const h = harness();
+    const repository = persistence.pollingStates;
+    const poll = createAvitoMessagePoller({ client: h.client, persistence, processIncomingEvent: h.processIncomingEvent,
+      clock: () => current, coalescingDelayMs: 0, logger: h.logger,
+      stateRepository: { initialize: (...args) => repository.initialize(...args), acquire: (...args) => repository.acquire(...args),
+        renew: (...args) => repository.renew(...args), complete: (...args) => repository.complete(...args),
+        release: vi.fn().mockRejectedValueOnce(Object.assign(new Error("private lock details"), { code: "SQLITE_BUSY" }))
+          .mockImplementation((...args: Parameters<typeof repository.release>) => repository.release(...args)) },
+    });
+    expect(await poll(current)).toMatchObject({ status: "FAIL", processed: 1 });
+    current = new Date(current.getTime()+60_000);
+    expect(await poll(current)).toMatchObject({ status: "PASS" });
+    expect(h.client.sendTextMessage).toHaveBeenCalledOnce();
+    expect(h.extractMessage).toHaveBeenCalledOnce();
+    expect((await repository.initialize(key, current)).leaseOwner).toBeNull();
+  });
+
+  it("makes lease acquisition replay safe for the same owner while fencing other owners", async () => {
+    const repository = persistence.pollingStates;
+    const until = new Date(current.getTime()+600_000);
+    expect(await repository.acquire(key, "same-worker", current, until)).toBe(true);
+    expect(await repository.acquire(key, "same-worker", current, until)).toBe(true);
+    expect(await repository.acquire(key, "another-worker", current, until)).toBe(false);
+    await repository.release(key, "another-worker");
+    expect(await repository.renew(key, "same-worker", current, until)).toBe(true);
+    await repository.release(key, "same-worker");
+  });
+
+  it("does not overlap two calls to the same polling worker even when it owns the lease", async () => {
+    const h = harness();
+    let resume!: () => void;
+    let entered!: () => void;
+    const ready = new Promise<void>(resolve => { entered=resolve; });
+    const gate = new Promise<void>(resolve => { resume=resolve; });
+    h.client.listChats.mockImplementation(async () => { entered(); await gate; return [{ id: "chat", updatedAtUnix: null }]; });
+    const first = h.poll(current);
+    await ready;
+    try { expect(await h.poll(current)).toMatchObject({ status: "BUSY" }); }
+    finally { resume(); }
+    expect(await first).toMatchObject({ status: "PASS" });
+    expect(h.client.sendTextMessage).toHaveBeenCalledOnce();
+  });
+
   it("recovers missed direct-chat history already handled by a human and answers only the next client turn", async () => {
     const h = harness(persistence, undefined, 0, async () => {}, true);
     const directChat = "u2u-direct-customer";

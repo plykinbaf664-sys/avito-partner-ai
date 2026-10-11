@@ -1,4 +1,10 @@
+import { createHash } from "node:crypto";
 import type { Persistence } from "../ports/repositories";
+
+// Preserve the previous healthy fingerprint so deployed incident state survives
+// this policy change. Every other delivered fingerprint means an open incident.
+export const HEALTHY_ALERT_FINGERPRINT = createHash("sha256").update("[]").digest("hex");
+export const OUTAGE_ALERT_FINGERPRINT = createHash("sha256").update("production-incident-v1").digest("hex");
 
 export type HealthComponent = "AVITO_POLLING" | "AVITO_MESSENGER" | "AVITO_OUTBOUND" | "APPLICATION_HTTP";
 export interface HealthObservation {

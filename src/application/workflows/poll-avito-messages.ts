@@ -79,6 +79,10 @@ export function createAvitoMessagePoller({
   const channel = new AvitoInboundChannel();
   let lastAccessCheckAt = Number.NEGATIVE_INFINITY;
   let knownAccessBlocked = false;
+  // Stable process-local ownership allows cleanup/SQL retries to recover our
+  // own lease. A different worker remains fenced until release or expiry.
+  const owner = generateId();
+  let running = false;
 
   return async function pollAvitoMessages(now: Date): Promise<AvitoPollResult> {
     if (!Number.isFinite(now.getTime())) throw new Error("INVALID_POLL_TIME");
@@ -87,12 +91,20 @@ export function createAvitoMessagePoller({
       skippedOldChats: 0, historyErrors: 0, previewAccepted: 0, fetched: 0,
       accepted: 0, processed: 0, duplicates: 0, ignored: 0, failed: 0, terminalSkipped: 0,
       apiRequests: 0, durationMs: 0 };
+    if (running) {
+      result.status = "BUSY";
+      return result;
+    }
+    running = true;
     let key: string | null = null;
     let acquired = false;
-    const owner = generateId();
     const assertLease = async () => {
       const at = clock();
       if (!key || !await stateRepository.renew(key, owner, at, new Date(at.getTime() + LEASE_MS))) {
+        const observed = key ? await stateRepository.initialize(key, at).catch(() => null) : null;
+        logger.error("avito.poll.lease_lost", { source: "AVITO",
+          ownerMatches: observed ? observed.leaseOwner === owner : null,
+          leaseRemainingMs: observed?.leaseUntil ? observed.leaseUntil.getTime()-at.getTime() : null });
         throw new Error("AVITO_POLL_LEASE_LOST");
       }
     };
@@ -514,6 +526,7 @@ export function createAvitoMessagePoller({
       }
       if (result.failed > 0) result.status = "FAIL";
       result.durationMs = Math.round(performance.now() - started);
+      running = false;
       logger.info("avito.poll.completed", { ...result, source: "AVITO" });
     }
     return result;

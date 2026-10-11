@@ -145,4 +145,70 @@ describe("operational safety with real SQLite", () => {
     expect((await run(at)).alertDelivery).toBe("FAILED");
     expect((await run(new Date(at.getTime()+60_000))).alerted).toBe(true);
   });
+
+  it("keeps one outage open across changing symptoms and hours without reminder spam", async () => {
+    await persistence.telegramManagerRecipients.upsertAuthorized({ id: "manager", telegramChatId: "synthetic-chat",
+      telegramUserId: "synthetic-manager", username: null, firstName: null, isActive: true, authorizedAt: at, createdAt: at, updatedAt: at });
+    const sender = { sendMessage: vi.fn().mockResolvedValue({ status: "SENT", externalId: "alert" }) };
+    const run = (now: Date) => runProductionWatchdog({ persistence, sender, now, probeHttp: async () => true });
+    await persistence.operations.observe("AVITO_POLLING", "OK", null, at);
+    await persistence.operations.observe("AVITO_MESSENGER", "DEGRADED", "AVITO_NETWORK_ERROR", at);
+    // First stale evidence is the same outage as the later stale polling evidence.
+    await run(new Date(at.getTime()+6*60_000));
+    expect(sender.sendMessage).toHaveBeenCalledOnce();
+    await persistence.operations.observe("AVITO_MESSENGER", "BLOCKED", "AVITO_UNAUTHORIZED", new Date(at.getTime()+7*60_000));
+    await run(new Date(at.getTime()+7*60_000));
+    await run(new Date(at.getTime()+40*60_000));
+    await run(new Date(at.getTime()+3*60*60_000));
+    expect(sender.sendMessage).toHaveBeenCalledOnce();
+    const recovered = new Date(at.getTime()+3*60*60_000+60_000);
+    await persistence.operations.observe("AVITO_POLLING", "OK", null, recovered);
+    await persistence.operations.observe("AVITO_MESSENGER", "OK", null, recovered);
+    await run(recovered);
+    await run(new Date(recovered.getTime()+60_000));
+    expect(sender.sendMessage).toHaveBeenCalledTimes(2);
+    expect(sender.sendMessage.mock.calls[1][1]).toContain("восстановлена");
+    await persistence.operations.observe("AVITO_MESSENGER", "BLOCKED", "AVITO_UNAUTHORIZED", new Date(recovered.getTime()+120_000));
+    await run(new Date(recovered.getTime()+120_000));
+    expect(sender.sendMessage).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not announce recovery on a merely tolerated degraded polling observation", async () => {
+    await persistence.telegramManagerRecipients.upsertAuthorized({ id: "manager", telegramChatId: "synthetic-chat",
+      telegramUserId: "synthetic-manager", username: null, firstName: null, isActive: true, authorizedAt: at, createdAt: at, updatedAt: at });
+    const sender = { sendMessage: vi.fn().mockResolvedValue({ status: "SENT", externalId: "alert" }) };
+    const run = (now: Date) => runProductionWatchdog({ persistence, sender, now, probeHttp: async () => true });
+    await persistence.operations.observe("AVITO_POLLING", "OK", null, at);
+    await persistence.operations.observe("AVITO_MESSENGER", "BLOCKED", "AVITO_UNAUTHORIZED", at);
+    await run(at);
+    const next = new Date(at.getTime()+60_000);
+    await persistence.operations.observe("AVITO_MESSENGER", "OK", null, next);
+    await persistence.operations.observe("AVITO_POLLING", "DEGRADED", "AVITO_POLL_FAILED", next);
+    expect((await run(next)).status.ready).toBe(true);
+    expect(sender.sendMessage).toHaveBeenCalledOnce();
+    const healthy = new Date(next.getTime()+60_000);
+    await persistence.operations.observe("AVITO_POLLING", "OK", null, healthy);
+    await run(healthy);
+    expect(sender.sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves an already notified legacy incident across deployment without another outage alert", async () => {
+    await persistence.operations.observe("APPLICATION_HTTP", "OK", null, at);
+    const owner = await persistence.operations.claimAlert("APPLICATION_HTTP", "legacy-issue-specific-fingerprint", at);
+    expect(owner).not.toBeNull();
+    await persistence.operations.finishAlert("APPLICATION_HTTP", owner!, "legacy-issue-specific-fingerprint", true, at);
+    await persistence.telegramManagerRecipients.upsertAuthorized({ id: "manager", telegramChatId: "synthetic-chat",
+      telegramUserId: "synthetic-manager", username: null, firstName: null, isActive: true, authorizedAt: at, createdAt: at, updatedAt: at });
+    const sender = { sendMessage: vi.fn().mockResolvedValue({ status: "SENT", externalId: "alert" }) };
+    const next = new Date(at.getTime()+60_000);
+    await persistence.operations.observe("AVITO_POLLING", "OK", null, next);
+    await persistence.operations.observe("AVITO_MESSENGER", "BLOCKED", "AVITO_UNAUTHORIZED", next);
+    await runProductionWatchdog({ persistence, sender, now: next, probeHttp: async () => true });
+    expect(sender.sendMessage).not.toHaveBeenCalled();
+    const healthy = new Date(next.getTime()+60_000);
+    await persistence.operations.observe("AVITO_MESSENGER", "OK", null, healthy);
+    await runProductionWatchdog({ persistence, sender, now: healthy, probeHttp: async () => true });
+    expect(sender.sendMessage).toHaveBeenCalledOnce();
+    expect(sender.sendMessage.mock.calls[0][1]).toContain("восстановлена");
+  });
 });

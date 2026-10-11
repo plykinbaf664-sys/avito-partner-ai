@@ -1,7 +1,6 @@
-import { createHash } from "node:crypto";
 import type { Persistence } from "../ports/repositories";
 import type { TelegramTextSender } from "@/integrations/telegram/telegram-bot-api-client";
-import { formatOperationalStatus, readOperationalStatus } from "./operational-health";
+import { formatOperationalStatus, readOperationalStatus, HEALTHY_ALERT_FINGERPRINT, OUTAGE_ALERT_FINGERPRINT } from "./operational-health";
 
 export async function runProductionWatchdog({ persistence, sender, now = new Date(), probeHttp }: {
   persistence: Persistence; sender?: TelegramTextSender; now?: Date; probeHttp: () => Promise<boolean>;
@@ -10,12 +9,14 @@ export async function runProductionWatchdog({ persistence, sender, now = new Dat
   await persistence.operations!.observe("APPLICATION_HTTP", httpOk ? "OK" : "BLOCKED", httpOk ? null : "APPLICATION_HTTP_UNAVAILABLE", now);
   const status = await readOperationalStatus(persistence, now);
   if (!sender) return { status, alerted: false, alertDelivery: "DISABLED" };
-  // Queue size and derived polling errors can change during one billing outage.
-  // Deduplicate by its blocking cause, while still reporting all current issues.
-  const blockingIssues = status.observations.filter(row => row.state === "BLOCKED")
-    .map(row => `${row.component}:${row.errorCode ?? "UNAVAILABLE"}`);
-  const fingerprint = createHash("sha256").update(JSON.stringify(
-    (blockingIssues.length ? blockingIssues : status.issues).slice().sort())).digest("hex");
+  // Readiness tolerates an isolated degraded observation. It is not evidence
+  // of recovery: wait for fresh, actually successful component observations.
+  if (status.ready && status.observations.some(row => row.state !== "OK")) {
+    return { status, alerted: false, alertDelivery: "RECOVERY_PENDING" };
+  }
+  // Incident identity survives evolving symptoms and worker restarts. Report
+  // only the outage transition and the confirmed recovery, never timed reminders.
+  const fingerprint = status.ready ? HEALTHY_ALERT_FINGERPRINT : OUTAGE_ALERT_FINGERPRINT;
   const recipients = await persistence.telegramManagerRecipients.listActive();
   if (!recipients.length) return { status, alerted: false, alertDelivery: "NO_RECIPIENTS" };
   const owner = await persistence.operations!.claimAlert("APPLICATION_HTTP", fingerprint, now, { recovery: status.ready });

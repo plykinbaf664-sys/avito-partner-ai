@@ -20,6 +20,7 @@ export class DrizzlePollingStateRepository implements PollingStateRepository {
     const rows = await this.database.update(schema.pollingStates)
       .set({ leaseOwner: owner, leaseUntil: until })
       .where(and(eq(schema.pollingStates.key, key), or(
+        eq(schema.pollingStates.leaseOwner, owner),
         isNull(schema.pollingStates.leaseOwner), lte(schema.pollingStates.leaseUntil, now),
       ))).returning({ key: schema.pollingStates.key });
     return rows.length === 1;

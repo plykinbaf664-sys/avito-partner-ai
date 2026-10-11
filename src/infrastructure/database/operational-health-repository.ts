@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import type { HealthComponent, HealthObservation, OperationalHealthRepository } from "@/application/health/operational-health";
+import { HEALTHY_ALERT_FINGERPRINT } from "@/application/health/operational-health";
 import { generateId } from "@/shared/id";
 import * as schema from "./schema";
 
@@ -27,8 +28,9 @@ export class DrizzleOperationalHealthRepository implements OperationalHealthRepo
       WHERE component=${component} AND (alert_lease_until IS NULL OR alert_lease_until<=${at.getTime()})
       AND (last_alert_attempt_at IS NULL OR last_alert_attempt_at<=${at.getTime() - 30_000})
       AND (${!options.recovery} OR last_alert_at IS NOT NULL)
-      AND (alert_fingerprint IS NULL OR alert_fingerprint!=${fingerprint} OR
-        (${!options.recovery} AND last_alert_at<=${at.getTime() - 30 * 60_000}))
+      AND (CASE WHEN ${!!options.recovery}
+        THEN alert_fingerprint IS NOT NULL AND alert_fingerprint!=${HEALTHY_ALERT_FINGERPRINT}
+        ELSE alert_fingerprint IS NULL OR alert_fingerprint=${HEALTHY_ALERT_FINGERPRINT} END)
       RETURNING component`);
     return rows.length ? owner : null;
   }
