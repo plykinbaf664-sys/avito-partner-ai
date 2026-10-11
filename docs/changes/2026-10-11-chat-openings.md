@@ -34,3 +34,19 @@
 Обнаружение возможно только после появления чата в Avito API. Пауза считается от обнаружения, а не от открытия интерфейса клиентом. Existing Avito API не даёт общей атомарной транзакции «прочитать историю + отправить»: ручное сообщение, появившееся уже после последней проверки и во время POST, нельзя гарантированно отозвать. Проведены три проверки и local fences, но абсолютное исключение такой внешней гонки было бы недостоверным обещанием.
 
 Добавляется только таблица `chat_openings` (migration 0015); существующие бизнес-данные, networking и provider configuration не меняются. При rollback старая версия игнорирует новую таблицу, production DB не откатывается и новые сообщения не теряются.
+
+## Production rollout
+
+- Source release: `c6a2d8e35d7420998e9045054c3b13b8a5dde6f0`, commit/push выполнены. Local и isolated Linux candidate: **625 tests / 46 files PASS**, typecheck/lint/build PASS.
+- Linux recorded replay: новая trajectory 8 calls / 3 fake deliveries; прежние HUMAN+AI/24–48–72/handoff scenarios 17 calls / 6 deliveries / 1 handoff. Все PASS, **0 дополнительных live calls**. Новый scenario также воспроизведён после deploy из production checkout, только in-memory DB/fake channels.
+- Перед переключением создан consistent backup: `/opt/avito-partner-ai-backups/qwen-migration-20261011-102021/operational-release.json`. Rollback revision `b60e2a05e053a7a565931ee15626c8a53c19eeae`.
+- Migration 0015 применена; новая таблица и индекс присутствуют. Сервисы перезапущены, health/readiness HTTP 200, приложение/polling/watchdog active. В первой проверке 7 polling cycles PASS, 0 errors; pending/failed/unverified inbound и unresolved outbound — 0.
+- Activation boundary: **2026-10-11 10:20:26.107 UTC / 13:20:26.107 МСК**. Ни одного historical opening job; существующие обработанные владельцем чаты не получают приветствие. Для новой функции на момент проверки ещё нет реального клиентского события: production sends проверялись синтетическим provider smoke, controlled conversation E2E использует fake delivery.
+- Реальный Qwen smoke с production-сервера: два SUCCESS `qwen3.8-flash`, latency 2579/1650 ms, uncached input 28/28, output 62/54, cache reads 0/2043 tokens, estimated cost $0.000504 суммарно. Claude fallback отсутствует. Env/network configuration не менялись.
+- Release evidence: `/root/.config/avito-partner-ai/chat-opening-release-evidence-c6a2d8e35d74.json`.
+
+Rollback без восстановления устаревшей DB:
+
+```powershell
+ssh -i C:\Users\User\.ssh\avito_codex root@200.169.177.129 "python3 /root/operational-release.py rollback /opt/avito-partner-ai-backups/qwen-migration-20261011-102021/operational-release.json"
+```
