@@ -168,6 +168,8 @@ export interface ConversationResponsePlan {
   currentQuestionKind?: ExtractedMessage["signals"]["questionKind"];
   previousQuestionResponse?: string;
   greetingRequired?: boolean;
+  /** Verified proactive workflow; allows a semantically reviewed open invitation, not CRM questions. */
+  initialContact?: boolean;
   currentUserObjections?: string[];
   currentUncertainty?: string[];
   conversationRepairRequired?: boolean;

@@ -10,6 +10,7 @@ interface StatusRow {
   started: number;
   active: number;
   answered: number;
+  initiated: number;
   transferred: number;
   converted: number;
   awaiting_phone: number;
@@ -44,6 +45,12 @@ export class DrizzleBotStatusReadRepository implements BotStatusReadRepository {
         JOIN avito_leads l ON l.id = m.lead_id
         WHERE m.direction = 'OUTBOUND' AND m.actor = 'AI'
           AND m.delivery_status = 'SENT' AND m.sent_at <= ${until}
+          AND m.lead_id IN (SELECT lead_id FROM activity)
+          AND (m.deduplication_key IS NULL OR m.deduplication_key NOT LIKE 'chat-opening:%')
+      ), ai_openings AS (
+        SELECT m.lead_id, m.sent_at FROM messages m JOIN avito_leads l ON l.id = m.lead_id
+        WHERE m.actor = 'AI' AND m.direction = 'OUTBOUND' AND m.delivery_status = 'SENT'
+          AND m.sent_at <= ${until} AND m.deduplication_key LIKE 'chat-opening:%'
       ), handoffs AS (
         SELECT n.lead_id, min(d.sent_at) AS first_sent_at
         FROM telegram_manager_deliveries d
@@ -60,6 +67,7 @@ export class DrizzleBotStatusReadRepository implements BotStatusReadRepository {
         (SELECT count(*) FROM activity WHERE first_at >= p.since) AS started,
         (SELECT count(*) FROM activity WHERE last_at >= p.since) AS active,
         (SELECT count(DISTINCT lead_id) FROM ai_replies WHERE sent_at >= p.since) AS answered,
+        (SELECT count(DISTINCT lead_id) FROM ai_openings WHERE sent_at >= p.since) AS initiated,
         (SELECT count(*) FROM handoffs WHERE first_sent_at >= p.since) AS transferred,
         (SELECT count(*) FROM activity a JOIN handoffs h ON h.lead_id = a.lead_id
           WHERE a.first_at >= p.since) AS converted,
@@ -87,7 +95,7 @@ export class DrizzleBotStatusReadRepository implements BotStatusReadRepository {
       periods: periods.map(({ key, since }) => {
         const row = rows.find((item) => item.period === key)!;
         return { key, since, startedDialogs: row.started, activeDialogs: row.active,
-          aiAnsweredDialogs: row.answered, transferredLeads: row.transferred,
+          aiAnsweredDialogs: row.answered, aiInitiatedDialogs: row.initiated, transferredLeads: row.transferred,
           transferredNewDialogs: row.converted };
       }),
       awaitingPhone: totals.awaiting_phone, pendingHandoffs: totals.pending_handoffs,

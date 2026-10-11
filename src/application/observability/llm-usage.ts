@@ -6,7 +6,7 @@ export interface LlmCallContext {
   leadId?: string;
   conversationId?: string;
   source?: string;
-  operation?: "INBOUND" | "FOLLOW_UP" | "EVAL";
+  operation?: "INBOUND" | "FOLLOW_UP" | "CHAT_OPENING" | "EVAL";
 }
 
 export type LlmWorkflowOutcome = "USED" | "FALLBACK" | "SUPPRESSED" | "NO_REPLY" | "FAILED";

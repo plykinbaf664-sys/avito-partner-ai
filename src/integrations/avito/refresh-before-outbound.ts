@@ -17,6 +17,11 @@ export async function refreshBeforeAvitoOutbound(client: AvitoApiClient, persist
   if (!draft) throw new AvitoApiError("AVITO_OUTBOUND_DRAFT_NOT_FOUND", null, false);
   const account = await client.getAuthenticatedAccount();
   const history = await client.listMessages(request.externalRecipientId, { limit: 100, offset: 0 });
+  const opening = request.idempotencyKey === `chat-opening:${draft.conversationId}`;
+  // A first contact requires proof that nobody has spoken, including media and
+  // activity older than the newly prepared draft. Never trust chat previews.
+  if (opening && (history.length >= 100 || history.some(message => message.origin !== "MESSAGE_HISTORY" ||
+    message.authorId !== "0" && message.type !== "system"))) return "CANCELLED_BY_EXISTING_DIALOGUE";
   const accept = createIncomingEventAcceptor({ persistence, logger });
   const recordHuman = createExternalConversationMessageRecorder({ persistence, logger });
   const channel = new AvitoInboundChannel();

@@ -25,6 +25,12 @@ const avitoChatSchema = z.object({
 const avitoChatsResponseSchema = z.object({
   chats: z.array(avitoChatSchema).max(100),
 }).passthrough();
+// Optional discovery metadata fails closed independently of normal ingestion.
+const chatDiscoverySchema = z.object({
+  created: z.number().int().nonnegative(),
+  context: z.object({ type: z.literal("item"), value: z.object({ user_id: externalIdSchema }) }),
+  users: z.array(z.object({ id: externalIdSchema })).min(2).max(10),
+});
 const avitoMessageSchema = z.object({
   id: externalIdSchema,
   author_id: externalIdSchema,
@@ -62,6 +68,10 @@ export interface AvitoChat {
   id: string;
   updatedAtUnix: number | null;
   lastMessage?: AvitoMessage;
+  createdAtUnix?: number;
+  contextType?: string;
+  listingOwnerId?: string;
+  participantIds?: string[];
 }
 
 export interface AvitoMessage {
@@ -212,9 +222,15 @@ export class AvitoApiClient {
     }
     return parsed.data.chats.map((chat) => {
       const last = avitoMessageSchema.safeParse(chat.last_message);
+      const discovery = chatDiscoverySchema.safeParse(chat);
       return {
         id: stringifyId(chat.id),
         updatedAtUnix: chat.updated ?? null,
+        ...(discovery.success ? { createdAtUnix: discovery.data.created,
+          contextType: discovery.data.context.type,
+          listingOwnerId: stringifyId(discovery.data.context.value.user_id),
+          participantIds: discovery.data.users.map(user => stringifyId(user.id)),
+        } : {}),
         ...(last.success ? { lastMessage: {
           id: stringifyId(last.data.id), authorId: stringifyId(last.data.author_id),
           createdAtUnix: last.data.created, direction: last.data.direction,

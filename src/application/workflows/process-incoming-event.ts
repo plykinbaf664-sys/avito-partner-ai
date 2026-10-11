@@ -237,6 +237,7 @@ async function prepareClaimedEvent(
 export async function ensureIncomingConversation(
   repositories: RepositoryContext, input: Pick<IncomingPartnerEvent, "source" | "externalLeadId">,
   idGenerator: IdGenerator, now: Date,
+  options: { hasInbound?: boolean } = {},
 ) {
   let lead = await repositories.leads.findByExternalIdentity(
     input.source,
@@ -255,7 +256,7 @@ export async function ensureIncomingConversation(
       state: transitionConversation("NEW", "DISCOVERY"),
       summary: null,
       pendingInformationNeed: null,
-      lastInboundAt: now,
+      lastInboundAt: options.hasInbound === false ? null : now,
       lastOutboundAt: null,
       awaitingUserReply: false,
       qualificationCompleted: false,

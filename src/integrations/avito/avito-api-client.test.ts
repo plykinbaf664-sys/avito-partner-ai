@@ -3,6 +3,20 @@ import { describe, expect, it, vi } from "vitest";
 import { AvitoApiClient, AvitoApiError } from "./avito-api-client";
 
 describe("Avito API client", () => {
+  it("exposes verified own-listing discovery metadata without affecting chats with missing metadata", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ access_token: "test", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(Response.json({ id: 123 }))
+      .mockResolvedValueOnce(Response.json({ chats: [
+        { id: "new", created: 1000, context: { type: "item", value: { user_id: 123 } }, users: [{ id: 123 }, { id: 456 }] },
+        { id: "unknown", created: "bad", context: { type: "u2u" } },
+      ] }));
+    const client = new AvitoApiClient({ clientId: "id", clientSecret: "secret" }, fetcher);
+    expect(await client.listChats()).toEqual([
+      { id: "new", updatedAtUnix: null, createdAtUnix: 1000, contextType: "item", listingOwnerId: "123", participantIds: ["123", "456"] },
+      { id: "unknown", updatedAtUnix: null },
+    ]);
+  });
   it("uses client_credentials and validates a read-only account response", async () => {
     const fetcher = vi
       .fn<typeof fetch>()

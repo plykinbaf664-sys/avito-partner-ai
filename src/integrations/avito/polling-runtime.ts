@@ -12,6 +12,7 @@ import { TelegramManagerNotificationProvider } from "@/integrations/telegram/tel
 import { AvitoApiClient } from "./avito-api-client";
 import { AvitoOutboundMessageProvider } from "./avito-outbound-message-provider";
 import { createAvitoRuntimeSafety } from "@/application/health/avito-runtime-safety";
+import { createChatOpeningWorkflow } from "@/application/workflows/process-chat-openings";
 
 export async function createRuntimeAvitoPolling(options: { chatId?: string } = {}) {
   const avito = readAvitoChannelEnvironment(process.env);
@@ -46,9 +47,12 @@ export async function createRuntimeAvitoPolling(options: { chatId?: string } = {
     logger,
   });
   const safety = createAvitoRuntimeSafety(persistence, processIncomingEvent);
+  const chatOpenings = createChatOpeningWorkflow({ persistence, stateRepository: persistence.pollingStates,
+    readHistory: chatId => client.listMessages(chatId, { limit: 100, offset: 0 }),
+    generateNaturalResponse: naturalResponseGenerator, outboundProvider, logger });
   const poll = createAvitoMessagePoller({ client, persistence, chatId: options.chatId,
     stateRepository: persistence.pollingStates, processIncomingEvent: safety.processIncomingEvent,
-    observeHistoryResult: safety.observeHistoryResult, logger });
+    observeHistoryResult: safety.observeHistoryResult, chatOpenings: options.chatId ? undefined : chatOpenings, logger });
   const followUps = createDueFollowUpsProcessor({ persistence, outboundProvider,
     generateNaturalResponse: naturalResponseGenerator, logger });
   return {

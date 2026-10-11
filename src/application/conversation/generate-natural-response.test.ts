@@ -8,10 +8,59 @@ import type { ConversationResponsePlan } from "@/domain/conversation/conversatio
 import { PARTNER_KNOWLEDGE_BASE } from "@/domain/knowledge/knowledge-base";
 import { buildApprovedEconomicsContext } from "@/domain/economics/economics-calculator";
 import { createInitialLead } from "../workflows/process-incoming-event";
+import { buildChatOpeningPlan } from "../workflows/process-chat-openings";
 
 describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
+
+  it("keeps service observations separate from customer speech and semantically reviews first contact", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({ replyAction: "SEND_REPLY",
+      answerText: "Здравствуйте! Помогу разобраться с запуском бизнеса на посуточной аренде. Что хотели бы узнать?",
+      qualificationQuestion: "", interpretedQuestionKind: "NONE", nextInformationNeed: null, awaitingUserReply: true,
+      usedKnowledgeEntryIds: ["offer-overview"] }), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: createInitialLead("opening", "AVITO", "synthetic", new Date()), plan: buildChatOpeningPlan(),
+      recentMessages: [], triggerType: "CHAT_OPENED", serviceObservations: ["A buyer opened our listing chat."] });
+    expect(result.replyAction).toBe("SEND_REPLY"); expect(llm.callCount).toBe(2);
+    const context = JSON.parse(llm.requests[0].userMessage);
+    expect(context.recentMessages).toEqual([]); expect(context.currentExchange.activeUserTurn).toEqual([]);
+    expect(context.serviceObservations).toHaveLength(1); expect(context.customerHasSpoken).toBe(false);
+    expect(context.approvedFacts).toHaveLength(1);
+    expect(JSON.parse(llm.requests[1].userMessage).customerHasSpoken).toBe(false);
+  });
+
+  it("accepts a calculator-backed total followed by its component breakdown instead of mistaking rent for an extra fee", async () => {
+    const answerText = "По Москве ориентир полного запуска одного объекта — около 180 000 ₽: аренда 50 000 ₽ + расчётный залог в один месяц 50 000 ₽ + подготовка 30 000 ₽ + разовая услуга запуска 50 000 ₽. Фактический залог зависит от собственника.";
+    const llm = new FakeLLMProvider([JSON.stringify({ replyAction: "SEND_REPLY", answerText,
+      qualificationQuestion: "", interpretedQuestionKind: "BUSINESS_INFORMATION", nextInformationNeed: null,
+      usedKnowledgeEntryIds: ["pricing"] }), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { ...createInitialLead("breakdown", "TEST", "synthetic", new Date()), city: "Москва" },
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        knowledgeEntryIds: ["pricing"], unresolvedQuestions: [], currentTurnRequiresAnswer: true,
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })) },
+      recentMessages: [{ direction: "INBOUND", content: "Сколько надо на один объект в Москве?" }] });
+    expect(result.text).toBe(answerText); expect(llm.callCount).toBe(2);
+  });
+
+  it("still rejects actually charging the launch fee on top of an inclusive calculator total", async () => {
+    const bad = "Полный запуск одного объекта в Москве — 180 000 ₽, плюс ещё 50 000 ₽ за услугу запуска.";
+    const good = "Полный ориентир запуска одного объекта в Москве — около 180 000 ₽, услуга запуска уже включена. Залог в один месяц — расчётное допущение, фактический зависит от собственника.";
+    const reply = (answerText: string) => JSON.stringify({ replyAction: "SEND_REPLY", answerText,
+      qualificationQuestion: "", interpretedQuestionKind: "BUSINESS_INFORMATION", nextInformationNeed: null,
+      usedKnowledgeEntryIds: ["pricing"] });
+    const llm = new FakeLLMProvider([reply(bad), JSON.stringify({ answerIsSupported: false,
+      answersCurrentRequest: true, optionalQuestionAppropriate: true, feedback: "Комиссия уже включена в полный ориентир." }),
+      reply(good), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { ...createInitialLead("extra-fee", "TEST", "synthetic", new Date()), city: "Москва" },
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        knowledgeEntryIds: ["pricing"], unresolvedQuestions: [], currentTurnRequiresAnswer: true,
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })) },
+      recentMessages: [{ direction: "INBOUND", content: "Сколько стоит запуск одного объекта в Москве?" }] });
+    expect(result.text).toBe(good); expect(llm.callCount).toBe(4);
+  });
 
   it("repairs SEND_REPLY with an empty body instead of delivering an invalid Avito message", async () => {
     const llm = new FakeLLMProvider([JSON.stringify({ replyAction: "SEND_REPLY", text: "", nextInformationNeed: null }),

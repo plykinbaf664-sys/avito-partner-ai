@@ -6,6 +6,7 @@ export interface BotStatusPeriod {
   startedDialogs: number;
   activeDialogs: number;
   aiAnsweredDialogs: number;
+  aiInitiatedDialogs?: number;
   transferredLeads: number;
   transferredNewDialogs: number;
 }
@@ -53,6 +54,7 @@ export function formatBotStatus(snapshot: BotStatusSnapshot): string {
       `Начато диалогов: ${period.startedDialogs}`,
       `С входящими сообщениями: ${period.activeDialogs}`,
       `С ответом AI: ${period.aiAnsweredDialogs}`,
+      `Первый контакт от AI: ${period.aiInitiatedDialogs ?? 0}`,
       `Передано в Telegram: ${period.transferredLeads}`,
       `Конверсия новых диалогов: ${conversion} (${period.transferredNewDialogs}/${period.startedDialogs})`,
     ].join("\n");

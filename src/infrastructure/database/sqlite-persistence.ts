@@ -49,6 +49,7 @@ import * as schema from "./schema";
 import type { PollingStateRepository } from "@/application/ports/polling-state";
 import { crmQualifiedStatuses } from "@/application/crm/crm-record";
 import { DrizzlePollingStateRepository } from "./polling-state-repository";
+import { DrizzleChatOpeningRepository } from "./chat-opening-repository";
 import type { LlmCallRecord, LlmUsageRepository, LlmWorkflowOutcome } from "@/application/observability/llm-usage";
 import type { BotStatusReadRepository } from "@/application/analytics/bot-status";
 import { DrizzleBotStatusReadRepository } from "./bot-status-repository";
@@ -830,6 +831,7 @@ class DrizzleIncomingEventRepository implements IncomingEventRepository {
 
 function createRepositoryContext(database: DatabaseExecutor): RepositoryContext {
   return {
+    chatOpenings: new DrizzleChatOpeningRepository(database),
     botStatus: new DrizzleBotStatusReadRepository(database),
     leads: new DrizzleLeadRepository(database),
     conversations: new DrizzleConversationRepository(database),
@@ -870,6 +872,7 @@ function serializeRepository<T extends object>(
 }
 
 export class SqlitePersistence implements Persistence {
+  readonly chatOpenings: RepositoryContext["chatOpenings"];
   readonly operations: OperationalHealthRepository;
   readonly botStatus: BotStatusReadRepository;
   readonly llmUsage: LlmUsageRepository;
@@ -892,6 +895,7 @@ export class SqlitePersistence implements Persistence {
     const repositories = createRepositoryContext(database);
     const serialize = <Result>(operation: () => Promise<Result>) =>
       this.serialize(operation);
+    this.chatOpenings = serializeRepository(repositories.chatOpenings, serialize);
     this.llmUsage = serializeRepository(new DrizzleLlmUsageRepository(database), serialize);
     this.pollingStates = serializeRepository(new DrizzlePollingStateRepository(database), serialize);
     this.operations = serializeRepository(new DrizzleOperationalHealthRepository(database), serialize);

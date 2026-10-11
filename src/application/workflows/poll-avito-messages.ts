@@ -13,7 +13,7 @@ import {
   type ProcessIncomingEventOptions,
   type ProcessIncomingEventResult,
 } from "./process-incoming-event";
-import { AVITO_CUSTOMER_CHAT_TYPES, AvitoApiError, type AvitoApiClient, type AvitoMessage } from "@/integrations/avito/avito-api-client";
+import { AVITO_CUSTOMER_CHAT_TYPES, AvitoApiError, type AvitoApiClient, type AvitoMessage, type AvitoChat } from "@/integrations/avito/avito-api-client";
 import { AvitoInboundChannel } from "@/integrations/avito/avito-inbound-channel";
 import { generateId } from "@/shared/id";
 import { externalErrorCode } from "../delivery/retry-policy";
@@ -58,6 +58,7 @@ export function createAvitoMessagePoller({
   waitForCoalescing = (milliseconds: number) =>
     new Promise<void>((resolve) => setTimeout(resolve, milliseconds)),
   observeHistoryResult,
+  chatOpenings,
 }: {
   client: Pick<AvitoApiClient, "getAuthenticatedAccount" | "listChats" | "listMessages">;
   persistence: Persistence;
@@ -72,6 +73,9 @@ export function createAvitoMessagePoller({
   coalescingDelayMs?: number;
   waitForCoalescing?: (milliseconds: number) => Promise<void>;
   observeHistoryResult?: (errorCode: string | null) => Promise<void>;
+  chatOpenings?: { start(accountId: string, now: Date): Promise<void>;
+    observe(chat: AvitoChat, accountId: string, now: Date): Promise<void>;
+    processDue(now: Date, assertLease: () => Promise<void>): Promise<void> };
 }) {
   const chatId = requestedChatId === undefined ? undefined : z.string().trim().min(1).max(255).parse(requestedChatId);
   const accept = createIncomingEventAcceptor({ persistence, logger, now: clock });
@@ -169,6 +173,7 @@ export function createAvitoMessagePoller({
       }
       // Reload only after acquiring the lease: another poll may have just completed.
       const state = await stateRepository.initialize(key, now);
+      await chatOpenings?.start(account.id, now);
       if (persistence.operations && (await persistence.operations.list()).some(
         row => row.component === "AVITO_MESSENGER" && row.state === "BLOCKED")) knownAccessBlocked = true;
       const since = Math.max(state.startedAt.getTime(),
@@ -209,6 +214,7 @@ export function createAvitoMessagePoller({
           seenChats.add(chat.id);
           result.chats += 1;
           if (chatId && chat.id !== chatId) continue;
+          await chatOpenings?.observe(chat, account.id, now);
           accessProbeChatId ??= chat.id;
           const chatSince = Math.min(since, pendingChatSince.get(chat.id) ?? since);
           // Never stop chat pagination based on ordering of the chat list.
@@ -494,6 +500,9 @@ export function createAvitoMessagePoller({
         }
       }
 
+      if (!knownAccessBlocked && result.failed === 0 && !chatId) {
+        await chatOpenings?.processDue(clock(), assertLease);
+      }
       // Do not move the recovery boundary during a known account denial merely
       // because this throttled cycle had no history read to attempt.
       if (knownAccessBlocked && result.failed === 0) result.failed += 1;

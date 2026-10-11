@@ -15,6 +15,7 @@ import { createIncomingEventProcessor } from "./process-incoming-event";
 import { createIncomingEventAcceptor } from "./accept-incoming-event";
 import { createAvitoMessagePoller } from "./poll-avito-messages";
 import { createAvitoRuntimeSafety } from "../health/avito-runtime-safety";
+import { createChatOpeningWorkflow } from "./process-chat-openings";
 
 const extraction: ExtractMessageResult = {
   extraction: {
@@ -110,6 +111,34 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     expect(messages.map((m) => m.direction)).toEqual(["INBOUND", "OUTBOUND"]);
     expect(messages[1]).toMatchObject({ deliveryStatus: "SENT", externalMessageId: "out-1" });
     expect(h.client.sendTextMessage).toHaveBeenCalledWith("chat", expect.any(String));
+  });
+
+  it("opens a service-only new chat once and processes its first real reply through the existing pipeline", async () => {
+    const h = harness();
+    h.client.listMessages.mockResolvedValue([{ ...message("notice"), authorId: "0", type: "system", origin: "MESSAGE_HISTORY" }]);
+    const born = current.getTime()/1000+1;
+    h.client.listChats.mockResolvedValue([{ id: "chat", updatedAtUnix: null, createdAtUnix: born,
+      contextType: "item", listingOwnerId: "owner", participantIds: ["owner", "customer"] }]);
+    const openingBrain = vi.fn().mockResolvedValue({ replyAction: "SEND_REPLY", text: "Здравствуйте! Что хотели бы узнать о запуске?",
+      nextInformationNeed: null, awaitingUserReply: true, model: "fake", inputTokens: 0, outputTokens: 0 });
+    const chatOpenings = createChatOpeningWorkflow({ persistence, stateRepository: persistence.pollingStates,
+      generateNaturalResponse: openingBrain, clock: () => current,
+      readHistory: chatId => h.client.listMessages(chatId, { limit: 100, offset: 0 }),
+      outboundProvider: new AvitoOutboundMessageProvider(h.client as unknown as AvitoApiClient) });
+    const poll = createAvitoMessagePoller({ client: h.client, persistence, stateRepository: persistence.pollingStates,
+      processIncomingEvent: h.processIncomingEvent, chatOpenings, coalescingDelayMs: 0, clock: () => current });
+    expect((await poll(current)).status).toBe("PASS"); // Activation before the new chat exists.
+    current = new Date(current.getTime()+10_000); await poll(current);
+    expect(openingBrain).not.toHaveBeenCalled();
+    current = new Date(current.getTime()+120_000); expect((await poll(current)).status).toBe("PASS");
+    expect(openingBrain).toHaveBeenCalledTimes(1); expect(h.extractMessage).not.toHaveBeenCalled();
+    const lead = (await persistence.leads.findByExternalIdentity("AVITO", "chat"))!;
+    expect((await persistence.messages.listByLeadId(lead.id)).map(m => m.actor)).toEqual(["AI"]);
+    current = new Date(current.getTime()+10_000);
+    h.client.listMessages.mockResolvedValue([message("first-real", { createdAtUnix: current.getTime()/1000, origin: "MESSAGE_HISTORY" })]);
+    expect((await poll(current)).processed).toBe(1);
+    expect(h.extractMessage).toHaveBeenCalledTimes(1); expect(openingBrain).toHaveBeenCalledTimes(1);
+    expect((await persistence.messages.listByLeadId(lead.id)).map(m => m.actor)).toEqual(["AI", "USER", "AI"]);
   });
 
   it("reports a lease-release failure without escaping the poll or duplicating a delivered reply", async () => {

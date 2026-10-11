@@ -345,6 +345,19 @@ export const telegramBotUpdates = sqliteTable("telegram_bot_updates", {
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
 });
 
+export const chatOpenings = sqliteTable("chat_openings", {
+  conversationId: text("conversation_id").primaryKey().references(() => conversations.id, { onDelete: "cascade" }),
+  leadId: text("lead_id").notNull().references(() => leads.id, { onDelete: "cascade" }),
+  chatCreatedAt: integer("chat_created_at", { mode: "timestamp_ms" }).notNull(),
+  eligibleAt: integer("eligible_at", { mode: "timestamp_ms" }).notNull(),
+  status: text("status").$type<import("@/application/ports/chat-openings").ChatOpening["status"]>().notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  leaseOwner: text("lease_owner"),
+  leaseUntil: integer("lease_until", { mode: "timestamp_ms" }),
+  reason: text("reason"),
+  response: text("response", { mode: "json" }).$type<import("@/application/ports/chat-openings").ChatOpening["response"]>(),
+}, table => [index("chat_openings_due_idx").on(table.status, table.eligibleAt), uniqueIndex("chat_openings_lead_unique").on(table.leadId)]);
+
 export const operationalHealth = sqliteTable("operational_health", {
   component: text("component").$type<import("@/application/health/operational-health").HealthComponent>().primaryKey(),
   state: text("state").$type<"OK" | "DEGRADED" | "BLOCKED">().notNull(),

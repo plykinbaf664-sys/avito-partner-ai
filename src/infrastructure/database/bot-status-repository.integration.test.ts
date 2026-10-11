@@ -14,6 +14,16 @@ describe("Telegram bot status aggregates", () => {
   beforeEach(async () => { db = await SqlitePersistence.createMigrated("file::memory:"); });
   afterEach(() => db.close());
 
+  it("counts proactive openings separately from actual inbound conversations and AI answers", async () => {
+    await lead("opened", null); await message("hello", "opened", today, true);
+    const opening = (await db.messages.findById("hello"))!;
+    await db.messages.update({ ...opening, deduplicationKey: "chat-opening:c-opened" });
+    const snapshot = await db.botStatus.snapshot(now);
+    expect(snapshot.periods[0]).toMatchObject({ startedDialogs: 0, activeDialogs: 0,
+      aiAnsweredDialogs: 0, aiInitiatedDialogs: 1 });
+    expect(formatBotStatus(snapshot)).toContain("Первый контакт от AI: 1");
+  });
+
   async function lead(id: string, first: Date | null, source = "AVITO", patch: Partial<Lead> = {}) {
     const createdAt = first ?? today;
     await db.leads.insert({ ...createInitialLead(id, source, `external-${id}`, createdAt),
