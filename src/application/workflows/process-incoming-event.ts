@@ -1131,6 +1131,8 @@ export function createIncomingEventProcessor({
               ? String(error.recoveryFailureCode) : null,
             reviewFailureCode: error instanceof Error && "reviewFailureCode" in error
               ? String(error.reviewFailureCode) : null,
+            reviewedTurnKind: error instanceof Error && "reviewedTurnKind" in error
+              ? String(error.reviewedTurnKind) : null,
           });
         }
       }
@@ -1678,6 +1680,7 @@ export function createIncomingEventProcessor({
         totalProcessingLatencyMs: completed.totalProcessingLatencyMs,
       });
       logger.info("conversation.turn", {
+        reviewedTurnKind: responseLlm?.reviewedTurnKind ?? null,
         conversationId: completed.conversation.id,
         latestInboundId: input.messageId,
         triggerType: "USER_INBOUND",

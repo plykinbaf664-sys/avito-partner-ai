@@ -90,6 +90,48 @@ describe("isolated Test Chat Lab workflow", () => {
   });
   afterEach(() => persistence.close());
 
+  it("continues after a manager's question despite a wrong requires-answer signal, then answers the real next request", async () => {
+    const extractor = new FakeLLMProvider([
+      extractionReply({ city: "Москва" }, { previousQuestionResponse: "ANSWERED",
+        questionKind: "NONE", requiresSubstantiveAnswer: true }, "QUALIFICATION_INFORMATION"),
+      extractionReply({ calculationUnits: 1 }, { previousQuestionResponse: "CHANGED_TOPIC",
+        questionKind: "BUSINESS_INFORMATION", requiresSubstantiveAnswer: true,
+        questions: ["А сколько потребуется на один объект?"], knowledgeEntryIds: ["pricing"] }, "QUESTION"),
+    ]);
+    const reviewed = (currentTurnKind: string) => JSON.stringify({ currentTurnKind,
+      answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+      additionalRequestInAnswer: false, answerWithoutAdditionalRequest: "", feedback: "" });
+    const brain = new FakeLLMProvider([
+      JSON.stringify({ answerText: "По Москве работаем.", qualificationQuestion: "Какую цель хотите решить этим бизнесом?",
+        nextInformationNeed: "GOAL", conversationAction: "DISCOVER", interpretedQuestionKind: "NONE",
+        qualificationMoveDecision: "ADVANCE", usedKnowledgeEntryIds: ["supported-cities"] }), reviewed("CONTRIBUTION"),
+      JSON.stringify({ answerText: "Для одного объекта в Москве ориентир полного запуска — 180 000 ₽, включая разовую услугу запуска. Залог в один месяц — расчётное допущение, фактическая сумма зависит от собственника.",
+        qualificationQuestion: "", interpretedQuestionKind: "BUSINESS_INFORMATION",
+        nextInformationNeed: null, usedKnowledgeEntryIds: ["pricing"] }), reviewed("REQUEST"),
+    ]);
+    const outbound = new FakeOutboundProvider();
+    const notifications = new FakeManagerNotificationProvider();
+    const lab = createTestChatLabService({ persistence, llmProvider: extractor, conversationLlmProvider: brain,
+      outboundProvider: outbound, managerNotificationProvider: notifications });
+    await lab.managerMessage("contribution-regression", "В каком городе рассматриваете запуск?", at(0), "manager-city");
+    const city = await lab.clientMessage("contribution-regression", "Москва", at(0.01), "city");
+    expect(city.snapshot.lastProcessing?.responseGenerationSource).toBe("LLM");
+    expect(city.snapshot.lastProcessing?.responseFailureCode).toBeNull();
+    expect(city.snapshot.lastProcessing?.outboundMessage).toContain("цель");
+    const economics = await lab.clientMessage("contribution-regression", "А сколько потребуется на один объект?", at(0.02), "cost");
+    expect(economics.snapshot.lastProcessing?.responseGenerationSource).toBe("LLM");
+    expect(economics.snapshot.lastProcessing?.responseFailureCode).toBeNull();
+    expect(economics.snapshot.lastProcessing?.outboundMessage).toContain("180 000");
+    expect(economics.snapshot.lastProcessing?.outboundMessage).not.toMatch(/каком городе/iu);
+    expect(outbound.requests).toHaveLength(2);
+    expect(notifications.requests).toHaveLength(0);
+    expect(extractor.callCount).toBe(2);
+    expect(brain.callCount).toBe(4);
+    const lead = await persistence.leads.findByExternalIdentity(TEST_CHAT_LAB_SOURCE, "contribution-regression");
+    expect(lead?.city).toBe("Москва");
+    expect(lead?.qualificationStatus).not.toBe("NO_FIT");
+  });
+
   it("uses separate extraction and conversation providers in the same real workflow", async () => {
     const extractor = new FakeLLMProvider([extractionReply({}, {
       questions: ["Как искать клиентов?"], requiresSubstantiveAnswer: true,
