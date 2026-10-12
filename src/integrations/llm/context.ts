@@ -10,7 +10,7 @@ export function factorLlmContext(request: LlmTextRequest, options: { literalConv
   if (suffix) context.applicationValidationFeedback = suffix;
   const stable: Record<string, unknown> = {};
   for (const key of [...request.cache.stableFields].sort()) {
-    if (key !== "approvedFacts" && key !== "APPROVED_KNOWLEDGE") throw new Error("INVALID_CACHE_FIELD");
+    if (key !== "approvedFacts" && key !== "APPROVED_KNOWLEDGE" && key !== "APPROVED_CITY_NAMES") throw new Error("INVALID_CACHE_FIELD");
     if (key in context) { stable[key] = context[key]; delete context[key]; }
   }
   if (context.economicsContext != null && context.availableEconomics != null &&

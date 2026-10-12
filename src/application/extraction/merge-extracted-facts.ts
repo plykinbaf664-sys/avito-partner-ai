@@ -2,6 +2,7 @@ import type { ExtractedMessage } from "../../domain/extraction/extracted-message
 import type { Lead, LeadFactPatch } from "../../domain/lead/lead";
 import { assessLeadSegment } from "../../domain/lead/lead-segment";
 import { evaluateServiceability } from "../../domain/lead/serviceability";
+import { canonicalApprovedCity } from "../../domain/lead/approved-geography";
 import { normalizePhoneNumber } from "../../domain/lead/phone-number";
 import {
   MAX_EXTRACTED_MONEY,
@@ -182,6 +183,7 @@ export function mergeExtractedFacts(
 
   const withServiceability = {
     ...merged,
+    city: merged.city === null ? null : canonicalApprovedCity(merged.city) ?? merged.city,
     serviceability: evaluateServiceability(merged.city),
   };
   const segment = assessLeadSegment(withServiceability);

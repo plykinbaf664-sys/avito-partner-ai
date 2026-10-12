@@ -90,6 +90,40 @@ describe("isolated Test Chat Lab workflow", () => {
   });
   afterEach(() => persistence.close());
 
+  it("repairs a region-qualified city, persists canonical geography, then answers a side question without another city request", async () => {
+    const extractor = Object.assign(new FakeLLMProvider([
+      extractionReply({ city: "Химки, Подмосковье" }, { previousQuestionResponse: "ANSWERED", questionKind: "NONE" }),
+      extractionReply({ city: "Химки" }, { previousQuestionResponse: "ANSWERED", questionKind: "NONE" }),
+      extractionReply({}, { questions: ["Сколько часов в день придётся уделять запуску?"],
+        requiresSubstantiveAnswer: true, questionKind: "BUSINESS_INFORMATION", knowledgeEntryIds: ["partner-time"] }, "QUESTION"),
+    ]), { promptProfile: "compact-v1" as const });
+    const reviewed = (kind: string) => JSON.stringify({ currentTurnKind: kind, answerIsSupported: true,
+      answersCurrentRequest: true, optionalQuestionAppropriate: true, additionalRequestInAnswer: false,
+      answerWithoutAdditionalRequest: "", feedback: "" });
+    const brain = Object.assign(new FakeLLMProvider([
+      JSON.stringify({ answerText: "В Химках работаем.", qualificationQuestion: "Какую цель ставите перед запуском?",
+        nextInformationNeed: "GOAL", interpretedQuestionKind: "NONE", usedKnowledgeEntryIds: ["supported-cities"] }), reviewed("CONTRIBUTION"),
+      JSON.stringify({ answerText: "На этапе запуска ориентир — около 3–4 часов в день на просмотры, договоры и решения.",
+        qualificationQuestion: "", nextInformationNeed: null, interpretedQuestionKind: "BUSINESS_INFORMATION",
+        usedKnowledgeEntryIds: ["partner-time"] }), reviewed("REQUEST"),
+    ]), { promptProfile: "compact-v1" as const });
+    const outbound = new FakeOutboundProvider();
+    const notifications = new FakeManagerNotificationProvider();
+    const lab = createTestChatLabService({ persistence, llmProvider: extractor, conversationLlmProvider: brain,
+      outboundProvider: outbound, managerNotificationProvider: notifications });
+    await lab.managerMessage("qualified-location", "Какой город рассматриваете для запуска?", at(0), "manager-city");
+    const city = await lab.clientMessage("qualified-location", "Химки, Подмосковье", at(0.01), "city");
+    expect(city.snapshot.lead).toMatchObject({ city: "Химки", serviceability: "SUPPORTED" });
+    const stored = await persistence.leads.findByExternalIdentity(TEST_CHAT_LAB_SOURCE, "qualified-location");
+    expect(stored?.qualificationReason).not.toContain("REGION_NEEDS_REVIEW");
+    const side = await lab.clientMessage("qualified-location", "Сколько часов в день придётся уделять запуску?", at(0.02), "time");
+    expect(side.snapshot.lead).toMatchObject({ city: "Химки", serviceability: "SUPPORTED" });
+    expect(side.snapshot.lastProcessing?.responseFailureCode).toBeNull();
+    expect(outbound.requests).toHaveLength(2);
+    expect(outbound.requests[1].text).toContain("3–4");
+    expect(notifications.requests).toHaveLength(0);
+  });
+
   it("continues after a manager's question despite a wrong requires-answer signal, then answers the real next request", async () => {
     const extractor = new FakeLLMProvider([
       extractionReply({ city: "Москва" }, { previousQuestionResponse: "ANSWERED",

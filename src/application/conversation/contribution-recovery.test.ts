@@ -30,6 +30,23 @@ const review = (overrides = {}) => JSON.stringify({ answerIsSupported: true,
   currentTurnKind: "CONTRIBUTION", ...overrides });
 
 describe("semantic recovery of customer contributions", () => {
+  it("provides independent geographic policy to semantic review, even when the plan omits it", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ answerText: "Возможность запуска в этом городе нужно уточнить.",
+        qualificationQuestion: "Какую цель Вы ставите перед запуском?", nextInformationNeed: "GOAL",
+        interpretedQuestionKind: "NONE", usedKnowledgeEntryIds: ["supported-cities"] }), review(),
+    ]);
+    await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { ...createInitialLead("geography", "TEST", "synthetic", new Date()), city: "Тверь" },
+      plan: { ...plan, currentTurnRequiresAnswer: false, groundedAnswerRequired: false },
+      recentMessages: [{ direction: "OUTBOUND", actor: "MANAGER", content: "Какой город рассматриваете?" },
+        { direction: "INBOUND", actor: "USER", content: "Тверь" }],
+    });
+    expect(JSON.parse(llm.requests[1].userMessage)).toMatchObject({
+      serviceabilityStatus: "NEEDS_REVIEW", currentFacts: { serviceability: "NEEDS_REVIEW" },
+    });
+  });
+
   it("lets reviewed conversation understanding override a mistaken mandatory-answer flag", async () => {
     const llm = new FakeLLMProvider([contribution, review()]);
     const result = await createNaturalResponseGenerator({ llmProvider: llm })({

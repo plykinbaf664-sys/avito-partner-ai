@@ -1,0 +1,223 @@
+{
+  "schemaVersion": 1,
+  "release": "0dab031dca7ca64e0d6e8a351015ba2327b11f32",
+  "provider": "qwen",
+  "model": "qwen3.8-flash",
+  "purpose": "Permanent regression/eval memory of five synthetic contextual contributions. Behavioral expectations are authoritative; recorded outputs are observations, not expected wording.",
+  "fixtureMethod": "Manager history plus explicit prior structured facts; one real new inbound per independent in-memory Test Chat Lab case.",
+  "productionTouched": false,
+  "realChannelSends": 0,
+  "totals": {
+    "cases": 5,
+    "passed": 4,
+    "failed": 1,
+    "calls": 16,
+    "estimatedCostMicrousd": 14376,
+    "inputTokens": 20872,
+    "outputTokens": 13310,
+    "cacheCreationInputTokens": 21576,
+    "cacheReadInputTokens": 42199
+  },
+  "scenarios": [
+    {
+      "id": "city-answer",
+      "manager": "Какой город Вам подходит для запуска?",
+      "user": "Химки, подмосковье",
+      "priorFacts": {},
+      "expectedFacts": {
+        "city": "Химки",
+        "serviceability": "SUPPORTED"
+      },
+      "behavioralGoal": "Accept city and advance naturally without asking city again.",
+      "observed": {
+        "verdict": "FAIL",
+        "answer": "Химки — у нас подтверждённый город, отлично. Подскажите, какая цель у Вас запуском — дополнительный доход, смена деятельности, или пока изучаете возможности?",
+        "checks": {
+          "noFallback": true,
+          "modelReply": true,
+          "oneReply": true,
+          "noPrematureHandoff": true,
+          "notRejected": true,
+          "expectedFacts": false
+        },
+        "city": "Химки, Подмосковье",
+        "serviceability": "NEEDS_REVIEW",
+        "qualificationStatus": "BORDERLINE",
+        "qualificationReason": "REGION_NEEDS_REVIEW",
+        "calls": 3,
+        "llmLatencyMs": 28241,
+        "stages": [
+          "EXTRACTION",
+          "GENERATION",
+          "REVIEW"
+        ]
+      },
+      "manualReview": "FAIL: approved city with geographical qualifier was not canonicalized; reply says supported while persisted serviceability=NEEDS_REVIEW and qualification=BORDERLINE/REGION_NEEDS_REVIEW."
+    },
+    {
+      "id": "contextual-capital",
+      "manager": "Для шести объектов в Москве расчётный ориентир запуска — 830 000 ₽. Какой общий капитал Вы готовы вложить?",
+      "user": "Миллион двести",
+      "priorFacts": {
+        "city": "Москва",
+        "startingUnits": 6
+      },
+      "expectedFacts": {
+        "city": "Москва",
+        "availableCapital": 1200000,
+        "availableCapitalConfirmed": true,
+        "startingUnits": 6
+      },
+      "behavioralGoal": "Interpret shorthand capital, recognize it covers the same six-object calculation, avoid false rejection and repeated budget question.",
+      "observed": {
+        "verdict": "PASS",
+        "answer": "Отлично, 1 200 000 ₽ с запасом покрывает запуск шести объектов в Москве (ориентировочно 830 000 ₽), при этом остаётся около 370 000 ₽ на операционные расходы и подушку. Когда планируете запуститься — есть ли конкретный месяц или пока в целом рассматриваете?",
+        "checks": {
+          "noFallback": true,
+          "modelReply": true,
+          "oneReply": true,
+          "noPrematureHandoff": true,
+          "notRejected": true,
+          "expectedFacts": true
+        },
+        "city": "Москва",
+        "serviceability": "SUPPORTED",
+        "qualificationStatus": "NEEDS_MORE_INFO",
+        "qualificationReason": "SEGMENT_UNDETERMINED",
+        "calls": 3,
+        "llmLatencyMs": 47594,
+        "stages": [
+          "EXTRACTION",
+          "GENERATION",
+          "REVIEW"
+        ]
+      },
+      "manualReview": "PASS: shorthand resolved to 1200000, six units retained, 830000 launch and 370000 reserve calculated correctly, no false rejection or repeated capital question."
+    },
+    {
+      "id": "uncertain-scale",
+      "manager": "По Москве при Вашем капитале 350 000 ₽ можно выбрать небольшой старт. Со скольких объектов хотели бы начать?",
+      "user": "Пока не знаю, хочу сначала попробовать",
+      "priorFacts": {
+        "city": "Москва",
+        "availableCapital": 350000,
+        "availableCapitalConfirmed": true,
+        "capitalScope": "TOTAL_LIMIT"
+      },
+      "expectedFacts": {
+        "city": "Москва",
+        "startingUnits": null,
+        "availableCapital": 350000
+      },
+      "behavioralGoal": "Accept uncertainty; do not invent an exact selected scale, reject the lead or repeat the scale question. Ground any recommendation in calculator.",
+      "observed": {
+        "verdict": "PASS",
+        "answer": "Понятно, начать с одного объекта — разумный способ попробовать формат и посмотреть на практике. Для Москвы при аренде около 50 000 ₽ запуск одного объекта вместе с услугой компании и подготовкой — порядка 180 000 ₽, у Вас остаётся запас.",
+        "checks": {
+          "noFallback": true,
+          "modelReply": true,
+          "oneReply": true,
+          "noPrematureHandoff": true,
+          "notRejected": true,
+          "expectedFacts": true
+        },
+        "city": "Москва",
+        "serviceability": "SUPPORTED",
+        "qualificationStatus": "NEEDS_MORE_INFO",
+        "qualificationReason": "LAUNCH_INTENT_UNKNOWN",
+        "calls": 3,
+        "llmLatencyMs": 39684,
+        "stages": [
+          "EXTRACTION",
+          "GENERATION",
+          "REVIEW"
+        ]
+      },
+      "manualReview": "PASS: uncertainty accepted, one-unit trial recommendation with correct 180000 orientation, selected startingUnits remains null; no repeated scale question. Answer could invite a next step more naturally, but supplies substantive advice."
+    },
+    {
+      "id": "city-correction",
+      "manager": "Тогда Москву записал. Как скоро хотели бы запуститься?",
+      "user": "Нет, я ошибся: Волгоград",
+      "priorFacts": {
+        "city": "Москва",
+        "availableCapital": 400000,
+        "availableCapitalConfirmed": true,
+        "capitalScope": "TOTAL_LIMIT"
+      },
+      "expectedFacts": {
+        "city": "Волгоград",
+        "availableCapital": 400000,
+        "availableCapitalConfirmed": true,
+        "launchTiming": null
+      },
+      "behavioralGoal": "Apply correction over old city, preserve capital, do not invent launch timing or repeat city.",
+      "observed": {
+        "verdict": "PASS",
+        "answer": "Понял, записал Волгоград — он в списке подтверждённых городов, тут всё в порядке.",
+        "checks": {
+          "noFallback": true,
+          "modelReply": true,
+          "oneReply": true,
+          "noPrematureHandoff": true,
+          "notRejected": true,
+          "expectedFacts": true
+        },
+        "city": "Волгоград",
+        "serviceability": "SUPPORTED",
+        "qualificationStatus": "NEEDS_MORE_INFO",
+        "qualificationReason": "SEGMENT_UNDETERMINED",
+        "calls": 3,
+        "llmLatencyMs": 44979,
+        "stages": [
+          "EXTRACTION",
+          "GENERATION",
+          "REVIEW"
+        ]
+      },
+      "manualReview": "PASS: correction overrides Moscow, capital retained, no fabricated launch timing or repeated city. Review removed a repeated timing question; resulting answer confirms correction and supported geography, though sales continuation is weak."
+    },
+    {
+      "id": "referential-time",
+      "manager": "Сколько часов в день сможете уделять проекту?",
+      "user": "А сколько нужно?",
+      "priorFacts": {
+        "city": "Москва",
+        "availableCapital": 500000,
+        "availableCapitalConfirmed": true,
+        "capitalScope": "TOTAL_LIMIT"
+      },
+      "expectedFacts": {
+        "city": "Москва",
+        "availableCapital": 500000,
+        "hasFreeTime": null
+      },
+      "behavioralGoal": "Answer the required time of approximately 3–4 hours per day; do not interpret as a money or scale question or infer time availability.",
+      "observed": {
+        "verdict": "PASS",
+        "answer": "Ориентир на этапе запуска — около 3–4 часов в день: поехать на объект, заключить договор, принять ключевые решения. После запуска основную работу (объявления, брони, гости, клининг) ведёт команда компании, и ваше участие сводится к эпизодическим визитам при нестандартных ситуациях.",
+        "checks": {
+          "noFallback": true,
+          "modelReply": true,
+          "oneReply": true,
+          "noPrematureHandoff": true,
+          "notRejected": true,
+          "expectedFacts": true
+        },
+        "city": "Москва",
+        "serviceability": "SUPPORTED",
+        "qualificationStatus": "NEEDS_MORE_INFO",
+        "qualificationReason": "SEGMENT_UNDETERMINED",
+        "calls": 4,
+        "llmLatencyMs": 74440,
+        "stages": [
+          "EXTRACTION",
+          "EXTRACTION",
+          "GENERATION",
+          "REVIEW"
+        ]
+      },
+      "manualReview": "PASS: answers required time of 3-4 hours/day and duties, preserves unknown actual availability, no repeated time question. Extraction schema retry succeeded; no conversation repair or technical fallback."
+    }
+  ]
+}
