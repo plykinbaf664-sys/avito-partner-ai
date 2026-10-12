@@ -15,6 +15,53 @@ describe("operational safety with real SQLite", () => {
   const input = { source: "AVITO", externalEventId: "new-inbound", externalLeadId: "synthetic-chat",
     messageId: "new-inbound", text: "Здравствуйте, интересует сотрудничество", receivedAt: at };
 
+  async function authorizeTwoManagers() {
+    for (const id of ["available", "unavailable"]) await persistence.telegramManagerRecipients.upsertAuthorized({
+      id, telegramChatId: id, telegramUserId: id, username: null, firstName: null, isActive: true,
+      authorizedAt: at, createdAt: at, updatedAt: at });
+    await persistence.operations.observe("AVITO_POLLING", "OK", null, at);
+    await persistence.operations.observe("AVITO_MESSENGER", "BLOCKED", "AVITO_UNAUTHORIZED", at);
+  }
+
+  it("retries only failed recipients and sends recovery only to recipients who saw the outage", async () => {
+    await authorizeTwoManagers();
+    const sender = { sendMessage: vi.fn().mockImplementation(async (chat: string) => chat === "available"
+      ? { status: "SENT", externalId: "alert" } : { status: "FAILED", retryable: true, errorCode: "TELEGRAM_NETWORK_ERROR" }) };
+    const run = (now: Date) => runProductionWatchdog({ persistence, sender, now, probeHttp: async () => true });
+    await run(at);
+    await run(new Date(at.getTime() + 60_000));
+    expect(sender.sendMessage.mock.calls.filter(([chat]) => chat === "available")).toHaveLength(1);
+    const healthy = new Date(at.getTime() + 120_000);
+    await persistence.operations.observe("AVITO_MESSENGER", "OK", null, healthy);
+    await persistence.operations.observe("AVITO_POLLING", "OK", null, healthy);
+    await run(healthy);
+    expect(sender.sendMessage.mock.calls.filter(([chat]) => chat === "available")).toHaveLength(2);
+    expect(sender.sendMessage.mock.calls.filter(([chat, text]) => chat === "unavailable" && text.includes("восстановлена"))).toHaveLength(0);
+    expect(sender.sendMessage.mock.calls.filter(([chat]) => chat === "available")[1][1]).toContain("восстановлена");
+  });
+
+  it("continues delivering to other recipients after a thrown send and deduplicates across independent watchdogs", async () => {
+    await authorizeTwoManagers();
+    const sender = { sendMessage: vi.fn().mockImplementation(async (chat: string) => {
+      if (chat === "available") throw new Error("private transport details");
+      return { status: "SENT", externalId: "alert" };
+    }) };
+    await Promise.all([1, 2].map(() => runProductionWatchdog({ persistence, sender, now: at, probeHttp: async () => true })));
+    expect(sender.sendMessage.mock.calls.filter(([chat]) => chat === "unavailable")).toHaveLength(1);
+    await runProductionWatchdog({ persistence, sender, now: new Date(at.getTime()+60_000), probeHttp: async () => true });
+    expect(sender.sendMessage.mock.calls.filter(([chat]) => chat === "unavailable")).toHaveLength(1);
+  });
+
+  it("backs off a permanently inaccessible recipient without repeating a delivered alert", async () => {
+    await authorizeTwoManagers();
+    const sender = { sendMessage: vi.fn().mockImplementation(async (chat: string) => chat === "available"
+      ? { status: "SENT", externalId: "alert" } : { status: "FAILED", retryable: false, errorCode: "TELEGRAM_HTTP_403" }) };
+    for (let minute=0; minute<5; minute++) await runProductionWatchdog({ persistence, sender,
+      now: new Date(at.getTime()+minute*60_000), probeHttp: async () => true });
+    expect(sender.sendMessage.mock.calls.filter(([chat]) => chat === "available")).toHaveLength(1);
+    expect(sender.sendMessage.mock.calls.filter(([chat]) => chat === "unavailable")).toHaveLength(1);
+  });
+
   it("keeps blocked inbound visible in CRM without spending processing attempts, and resumes after recovery", async () => {
     const process = vi.fn().mockResolvedValue({} as ProcessIncomingEventResult);
     const safety = createAvitoRuntimeSafety(persistence, process, () => at);

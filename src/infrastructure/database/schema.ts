@@ -372,6 +372,23 @@ export const operationalHealth = sqliteTable("operational_health", {
   alertLeaseUntil: integer("alert_lease_until", { mode: "timestamp_ms" }),
 });
 
+// One independent notification state per authorized manager. Delivery failure
+// never resets the acknowledgements of other recipients.
+export const operationalAlertDeliveries = sqliteTable("operational_alert_deliveries", {
+  id: text("id").primaryKey(),
+  component: text("component").notNull(),
+  recipientId: text("recipient_id").notNull().references(() => telegramManagerRecipients.id),
+  alertFingerprint: text("alert_fingerprint"),
+  lastAlertAt: integer("last_alert_at", { mode: "timestamp_ms" }),
+  lastAttemptAt: integer("last_attempt_at", { mode: "timestamp_ms" }),
+  nextAttemptAt: integer("next_attempt_at", { mode: "timestamp_ms" }),
+  failures: integer("failures").notNull().default(0),
+  lastErrorCode: text("last_error_code"),
+  externalMessageId: text("external_message_id"),
+  leaseOwner: text("lease_owner"),
+  leaseUntil: integer("lease_until", { mode: "timestamp_ms" }),
+}, table => [uniqueIndex("operational_alert_recipient_unique").on(table.component, table.recipientId)]);
+
 export const llmCalls = sqliteTable("llm_calls", {
   id: text("id").primaryKey(),
   requestId: text("request_id").notNull(),

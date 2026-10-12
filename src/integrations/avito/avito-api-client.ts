@@ -1,4 +1,15 @@
 import { z } from "zod";
+import type { StructuredLogger } from "@/application/observability/structured-logger";
+
+type AvitoOperation = "TOKEN" | "ACCOUNT" | "LIST_CHATS" | "LIST_MESSAGES" | "SEND_MESSAGE" | "WEBHOOK";
+interface AvitoClientConfig {
+  clientId: string;
+  clientSecret: string;
+  timeoutMs?: number;
+  /** One bounded retry of GET only. Writes retain delivery reconciliation. */
+  readRetries?: 0 | 1;
+  logger?: StructuredLogger;
+}
 
 const AVITO_API_BASE_URL = "https://api.avito.ru";
 export const AVITO_CUSTOMER_CHAT_TYPES = ["u2i", "u2u"] as const;
@@ -135,20 +146,12 @@ const stringifyId = (value: string | number): string => String(value);
 export class AvitoApiClient {
   private cachedToken: { token: string; expiresAt: number } | null = null;
   private cachedAccount: AvitoAccount | null = null;
-  private readonly config: {
-    clientId: string;
-    clientSecret: string;
-    timeoutMs?: number;
-  };
+  private readonly config: AvitoClientConfig;
   private readonly fetcher: typeof fetch;
   private readonly now: () => number;
 
   constructor(
-    config: {
-      clientId: string;
-      clientSecret: string;
-      timeoutMs?: number;
-    },
+    config: AvitoClientConfig,
     fetcher: typeof fetch = fetch,
     now: () => number = () => Date.now(),
   ) {
@@ -167,7 +170,7 @@ export class AvitoApiClient {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body,
-    });
+    }, "TOKEN");
     const payload = await safeResponsePayload(response);
     if (!response.ok) throw classifyHttpError(response.status, payload);
     const parsed = avitoTokenSchema.safeParse(payload);
@@ -215,6 +218,7 @@ export class AvitoApiClient {
     const payload = await this.authenticatedJson(
       `/messenger/v2/accounts/${encodeURIComponent(account.id)}/chats?${params}`,
       { method: "GET" },
+      "LIST_CHATS",
     );
     const parsed = avitoChatsResponseSchema.safeParse(payload);
     if (!parsed.success) {
@@ -253,6 +257,7 @@ export class AvitoApiClient {
     const payload = await this.authenticatedJson(
       `/messenger/v3/accounts/${encodeURIComponent(account.id)}/chats/${encodeURIComponent(chatId)}/messages/?${params}`,
       { method: "GET" },
+      "LIST_MESSAGES",
     );
     const parsed = avitoMessagesResponseSchema.safeParse(payload);
     if (!parsed.success) {
@@ -290,6 +295,7 @@ export class AvitoApiClient {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "text", message: { text } }),
       },
+      "SEND_MESSAGE",
     );
     const parsed = avitoSentMessageSchema.safeParse(payload);
     if (!parsed.success) {
@@ -307,14 +313,14 @@ export class AvitoApiClient {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url: webhookUrl }),
-    });
+    }, "WEBHOOK");
   }
 
   private async getOwnAccountDetails(accessToken: string): Promise<AvitoAccount> {
     const response = await this.request(`${AVITO_API_BASE_URL}/core/v1/accounts/self`, {
       method: "GET",
       headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    }, "ACCOUNT");
     const payload = await safeResponsePayload(response);
     if (!response.ok) throw classifyHttpError(response.status, payload);
     const parsed = avitoAccountSchema.safeParse(payload);
@@ -340,13 +346,13 @@ export class AvitoApiClient {
     return token.accessToken;
   }
 
-  private async authenticatedJson(path: string, init: RequestInit): Promise<unknown> {
+  private async authenticatedJson(path: string, init: RequestInit, operation: AvitoOperation): Promise<unknown> {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const token = await this.accessToken(attempt === 1);
       const response = await this.request(`${AVITO_API_BASE_URL}${path}`, {
         ...init,
         headers: { ...init.headers, Authorization: `Bearer ${token}` },
-      });
+      }, operation);
       const payload = await safeResponsePayload(response);
       if (response.status === 401 && attempt === 0) {
         this.cachedToken = null;
@@ -359,14 +365,32 @@ export class AvitoApiClient {
     throw new AvitoApiError("AVITO_UNAUTHORIZED", 401, false);
   }
 
-  private async request(url: string, init: RequestInit): Promise<Response> {
-    try {
-      return await this.fetcher(url, {
-        ...init,
-        signal: AbortSignal.timeout(this.config.timeoutMs ?? 10_000),
+  private async request(url: string, init: RequestInit, operation: AvitoOperation): Promise<Response> {
+    const attempts = init.method === "GET" ? 1 + (this.config.readRetries ?? 0) : 1;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      let response: Response | undefined;
+      try {
+        response = await this.fetcher(url, {
+          ...init,
+          signal: AbortSignal.timeout(this.config.timeoutMs ?? 10_000),
+        });
+      } catch { /* Network details can contain URLs or credentials. */ }
+      const transient = !response || response.status >= 500;
+      if (!transient || attempt === attempts) {
+        if (!response || !response.ok) this.config.logger?.error("avito.api.failed", {
+          operation, attempt, status: response?.status ?? null,
+          errorCode: response ? `AVITO_HTTP_${response.status}` : "AVITO_NETWORK_ERROR",
+        });
+        if (!response) throw new AvitoApiError("AVITO_NETWORK_ERROR", null, true);
+        return response;
+      }
+      this.config.logger?.info("avito.api.retry", {
+        operation, attempt, status: response?.status ?? null,
+        errorCode: response ? `AVITO_HTTP_${response.status}` : "AVITO_NETWORK_ERROR",
       });
-    } catch {
-      throw new AvitoApiError("AVITO_NETWORK_ERROR", null, true);
+      await response?.body?.cancel().catch(() => undefined);
+      await new Promise(resolve => setTimeout(resolve, 500 + Math.floor(Math.random() * 500)));
     }
+    throw new AvitoApiError("AVITO_NETWORK_ERROR", null, true);
   }
 }

@@ -109,7 +109,7 @@ export function createAvitoMessagePoller({
         logger.error("avito.poll.lease_lost", { source: "AVITO",
           ownerMatches: observed ? observed.leaseOwner === owner : null,
           leaseRemainingMs: observed?.leaseUntil ? observed.leaseUntil.getTime()-at.getTime() : null });
-        throw new Error("AVITO_POLL_LEASE_LOST");
+        throw Object.assign(new Error("AVITO_POLL_LEASE_LOST"), { code: "AVITO_POLL_LEASE_LOST" });
       }
     };
     const attempted = new Set<string>();
@@ -510,7 +510,7 @@ export function createAvitoMessagePoller({
         await assertLease();
         if (!await stateRepository.complete(key, owner, clock(),
           new Date(Math.max(now.getTime(), state.lastCompletedAt?.getTime() ?? 0)))) {
-          throw new Error("AVITO_POLL_LEASE_LOST");
+          throw Object.assign(new Error("AVITO_POLL_LEASE_LOST"), { code: "AVITO_POLL_LEASE_LOST" });
         }
       }
     } catch (error) {

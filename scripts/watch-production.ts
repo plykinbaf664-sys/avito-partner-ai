@@ -17,8 +17,10 @@ async function main() {
         return response.ok && (await response.json()).status === "ok";
       } });
     console.log(JSON.stringify({ event: "production.watchdog", ready: result.status.ready, issues: result.status.issues,
-      backlog: result.status.backlog, alertDelivery: result.alertDelivery }));
-    if (result.alertDelivery === "FAILED") process.exitCode = 1;
+      backlog: result.status.backlog, alertDelivery: result.alertDelivery,
+      delivered: "delivered" in result ? result.delivered : 0,
+      deliveryErrors: "deliveryErrors" in result ? result.deliveryErrors : [] }));
+    if (result.alertDelivery === "FAILED" || result.alertDelivery === "PARTIAL") process.exitCode = 1;
   } finally { persistence.close(); }
 }
 main().catch(() => { console.error("PRODUCTION_WATCHDOG_FAILED"); process.exitCode = 1; });

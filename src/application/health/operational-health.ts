@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Persistence } from "../ports/repositories";
+import type { ProviderDeliveryResult } from "../ports/channels";
 
 // Preserve the previous healthy fingerprint so deployed incident state survives
 // this policy change. Every other delivered fingerprint means an open incident.
@@ -20,6 +21,8 @@ export interface OperationalHealthRepository {
   list(): Promise<HealthObservation[]>;
   claimAlert(component: HealthComponent, fingerprint: string, at: Date, options?: { recovery?: boolean }): Promise<string | null>;
   finishAlert(component: HealthComponent, owner: string, fingerprint: string, sent: boolean, at: Date): Promise<void>;
+  claimRecipientAlert(component: HealthComponent, recipientId: string, fingerprint: string, at: Date, options?: { recovery?: boolean }): Promise<string | null>;
+  finishRecipientAlert(component: HealthComponent, recipientId: string, owner: string, fingerprint: string, delivery: ProviderDeliveryResult, at: Date): Promise<void>;
   backlog(at: Date): Promise<{ pendingInbound: number; oldestPendingAt: number | null; failedInbound: number;
     failedOutbound: number; unresolvedOutbound: number; unverifiedInbound: number }>;
 }

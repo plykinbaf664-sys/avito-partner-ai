@@ -29,6 +29,8 @@ export async function createRuntimeAvitoPolling(options: { chatId?: string } = {
   const client = new AvitoApiClient({
     clientId: avito.clientId,
     clientSecret: avito.clientSecret,
+    readRetries: 1,
+    logger,
   });
   const naturalResponseGenerator = createNaturalResponseGenerator({ llmProvider: conversationProvider });
   const outboundProvider = new AvitoOutboundMessageProvider(client, logger, persistence.operations, persistence);

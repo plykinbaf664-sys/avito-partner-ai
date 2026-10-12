@@ -1,6 +1,8 @@
 import type { Persistence } from "../ports/repositories";
 import type { TelegramTextSender } from "@/integrations/telegram/telegram-bot-api-client";
 import { formatOperationalStatus, readOperationalStatus, HEALTHY_ALERT_FINGERPRINT, OUTAGE_ALERT_FINGERPRINT } from "./operational-health";
+import type { ProviderDeliveryResult } from "../ports/channels";
+import { createHash } from "node:crypto";
 
 export async function runProductionWatchdog({ persistence, sender, now = new Date(), probeHttp }: {
   persistence: Persistence; sender?: TelegramTextSender; now?: Date; probeHttp: () => Promise<boolean>;
@@ -19,18 +21,25 @@ export async function runProductionWatchdog({ persistence, sender, now = new Dat
   const fingerprint = status.ready ? HEALTHY_ALERT_FINGERPRINT : OUTAGE_ALERT_FINGERPRINT;
   const recipients = await persistence.telegramManagerRecipients.listActive();
   if (!recipients.length) return { status, alerted: false, alertDelivery: "NO_RECIPIENTS" };
-  const owner = await persistence.operations!.claimAlert("APPLICATION_HTTP", fingerprint, now, { recovery: status.ready });
-  if (!owner) return { status, alerted: false, alertDelivery: "THROTTLED" };
-  let sent = true;
-  try {
-    for (const recipient of recipients) {
-      const active = await persistence.telegramManagerRecipients.findByChatId(recipient.telegramChatId);
-      if (!active?.isActive) continue;
-      const result = await sender.sendMessage(recipient.telegramChatId,
+  let delivered = 0;
+  const deliveryErrors: Array<{ recipientRef: string; errorCode: string; retryable: boolean }> = [];
+  for (const recipient of recipients) {
+    const active = await persistence.telegramManagerRecipients.findByChatId(recipient.telegramChatId);
+    if (!active?.isActive) continue;
+    const owner = await persistence.operations!.claimRecipientAlert("APPLICATION_HTTP", recipient.id, fingerprint, now, { recovery: status.ready });
+    if (!owner) continue;
+    let result: ProviderDeliveryResult;
+    try {
+      result = await sender.sendMessage(recipient.telegramChatId,
         (status.ready ? "✅ Работа автоответов восстановлена\n\n" : "🚨 Сбой production avito-partner-ai\n\n") + formatOperationalStatus(status));
-      if (result.status !== "SENT") sent = false;
+    } catch { result = { status: "FAILED", retryable: true, errorCode: "TELEGRAM_NETWORK_ERROR" }; }
+    await persistence.operations!.finishRecipientAlert("APPLICATION_HTTP", recipient.id, owner, fingerprint, result, now);
+    if (result.status === "SENT") delivered += 1;
+    else {
+      deliveryErrors.push({ recipientRef: createHash("sha256").update(recipient.id).digest("hex").slice(0,16),
+        errorCode: /^[A-Z0-9_]{1,100}$/u.test(result.errorCode) ? result.errorCode : "TELEGRAM_DELIVERY_ERROR", retryable: result.retryable });
     }
-  } catch { sent = false; }
-  await persistence.operations!.finishAlert("APPLICATION_HTTP", owner, fingerprint, sent, now);
-  return { status, alerted: sent, alertDelivery: sent ? "SENT" : "FAILED" };
+  }
+  return { status, alerted: delivered > 0, delivered, deliveryErrors,
+    alertDelivery: deliveryErrors.length ? delivered ? "PARTIAL" : "FAILED" : delivered ? "SENT" : "THROTTLED" };
 }

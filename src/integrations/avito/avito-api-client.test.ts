@@ -3,6 +3,61 @@ import { describe, expect, it, vi } from "vitest";
 import { AvitoApiClient, AvitoApiError } from "./avito-api-client";
 
 describe("Avito API client", () => {
+  it("retries a transient read once with safe operation diagnostics", async () => {
+    vi.useFakeTimers();
+    try {
+      const logger = { info: vi.fn(), error: vi.fn() };
+      const fetcher = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json({ private: "do-not-log" }, { status: 500 }))
+        .mockResolvedValueOnce(Response.json({ id: "private-account" }));
+      const client = new AvitoApiClient({ clientId: "id", clientSecret: "secret", readRetries: 1, logger }, fetcher);
+      const pending = expect(client.getOwnAccount("private-token")).resolves.toMatchObject({ idPresent: true });
+      await vi.runAllTimersAsync();
+      await pending;
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(logger.info).toHaveBeenCalledWith("avito.api.retry", expect.objectContaining({ operation: "ACCOUNT", status: 500, attempt: 1 }));
+      expect(JSON.stringify(logger.info.mock.calls)).not.toMatch(/private|secret|do-not-log/);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([500, 402, 429])("bounds HTTP %s read attempts without hiding final failures", async status => {
+    vi.useFakeTimers();
+    try {
+      const fetcher = vi.fn<typeof fetch>().mockImplementation(async () => Response.json({}, { status }));
+      const client = new AvitoApiClient({ clientId: "id", clientSecret: "secret", readRetries: 1 }, fetcher);
+      const pending = client.getOwnAccount("token").catch(error => error);
+      await vi.runAllTimersAsync();
+      expect(await pending).toMatchObject({ status });
+      expect(fetcher).toHaveBeenCalledTimes(status === 500 ? 2 : 1);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("recovers a GET network failure once and never logs the transport exception", async () => {
+    vi.useFakeTimers();
+    try {
+      const logger = { info: vi.fn(), error: vi.fn() };
+      const fetcher = vi.fn<typeof fetch>()
+        .mockRejectedValueOnce(new Error("private-url-and-secret"))
+        .mockResolvedValueOnce(Response.json({ id: 123 }));
+      const client = new AvitoApiClient({ clientId: "id", clientSecret: "secret", readRetries: 1, logger }, fetcher);
+      const pending = expect(client.getOwnAccount("token")).resolves.toMatchObject({ idPresent: true });
+      await vi.runAllTimersAsync(); await pending;
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(JSON.stringify(logger.info.mock.calls)).not.toContain("private-url-and-secret");
+      expect(logger.info).toHaveBeenCalledWith("avito.api.retry", expect.objectContaining({ operation: "ACCOUNT", status: null, errorCode: "AVITO_NETWORK_ERROR" }));
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("never retries a POST after a transient HTTP failure", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ access_token: "token", token_type: "Bearer", expires_in: 3600 }))
+      .mockResolvedValueOnce(Response.json({ id: 123 }))
+      .mockResolvedValueOnce(Response.json({}, { status: 500 }));
+    const client = new AvitoApiClient({ clientId: "id", clientSecret: "secret", readRetries: 1 }, fetcher);
+    await expect(client.sendTextMessage("chat", "message")).rejects.toMatchObject({ code: "AVITO_HTTP_500" });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
   it("exposes verified own-listing discovery metadata without affecting chats with missing metadata", async () => {
     const fetcher = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ access_token: "test", token_type: "Bearer", expires_in: 3600 }))

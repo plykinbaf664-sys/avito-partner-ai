@@ -113,6 +113,13 @@
       "when": 1791712499378,
       "tag": "0015_fair_master_chief",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1791794769781,
+      "tag": "0016_recipient_operational_alerts",
+      "breakpoints": true
     }
   ]
 }

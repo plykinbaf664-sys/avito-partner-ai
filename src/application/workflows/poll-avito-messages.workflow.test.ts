@@ -141,6 +141,25 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     expect((await persistence.messages.listByLeadId(lead.id)).map(m => m.actor)).toEqual(["AI", "USER", "AI"]);
   });
 
+  it("fences a lost polling lease, preserves the cursor and recovers once without duplicates", async () => {
+    const h = harness();
+    h.client.listChats.mockImplementationOnce(async () => {
+      const state = await persistence.pollingStates.initialize(key, current);
+      await persistence.pollingStates.release(key, state.leaseOwner!);
+      return [{ id: "chat", updatedAtUnix: null }];
+    });
+    expect(await h.poll(current)).toMatchObject({ status: "FAIL", processed: 0 });
+    expect(h.extractMessage).not.toHaveBeenCalled();
+    expect(h.client.sendTextMessage).not.toHaveBeenCalled();
+    expect((await persistence.pollingStates.initialize(key, current)).lastCompletedAt).toBeNull();
+    expect(h.logger.error).toHaveBeenCalledWith("avito.poll.failed",
+      expect.objectContaining({ code: "AVITO_POLL_LEASE_LOST", errorCode: "AVITO_POLL_LEASE_LOST" }));
+    current = new Date(current.getTime()+60_000);
+    expect(await h.poll(current)).toMatchObject({ status: "PASS", processed: 1 });
+    await h.poll(current);
+    expect(h.client.sendTextMessage).toHaveBeenCalledOnce();
+  });
+
   it("reports a lease-release failure without escaping the poll or duplicating a delivered reply", async () => {
     const h = harness();
     const repository = persistence.pollingStates;

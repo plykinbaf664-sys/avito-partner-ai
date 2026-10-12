@@ -4,6 +4,7 @@ import type { HealthComponent, HealthObservation, OperationalHealthRepository } 
 import { HEALTHY_ALERT_FINGERPRINT } from "@/application/health/operational-health";
 import { generateId } from "@/shared/id";
 import * as schema from "./schema";
+import type { ProviderDeliveryResult } from "@/application/ports/channels";
 
 export class DrizzleOperationalHealthRepository implements OperationalHealthRepository {
   constructor(private readonly database: LibSQLDatabase<typeof schema>) {}
@@ -39,6 +40,42 @@ export class DrizzleOperationalHealthRepository implements OperationalHealthRepo
       alert_fingerprint=CASE WHEN ${sent} THEN ${fingerprint} ELSE alert_fingerprint END,
       last_alert_at=CASE WHEN ${sent} THEN ${at.getTime()} ELSE last_alert_at END
       WHERE component=${component} AND alert_lease_owner=${owner}`);
+  }
+  async claimRecipientAlert(component: HealthComponent, recipientId: string, _fingerprint: string, at: Date, options: { recovery?: boolean } = {}): Promise<string | null> {
+    // Seed all existing recipients together exactly once, preserving a legacy
+    // delivered incident on rollout. Newly authorized managers start separately.
+    await this.database.run(sql`INSERT OR IGNORE INTO operational_alert_deliveries
+      (id,component,recipient_id,alert_fingerprint,last_alert_at)
+      SELECT ${component}||':'||r.id,${component},r.id,h.alert_fingerprint,h.last_alert_at
+      FROM telegram_manager_recipients r LEFT JOIN operational_health h ON h.component=${component}
+      WHERE r.is_active=1 AND NOT EXISTS(SELECT 1 FROM operational_alert_deliveries WHERE component=${component})`);
+    await this.database.run(sql`INSERT OR IGNORE INTO operational_alert_deliveries(id,component,recipient_id)
+      VALUES(${component + ":" + recipientId},${component},${recipientId})`);
+    const owner = generateId();
+    const rows = await this.database.all(sql`UPDATE operational_alert_deliveries
+      SET lease_owner=${owner},lease_until=${at.getTime()+120_000},last_attempt_at=${at.getTime()}
+      WHERE component=${component} AND recipient_id=${recipientId}
+      AND (lease_until IS NULL OR lease_until<=${at.getTime()})
+      AND (next_attempt_at IS NULL OR next_attempt_at<=${at.getTime()}
+        OR EXISTS(SELECT 1 FROM telegram_manager_recipients r WHERE r.id=${recipientId} AND r.authorized_at>last_attempt_at))
+      AND (last_attempt_at IS NULL OR last_attempt_at<=${at.getTime()-30_000})
+      AND (CASE WHEN ${!!options.recovery}
+        THEN last_alert_at IS NOT NULL AND alert_fingerprint IS NOT NULL AND alert_fingerprint!=${HEALTHY_ALERT_FINGERPRINT}
+        ELSE alert_fingerprint IS NULL OR alert_fingerprint=${HEALTHY_ALERT_FINGERPRINT} END)
+      RETURNING id`);
+    return rows.length ? owner : null;
+  }
+  async finishRecipientAlert(component: HealthComponent, recipientId: string, owner: string, fingerprint: string, delivery: ProviderDeliveryResult, at: Date) {
+    const sent = delivery.status === "SENT";
+    const code = !sent ? /^[A-Z0-9_]{1,100}$/u.test(delivery.errorCode) ? delivery.errorCode : "TELEGRAM_DELIVERY_ERROR" : null;
+    await this.database.run(sql`UPDATE operational_alert_deliveries SET lease_owner=NULL,lease_until=NULL,
+      alert_fingerprint=CASE WHEN ${sent} THEN ${fingerprint} ELSE alert_fingerprint END,
+      last_alert_at=CASE WHEN ${sent} THEN ${at.getTime()} ELSE last_alert_at END,
+      external_message_id=CASE WHEN ${sent} THEN ${sent ? delivery.externalId : null} ELSE external_message_id END,
+      last_error_code=${code},failures=CASE WHEN ${sent} THEN 0 ELSE min(failures+1,1000) END,
+      next_attempt_at=CASE WHEN ${sent} THEN NULL ELSE ${at.getTime()}+
+        CASE WHEN ${!sent && !delivery.retryable} THEN 21600000 ELSE min(1800000,60000*(1 << min(failures,5))) END END
+      WHERE component=${component} AND recipient_id=${recipientId} AND lease_owner=${owner}`);
   }
   async backlog(at: Date) {
     const [row] = await this.database.all<{pendingInbound:number;oldestPendingAt:number|null;failedInbound:number;failedOutbound:number;unresolvedOutbound:number;unverifiedInbound:number}>(sql`
