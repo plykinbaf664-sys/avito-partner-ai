@@ -73,26 +73,45 @@ not included in production model context.
 
 ## Release status and procedure
 
-**Not deployed as of this report.** SSH to `200.169.177.129:22` repeatedly times
-out before authentication, including an unrestricted retry. TCP 80/443 also
-time out from this workstation. The selected local route is AmneziaVPN; these
-facts do not establish whether the server itself, filtering or the route is
-responsible. Keys remain unchanged. Current production health is unverified.
+**Deployed and verified on 16 October 2026:** production revision
+`096b82de789a5a7e3bcd37c892fa7ca438102e50`. SSH became accessible after the owner
+replenished the server account; uptime showed a recent boot. Earlier TCP
+timeouts occurred before authentication, without a key rejection.
 
-When access is restored, inspect actual production HEAD/status/health and use
-the existing guarded operational release helper: isolated Linux candidate,
-server technical checks, recorded fake-channel E2E, read-only Avito coverage,
-reviewed evidence, backup and rollback point, stopped-worker check, additive
-migration before restart, health/readiness, real production Qwen provider smoke
-and polling verification. No blind `git pull` plus service restart. Existing
-env, credentials, Qwen provider and selective networking are unchanged.
+All technical checks passed again in an isolated Linux candidate. All 164
+reviewed runtime hashes matched. One recorded HUMAN/contact/post-handoff Lab
+E2E replay passed (12 recorded responses, no paid agent evaluation or real
+channel sends). Read-only Avito coverage passed. Two real Qwen network probes
+passed before switching; the second read 2,043 cached tokens.
 
-Rollback must use the **new release's** generated manifest:
+The guarded helper backed up the DB/env/build, stopped old workers, applied
+the additive migration and restarted services. Health/readiness are HTTP 200;
+app, polling and watchdog timer are active. Thirteen subsequent polling cycles
+passed, with no failed/history-error cycles. Current readiness reports no
+pending, unverified, failed or unresolved delivery backlog. No new failed Avito
+inbound was observed after the release. DB integrity and the new column passed.
+Env bytes match the backup; provider/network configuration was unchanged.
+
+Production telemetry confirms two successful `qwen3.8-flash` provider probes:
+28 uncached input tokens each, 2,043 cache-read tokens each, outputs 75/61,
+latency 3,240/2,134 ms, estimated cost 72/66 micro-USD. These are synthetic
+provider probes, not customer conversation latency. Four total deployment
+probes cost an estimated $0.000629. No Claude calls were recorded in the release
+window. Operational alert delivery records show zero new alert recipients and
+zero failures in that window. These checks establish the observed state, not a
+guarantee against future external outages.
+
+Private evidence is retained on the server in
+`/root/.config/avito-partner-ai/contact-release-evidence-096b82de789a.json` and
+`contact-production-verified-096b82de789a.json`. The earlier local evaluation
+JSON's NOT_DEPLOYED status describes when that evidence was recorded.
+
+Rollback to `807e8be` from an SSH session on the server:
 
 ```sh
-python3 /root/operational-release.py rollback /absolute/new-backup/operational-release.json
+python3 /root/operational-release.py rollback /opt/avito-partner-ai-backups/qwen-migration-20261016-152900/operational-release.json
 ```
 
 The new nullable column can remain when restoring old code/build/env; do not
 restore an old DB snapshot over subsequently received customer messages. The
-exact rollback manifest is unknown until a server release is actually prepared.
+rollback manifest above was generated and verified during this release.
