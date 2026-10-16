@@ -247,7 +247,7 @@ export function buildConversationResponse(params: {
   const allowedNextInformationNeeds = candidateNextInformationNeeds;
   const preferDiscoveryContext = isFreshDiscoveryLead(params.lead);
   const postHandoffContinuation = params.lead.handoffAt !== null;
-  const preferredContactTime = preferredContactTimeFromQuestions(
+  const preferredContactTime = params.lead.contactPreferences ?? preferredContactTimeFromQuestions(
     params.lead.questions,
   );
   const qualificationProgressExpected = expectsQualificationProgress({
@@ -413,11 +413,11 @@ export function buildConversationResponse(params: {
   if (asksCallTime) {
     parts.splice(0, parts.length, "\u041c\u0435\u043d\u0435\u0434\u0436\u0435\u0440 \u0441\u0432\u044f\u0436\u0435\u0442\u0441\u044f \u0441 \u0432\u0430\u043c\u0438. \u041d\u0430\u043f\u0438\u0448\u0438\u0442\u0435, \u043f\u043e\u0436\u0430\u043b\u0443\u0439\u0441\u0442\u0430, \u0432 \u043a\u0430\u043a\u043e\u0439 \u0434\u0435\u043d\u044c \u0438 \u043f\u0440\u0438\u043c\u0435\u0440\u043d\u043e\u0435 \u0432\u0440\u0435\u043c\u044f \u0432\u0430\u043c \u0443\u0434\u043e\u0431\u043d\u043e \u043f\u0440\u0438\u043d\u044f\u0442\u044c \u0437\u0432\u043e\u043d\u043e\u043a.");
   }
-  if (params.callbackPreferenceCaptured && preferredContactTime) {
+  if (params.callbackPreferenceCaptured && preferredContactTime && postHandoffContinuation && !currentTurnRequiresAnswer) {
     parts.splice(
       0,
       parts.length,
-      `Спасибо, зафиксировал: ${preferredContactTime}. Менеджер свяжется с вами в это время.`,
+      `Спасибо, пожелания к связи сохранены: ${preferredContactTime}.`,
     );
   }
   const phoneDeclined = nextInformationNeed === "PHONE_NUMBER" && params.lead.objections.some((objection) =>
@@ -434,7 +434,9 @@ export function buildConversationResponse(params: {
   if (decision.shouldHandoffToManager && !postHandoffContinuation) {
     parts.push(
       extraction.facts.phoneNumber && extraction.facts.phoneConfirmed
-        ? "Спасибо, передал номер менеджеру. Подскажите, в какой день и примерно во сколько вам удобно принять звонок? Если пока не знаете, время можно согласовать уже с менеджером."
+        ? params.lead.contactPreferences
+          ? "Спасибо, контакт и пожелания к связи переданы менеджеру."
+          : "Спасибо, передал номер менеджеру. Подскажите, в какой день и примерно во сколько вам удобно принять звонок? Если пока не знаете, время можно согласовать уже с менеджером."
         : extraction.signals.wantsHuman || knowledge.unresolvedQuestions.length > 0 ||
         ["USER_REQUESTED_HUMAN", "UNKNOWN_BUSINESS_QUESTION"].includes(decision.reason)
         ? "Передам менеджеру контекст разговора, чтобы он мог продолжить с вами предметно."

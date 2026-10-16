@@ -19,6 +19,8 @@ export interface Lead {
   contact: string | null;
   phoneNumber: string | null;
   phoneConfirmed: boolean;
+  /** Customer's current contact constraints, interpreted semantically. */
+  contactPreferences?: string | null;
   city: string | null;
   serviceability: ServiceabilityStatus;
   budget: number | null;
@@ -65,6 +67,7 @@ export type LeadFactPatch = Partial<
     | "contact"
     | "phoneNumber"
     | "phoneConfirmed"
+    | "contactPreferences"
     | "city"
     | "budget"
     | "budgetConfirmed"

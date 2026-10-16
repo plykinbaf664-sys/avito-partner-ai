@@ -53,6 +53,7 @@ function toRecord(snapshot: CrmLeadSnapshot): CrmLeadRecord {
     hasFreeTime: lead.hasFreeTime,
     availableTimeDetails: lead.availableTimeDetails,
     preferredContactTime: preferredContactTimeFromQuestions(lead.questions),
+    contactPreferences: lead.contactPreferences ?? null,
     goal: lead.primaryGoal,
     desiredIncome: lead.desiredIncome,
     launchTiming: lead.launchTiming,

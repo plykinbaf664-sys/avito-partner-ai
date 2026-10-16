@@ -44,6 +44,7 @@ export const leads = sqliteTable(
     name: text("name"),
     contact: text("contact"),
     phoneNumber: text("phone_number"),
+    contactPreferences: text("contact_preferences"),
     phoneConfirmed: integer("phone_confirmed", { mode: "boolean" })
       .notNull()
       .default(false),

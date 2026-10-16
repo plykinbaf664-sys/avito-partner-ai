@@ -93,6 +93,7 @@ export function formatTelegramManagerCard(
   const lines = ["🔥 Новый квалифицированный лид"];
   addLine(lines, "Имя", summary.name);
   addLine(lines, "Телефон", summary.phoneNumber);
+  addLine(lines, "Пожелания к связи", summary.contactPreferences);
   lines.push("");
   addLine(lines, "Статус", qualificationLabels[summary.qualificationStatus] ?? summary.qualificationStatus);
   addLine(lines, "Сегмент", segmentLabels[summary.segment] ?? "Не указано");
@@ -118,7 +119,7 @@ export function formatTelegramManagerCard(
   addLine(lines, "Доступное время", summary.availableTime);
   addLine(lines, "Ключевые факты", compactManagerSummary(summary));
   const concerns = [
-    ...summary.questions, ...summary.objections,
+    ...summary.questions.filter(question => !summary.contactPreferences || !question.startsWith("Удобное время связи:")), ...summary.objections,
     barrierLabels[summary.primaryBarrier ?? ""], barrierLabels[summary.secondaryBarrier ?? ""],
     financialBarrierLabels[summary.financialBarrier ?? ""],
   ].filter(Boolean);

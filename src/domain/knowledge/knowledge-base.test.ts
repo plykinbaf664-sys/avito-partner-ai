@@ -29,6 +29,14 @@ function question(text: string, facts: Partial<ExtractedMessage["facts"]> = {}):
 }
 
 describe("contextual partner knowledge", () => {
+  it.each([[1, "1 объекта", "20 000"], [2, "2 объектов", "40 000"], [5, "5 объектов", "100 000"]] as const)(
+    "formats the deterministic income fallback grammatically for %s units", (units, label, amount) => {
+      const answer = answerFromKnowledgeBase(question("Какой доход с квартиры?", { calculationUnits: units }));
+      const text = answer.answerFragments.join(" ");
+      expect(text).toContain(`Для ${label} ориентир`);
+      expect(text).toContain(amount);
+      expect(text).toContain("не гарантия");
+    });
   it.each([
     "Хотелось бы сначала понять как вести объект, как найти его и клиентов",
     "С чего начать",

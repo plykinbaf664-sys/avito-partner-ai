@@ -341,7 +341,7 @@ describe("isolated Test Chat Lab workflow", () => {
     const llm = new FakeLLMProvider([
       extractionReply(facts), naturalReply("Здравствуйте! На какой номер менеджер может Вам позвонить?", "PHONE_NUMBER"),
       extractionReply({ phoneNumber: "+79991234567", phoneConfirmed: true }),
-      extractionReply({}, { previousQuestionResponse: "ANSWERED" }, "CONFIRMATION"),
+      extractionReply({ contactPreferences: "Время с менеджером согласую" }, { previousQuestionResponse: "ANSWERED" }, "CONFIRMATION"),
       JSON.stringify({ text: "Менеджер свяжется с Вами, чтобы обсудить запуск.",
         conversationMemory: "Контакт передан. Время клиент согласует с менеджером. Диалог завершён." }),
       ...replies,

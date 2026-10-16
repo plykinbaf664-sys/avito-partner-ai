@@ -176,6 +176,69 @@ describe("incoming partner event workflow", () => {
     expect(llm.callCount).toBe(3);
   });
 
+  it("persists semantic contact instructions before the first handoff and includes them in the card exactly once", async () => {
+    const preferences = "Сначала написать; сейчас не звонить. Для звонка удобно после 18 часов.";
+    const extracted = extractionResult({ city: "Москва", availableCapital: 400_000,
+      availableCapitalConfirmed: true, additionalExpensesReadiness: "READY", managementReadiness: "READY",
+      launchTiming: "READY_NOW", primaryGoal: "MAIN_BUSINESS", phoneNumber: "+79990001122", phoneConfirmed: true });
+    Object.assign(extracted.extraction.facts, { contactPreferences: preferences });
+    const notifications = new FakeManagerNotificationProvider();
+    const processEvent = createIncomingEventProcessor({ persistence, extractMessage: async () => extracted,
+      managerNotificationProvider: notifications, outboundProvider: new FakeOutboundProvider() });
+    const event = input("contact-preferences-first-phone", "Готов начать в Москве. Номер +79990001122, сначала напишите, сейчас не звоните; звонить удобно после 18.");
+    await processEvent(event);
+    const lead = await persistence.leads.findByExternalIdentity(event.source, event.externalLeadId);
+    expect(lead).toMatchObject({ contactPreferences: preferences });
+    expect(notifications.requests).toHaveLength(1);
+    expect(notifications.requests[0].summary).toMatchObject({ contactPreferences: preferences });
+    await processEvent(event);
+    expect(notifications.requests).toHaveLength(1);
+  });
+
+  it("retains a supported substantive answer when the transaction disallows its optional move after handoff", async () => {
+    const notifications = new FakeManagerNotificationProvider();
+    const answerText = "Гарантированного дохода нет: результат зависит от объекта, загрузки и расходов.";
+    const extract = vi.fn().mockResolvedValueOnce(extractionResult({ city: "Москва", availableCapital: 400_000,
+      availableCapitalConfirmed: true, additionalExpensesReadiness: "READY", managementReadiness: "READY",
+      launchTiming: "READY_NOW", primaryGoal: "MAIN_BUSINESS", phoneNumber: "+79990001122", phoneConfirmed: true }))
+      .mockResolvedValueOnce({ ...extractionResult({}), extraction: { ...extractionResult({}).extraction, intent: "QUESTION",
+        signals: { ...extractionResult({}).extraction.signals, questions: ["Доход гарантируете?"],
+          questionKind: "BUSINESS_INFORMATION", requiresSubstantiveAnswer: true, knowledgeEntryIds: ["guarantees-and-economics"] } } });
+    const generate = vi.fn().mockResolvedValueOnce({ text: "Контакт передан менеджеру.", answerText: "Контакт передан менеджеру.",
+      qualificationQuestion: "", nextInformationNeed: null, model: "fake", inputTokens: 0, outputTokens: 0,
+      conversationMemory: "Контакт передан, клиент ждёт обсуждения запуска." })
+      .mockResolvedValueOnce({ text: answerText + " Какой масштаб планируете в будущем?", answerText,
+        qualificationQuestion: "Какой масштаб планируете в будущем?", nextInformationNeed: "SCALING_POTENTIAL_UNITS",
+        model: "fake", inputTokens: 0, outputTokens: 0, conversationMemory: "Спросил будущий масштаб." });
+    const processEvent = createIncomingEventProcessor({ persistence, extractMessage: extract,
+      generateNaturalResponse: generate, managerNotificationProvider: notifications, outboundProvider: new FakeOutboundProvider() });
+    await processEvent(input("handoff-before-side-question", "Москва, 400 тысяч, готов запускать свой бизнес сейчас и участвовать лично. Телефон +79990001122."));
+    const result = await processEvent(input("post-handoff-side-question", "Доход гарантируете?"));
+    expect(result.metrics.responseGenerationSource).toBe("LLM");
+    expect(result.outboundMessage).toBe(answerText);
+    expect(notifications.requests).toHaveLength(1);
+    const conversation = await persistence.conversations.findOpenByLeadId(result.leadId!);
+    expect(JSON.parse(conversation!.summary!).conversationalNotes).not.toContain("Спросил будущий масштаб");
+  });
+
+  it("preserves omitted contact constraints and refreshes a pending unattempted card on correction without a second handoff", async () => {
+    const first = extractionResult({ city: "Москва", availableCapital: 400_000, availableCapitalConfirmed: true,
+      additionalExpensesReadiness: "READY", managementReadiness: "READY", launchTiming: "READY_NOW",
+      primaryGoal: "MAIN_BUSINESS", phoneNumber: "+79990001122", phoneConfirmed: true, contactPreferences: "Только переписка." });
+    const extract = vi.fn().mockResolvedValueOnce(first)
+      .mockResolvedValueOnce(extractionResult({ contactPreferences: "Можно позвонить завтра после 18 часов." }))
+      .mockResolvedValueOnce(extractionResult({}));
+    const processEvent = createIncomingEventProcessor({ persistence, extractMessage: extract });
+    const result = await processEvent(input("pending-contact", "Москва, готов стартовать. Номер +79990001122, только переписка."));
+    const key = `manager-handoff:${result.leadId}`;
+    const initial = await persistence.managerNotifications.findByIdempotencyKey(key);
+    await processEvent(input("contact-correction", "Завтра после 18 можете позвонить."));
+    await processEvent(input("contact-unchanged", "Спасибо."));
+    expect(await persistence.leads.findById(result.leadId!)).toMatchObject({ contactPreferences: "Можно позвонить завтра после 18 часов." });
+    expect(await persistence.managerNotifications.findByIdempotencyKey(key)).toMatchObject({ id: initial!.id,
+      deliveryStatus: "PENDING", deliveryAttempts: 0, summary: { contactPreferences: "Можно позвонить завтра после 18 часов." } });
+  });
+
   it("never persists or delivers an empty SEND_REPLY even from a custom response generator", async () => {
     const outbound = new FakeOutboundProvider();
     const processEvent = createIncomingEventProcessor({ persistence,

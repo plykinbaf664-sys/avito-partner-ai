@@ -1,0 +1,134 @@
+{
+  "kind": "RECORDED_SYNTHETIC_MODEL_RESPONSES",
+  "sourceRevision": "807e8be138b0b63bab3b8b1cc24df15a64d2c0fd",
+  "sourceReportSha256": "b0542bce4732c25227c0fd878c85259066820865d5a77c01d5feb2e5d6243daf",
+  "model": "qwen3.8-flash",
+  "productionTouched": false,
+  "reports": [
+    {
+      "id": "human-manager-contact-preference",
+      "trace": [
+        {
+          "stage": "EXTRACTION",
+          "response": {
+            "text": "{\"intent\":\"QUALIFICATION_INFORMATION\",\"facts\":{\"phoneNumber\":\"\",\"phoneConfirmed\":false,\"city\":\"Москва\",\"availableCapital\":400000,\"availableCapitalConfirmed\":true,\"capitalScope\":\"TOTAL_LIMIT\",\"additionalExpensesReadiness\":\"READY\",\"businessModelReadiness\":\"ACCEPTS\",\"buyingIntent\":\"READY_TO_START\",\"primaryGoal\":\"MAIN_BUSINESS\",\"launchTiming\":\"WITHIN_MONTH\",\"hasFreeTime\":true,\"availableTimeDetails\":\"3–4 часа в день\",\"managementReadiness\":\"READY\"},\"signals\":{\"questions\":[],\"objections\":[],\"wantsHuman\":false,\"previousQuestionResponse\":\"ANSWERED\",\"contextualReference\":false,\"questionKind\":\"NONE\",\"requiresSubstantiveAnswer\":false,\"possiblePrimaryFear\":null,\"possibleSecondaryFear\":null,\"needsStartupScaleRecommendation\":false,\"knowledgeEntryIds\":[]},\"confidence\":0.95,\"uncertainty\":[\"Количество стартовых квартир (startingUnits) не названо\"]}",
+            "model": "qwen3.8-flash",
+            "provider": "qwen",
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        },
+        {
+          "stage": "GENERATION",
+          "response": {
+            "text": "{\"replyAction\":\"SEND_REPLY\",\"answerText\":\"Спасибо, ситуация очень ясная. С капиталом 400 тысяч в Москве на старте можно закрыть 1–2 объекта (один объект — около 180 тысяч, два — около 310 тысяч), и у вас остаётся резерв. Готовность к личным просмотрам и 3–4 часа в день — как раз то, что нужно для запуска на следующей неделе. Дмитрий, наш менеджер, поможет определиться с числом объектов на старте и согласовать конкретные шаги.\",\"qualificationQuestion\":\"Подскажите, пожалуйста, номер телефона — Дмитрий свяжется с вами для обсуждения запуска.\",\"nextInformationNeed\":\"PHONE_NUMBER\",\"interpretedQuestionKind\":\"NONE\",\"awaitingUserReply\":true,\"answerCoverage\":\"FULL\",\"unresolvedTopics\":[],\"usedKnowledgeEntryIds\":[\"small-business-entry\",\"single-unit-start\",\"supported-cities\",\"pricing\"],\"conversationMemory\":\"Клиент: Москва, 400к капитал (весь на запуск), цель — основной бизнес, старт на следующей неделе, 3–4 часа/день, готов к просмотрам и договорам сам. Финансово подходит на 1–2 объекта. startingUnits не назван. Квалификация HOT, запрошен телефон для связи с Дмитрием.\"}",
+            "model": "qwen3.8-flash",
+            "provider": "qwen",
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        },
+        {
+          "stage": "REVIEW",
+          "response": {
+            "text": "{\"currentTurnKind\":\"CONTRIBUTION\",\"answerIsSupported\":true,\"answersCurrentRequest\":true,\"optionalQuestionAppropriate\":true,\"additionalRequestInAnswer\":false,\"answerWithoutAdditionalRequest\":\"\",\"feedback\":\"\"}",
+            "model": "qwen3.8-flash",
+            "provider": "qwen",
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        },
+        {
+          "stage": "EXTRACTION",
+          "response": {
+            "text": "{\"intent\":\"QUESTION\",\"facts\":{\"hasFreeTime\":null},\"signals\":{\"questions\":[\"А без звонка можно?\",\"Какие расходы будут каждый месяц?\"],\"objections\":[],\"wantsHuman\":false,\"previousQuestionResponse\":\"DECLINED_TO_ANSWER\",\"resolvedQuestion\":\"Какие будут ежемесячные операционные расходы после запуска бизнеса по аренде квартир?\",\"contextualReference\":true,\"questionKind\":\"BUSINESS_INFORMATION\",\"needsStartupScaleRecommendation\":false,\"requiresSubstantiveAnswer\":true,\"knowledgeEntryIds\":[\"guarantees-and-economics\",\"operations-guests\"]},\"confidence\":0.92,\"uncertainty\":[\"Пользователь не предоставил телефон, предпочитает переписку — коммуникационный канал не завершён\",\"Ежемесячные расходы — новый вопрос, требующий содержательного ответа о текущих операционных затратах после запуска\"]}",
+            "model": "qwen3.8-flash",
+            "provider": "qwen",
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        },
+        {
+          "stage": "GENERATION",
+          "response": {
+            "text": "{\"replyAction\":\"SEND_REPLY\",\"answerText\":\"Переписка — это удобно, без проблем. По ежемесячным расходам: основная сумма — аренда, в Москве это порядка 50 000 ₽ за объект в месяц. Плюс клининг, коммунальные и комиссии площадок — точные цифры зависят от конкретного объекта. Услуга запуска в 50 000 ₽ — разовая, а не ежемесячная. С учётом капитала 400 000 ₽ старт получается комфортный. На сколько объектов планируете начать?\",\"qualificationQuestion\":\"На сколько объектов планируете начать?\",\"interpretedQuestionKind\":\"CLARIFICATION\",\"nextInformationNeed\":\"SCALING_POTENTIAL_UNITS\",\"awaitingUserReply\":true,\"answerCoverage\":\"FULL\",\"unresolvedTopics\":[],\"usedKnowledgeEntryIds\":[\"small-business-entry\",\"pricing\",\"operations-guests\"],\"conversationMemory\":\"Клиент: Москва, 400к капитал, цель — основной бизнес, старт на следующей неделе, 3–4 часа/день, готов к просмотрам и договорам сам. Финансово подходит на 1–2 объекта. startingUnits не назван. Клиент отказался от звонка — предпочитает переписку, на работе. Спросил про ежемесячные расходы — ответ дан (аренда ~50к/объект, клининг, коммунальные, комиссии; 50к за услугу — разовая). Запрошен startingUnits.\"}",
+            "model": "qwen3.8-flash",
+            "provider": "qwen",
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        },
+        {
+          "stage": "REVIEW",
+          "response": {
+            "text": "{\"currentTurnKind\":\"REQUEST\",\"answerIsSupported\":true,\"answersCurrentRequest\":true,\"optionalQuestionAppropriate\":true,\"additionalRequestInAnswer\":true,\"answerWithoutAdditionalRequest\":\"Переписка — это удобно, без проблем. По ежемесячным расходам: основная сумма — аренда, в Москве это порядка 50 000 ₽ за объект в месяц. Плюс клининг, коммунальные и комиссии площадок — точные цифры зависят от конкретного объекта. Услуга запуска в 50 000 ₽ — разовая, а не ежемесячная. С учётом капитала 400 000 ₽ старт получается комфортный.\",\"feedback\":\"\"}",
+            "model": "qwen3.8-flash",
+            "provider": "qwen",
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        },
+        {
+          "stage": "EXTRACTION",
+          "response": {
+            "text": "{\"intent\":\"QUALIFICATION_INFORMATION\",\"facts\":{\"phoneNumber\":\"+79990001122\",\"phoneConfirmed\":true},\"signals\":{\"questions\":[],\"objections\":[],\"previousQuestionResponse\":\"ANSWERED\",\"questionKind\":\"NONE\",\"requiresSubstantiveAnswer\":false,\"contextualReference\":false,\"resolvedQuestion\":\"\",\"wantsHuman\":false,\"needsStartupScaleRecommendation\":false,\"knowledgeEntryIds\":[]},\"confidence\":0.95,\"uncertainty\":[\"Пользователь просит написать первым, а не звонить — это коммуникационное предпочтение, не ответ на вопрос о startingUnits.\"]}",
+            "model": "qwen3.8-flash",
+            "provider": "qwen",
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        },
+        {
+          "stage": "GENERATION",
+          "response": {
+            "text": "{\"replyAction\":\"SEND_REPLY\",\"answerText\":\"Принял ваш номер, спасибо. Дмитрий напишет первым в переписку — без звонка. В чате он как раз поможет определиться с числом объектов на старте и согласовать следующие шаги.\",\"qualificationQuestion\":\"\",\"nextInformationNeed\":null,\"interpretedQuestionKind\":\"NONE\",\"awaitingUserReply\":false,\"answerCoverage\":\"FULL\",\"unresolvedTopics\":[],\"usedKnowledgeEntryIds\":[\"pricing\",\"small-business-entry\"],\"conversationMemory\":\"Клиент: Москва, 400к капитал, цель — основной бизнес, старт на следующей неделе, 3–4 часа/день, готов к просмотрам и договорам сам. Финансово подходит на 1–2 объекта. startingUnits не назван. Клиент дал телефон +79990001122 (совпадает с известным), предпочитает переписку, не звонки. Handoff авторизован — Дмитрий напишет первым в чат и обсудит число объектов.\"}",
+            "model": "qwen3.8-flash",
+            "provider": "qwen",
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        },
+        {
+          "stage": "REVIEW",
+          "response": {
+            "text": "{\"currentTurnKind\":\"CONTRIBUTION\",\"answerIsSupported\":true,\"answersCurrentRequest\":true,\"optionalQuestionAppropriate\":true,\"additionalRequestInAnswer\":false,\"answerWithoutAdditionalRequest\":\"\",\"feedback\":\"\"}",
+            "model": "qwen3.8-flash",
+            "provider": "qwen",
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        },
+        {
+          "stage": "EXTRACTION",
+          "response": {
+            "text": "{\"intent\":\"QUESTION\",\"facts\":{},\"signals\":{\"questions\":[\"а доход с одной квартиры вы гарантируете?\"],\"objections\":[],\"possiblePrimaryFear\":\"FEAR_LOSE_MONEY\",\"possibleSecondaryFear\":null,\"wantsHuman\":false,\"previousQuestionResponse\":\"CHANGED_TOPIC\",\"resolvedQuestion\":\"\",\"contextualReference\":false,\"questionKind\":\"BUSINESS_INFORMATION\",\"needsStartupScaleRecommendation\":false,\"requiresSubstantiveAnswer\":true,\"knowledgeEntryIds\":[\"guarantees-and-economics\"]},\"confidence\":0.9,\"uncertainty\":[\"'одна квартира' может быть гипотетическим масштабным примером для вопроса о гарантиях, а не заявленным выбором startingUnits; AI ранее спрашивал количество объектов — пользователь не ответил\"]}",
+            "model": "qwen3.8-flash",
+            "provider": "qwen",
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        },
+        {
+          "stage": "GENERATION",
+          "response": {
+            "text": "{\"replyAction\":\"SEND_REPLY\",\"answerText\":\"Нет, гарантированного дохода нет. Ориентир по модели — около 20 000 ₽ с одного объекта в месяц, но фактический результат зависит от конкретного объекта, загрузки и условий. Дмитрий в переписке как раз поможет подобрать объект с лучшими перспективами.\",\"qualificationQuestion\":\"На какое число объектов рассчитываете выйти в перспективе — это поможет Дмитрию выстроить план?\",\"nextInformationNeed\":\"SCALING_POTENTIAL_UNITS\",\"interpretedQuestionKind\":\"BUSINESS_INFORMATION\",\"awaitingUserReply\":true,\"answerCoverage\":\"FULL\",\"unresolvedTopics\":[],\"usedKnowledgeEntryIds\":[\"guarantees-and-economics\"],\"conversationMemory\":\"Клиент: Москва, 400к капитал, цель — основной бизнес, старт на следующей неделе, 3–4 часа/день, готов к просмотрам и договорам сам. Финансово подходит на 1–2 объекта. startingUnits не назван. Клиент дал телефон +79990001122 (совпадает с известным), предпочитает переписку, не звонки. Handoff авторизован — Дмитрий напишет первым в чат и обсудит число объектов. Спросил про гарантию дохода — answered. Желаемый масштаб в перспективе не уточнён.\"}",
+            "model": "qwen3.8-flash",
+            "provider": "qwen",
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        },
+        {
+          "stage": "REVIEW",
+          "response": {
+            "text": "{\"currentTurnKind\":\"REQUEST\",\"answerIsSupported\":true,\"answersCurrentRequest\":true,\"optionalQuestionAppropriate\":true,\"additionalRequestInAnswer\":false,\"answerWithoutAdditionalRequest\":\"\",\"feedback\":\"\"}",
+            "model": "qwen3.8-flash",
+            "provider": "qwen",
+            "inputTokens": 0,
+            "outputTokens": 0
+          }
+        }
+      ]
+    }
+  ]
+}

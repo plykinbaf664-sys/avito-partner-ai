@@ -1,0 +1,521 @@
+{
+  "date": "2026-10-16",
+  "sourceRevision": "807e8be138b0b63bab3b8b1cc24df15a64d2c0fd",
+  "status": "WORKFLOW_PASS_WITH_CONFIRMED_QUALITY_DEFECTS",
+  "model": "qwen3.8-flash",
+  "scope": "LOCAL_TEST_CHAT_LAB",
+  "productionTouched": false,
+  "realChannelSends": 0,
+  "phoneCaptureAndSingleHandoff": {
+    "passed": 5,
+    "total": 5
+  },
+  "uniqueInboundTurns": 17,
+  "duplicateInboundReplayed": 1,
+  "humanManagerTurns": 1,
+  "existingTests": {
+    "passed": 199,
+    "files": 6
+  },
+  "regression": {
+    "scenario": "human-manager-contact-preference",
+    "result": "FAIL_REPRODUCED",
+    "liveModelCalls": 0,
+    "violation": "SUBSTANTIVE_ANSWER_REPLACED_BY_DRAFT",
+    "fixture": "2026-10-16-qualified-contact-regression.json"
+  },
+  "usage": {
+    "calls": 57,
+    "successfulCalls": 57,
+    "inputTokens": 97204,
+    "cacheCreationInputTokens": 47524,
+    "cacheReadInputTokens": 192020,
+    "outputTokens": 67315,
+    "reasoningTokensIncludedInOutput": 57987,
+    "estimatedCostMicrousd": 58795
+  },
+  "latency": {
+    "method": "Sum recorded sequential API latencies per event; excludes application overhead; nearest-rank p90.",
+    "medianLlmWaitMs": 63825,
+    "p90LlmWaitMs": 100508,
+    "maxLlmWaitMs": 118174
+  },
+  "scenarios": [
+    {
+      "id": "ready-side-question",
+      "manualReview": {
+        "status": "WARN",
+        "findings": [
+          "Two contact solicitations inside one optional component; capture and handoff passed."
+        ]
+      },
+      "mechanicalInvariantViolations": [],
+      "handoffs": 1,
+      "phoneKnownAtEnd": true,
+      "managerCardPhoneMatchesLead": true,
+      "transcript": [
+        {
+          "actor": "USER",
+          "text": "Я в Москве. На запуск есть 400 тысяч, это весь доступный капитал, готов потратить его на аренду, залог, подготовку и текущие расходы. Хочу свой основной бизнес, начать на следующей неделе. На просмотры и договоры буду ездить сам, 3–4 часа в день выделю.",
+          "reply": "Отличная вводная — по всем параметрам вы готовы к запуску. С капиталом 400 000 ₽ в Москве реально стартовать с одного объекта (≈180 000 ₽ запуск + 220 000 ₽ в резерве) или сразу с двух (≈310 000 ₽ + 90 000 ₽ на операционку). Услуга компании — 50 000 ₽ за весь запуск, аренда, залог и подготовка оплачиваются отдельно по каждому объекту. Удобно будет, если я передам ваш контакт Дмитрию? Напишите номер телефона, и он свяжется с вами для обсуждения следующего шага.",
+          "qualification": "HOT",
+          "phoneKnown": false,
+          "responseSource": "LLM"
+        },
+        {
+          "actor": "USER",
+          "text": "Если начну с одной, из этих денег сколько уйдёт сразу и сколько останется?",
+          "reply": "При старте с одного объекта в Москве из 400 000 ₽ сразу уходит ≈180 000 ₽: 50 000 ₽ — услуга запуска (один раз за весь бизнес), 50 000 ₽ — первая аренда, 50 000 ₽ — залог (допущение — один месяц), 30 000 ₽ — подготовка. Остаётся 220 000 ₽ на операционку и резерв. Точные суммы аренды и залога зависят от конкретного объекта и собственника — это ориентир, не фиксированная смета.",
+          "qualification": "HOT",
+          "phoneKnown": false,
+          "responseSource": "LLM"
+        },
+        {
+          "actor": "USER",
+          "text": "Хорошо, обсудим запуск. Мой номер +79990001122",
+          "reply": "Принято, Дмитрий свяжется с вами по указанному номеру, чтобы обсудить запуск на следующей неделе.",
+          "qualification": "HOT",
+          "phoneKnown": true,
+          "responseSource": "LLM"
+        },
+        {
+          "actor": "USER",
+          "text": "А кто потом будет отвечать гостям?",
+          "reply": "После запуска заявки и работу с гостями ведёт администратор команды компании: обрабатывает обращения, работает с возражениями, запрашивает обратную связь и координирует горничную. Дистанционное заселение, клининг, календари — тоже на стороне компании. С вами дополнительно работает персональный менеджер. Вам лично вмешиваться нужно только в нестандартных ситуациях.",
+          "qualification": "HOT",
+          "phoneKnown": true,
+          "responseSource": "LLM"
+        }
+      ],
+      "notificationSummary": {
+        "name": null,
+        "contact": null,
+        "phoneNumber": "+79990001122",
+        "city": "Москва",
+        "budget": 400000,
+        "segment": "SMALL_BUSINESS",
+        "segmentConfidence": 0.75,
+        "availableCapital": 400000,
+        "entryBudget": null,
+        "additionalLaunchCapital": null,
+        "capitalScope": "TOTAL_LIMIT",
+        "additionalExpensesReadiness": "READY",
+        "businessModelReadiness": "CONSIDERING",
+        "launchCostAwareness": "CONFIRMED",
+        "financialReadiness": "HIGH",
+        "financialBarrier": null,
+        "startingUnits": null,
+        "scalingPotentialUnits": null,
+        "launchTiming": "WITHIN_MONTH",
+        "goal": "MAIN_BUSINESS",
+        "businessExperience": null,
+        "shortTermRentalExperience": null,
+        "ownsProperty": null,
+        "managementReadiness": "READY",
+        "availableTime": "3–4 часа в день",
+        "desiredIncome": null,
+        "economicsEstimateUnits": null,
+        "estimatedMonthlyPartnerIncome": null,
+        "incomeEstimateGuaranteed": false,
+        "questions": [
+          "Если начну с одной, из этих денег сколько уйдёт сразу и сколько останется?"
+        ],
+        "objections": [],
+        "primaryBarrier": null,
+        "secondaryBarrier": null,
+        "explainedKnowledge": [
+          "small-business-entry",
+          "single-unit-start",
+          "pricing"
+        ],
+        "qualificationStatus": "HOT",
+        "reasonCodes": [
+          "SMALL_BUSINESS_READY"
+        ],
+        "qualificationRationale": "Критические данные для выбранного сегмента собраны, готовность к запуску подтверждена.",
+        "buyingIntent": "READY_TO_START",
+        "recommendedNextStep": "Связаться с лидом и перейти к предметному обсуждению запуска."
+      }
+    },
+    {
+      "id": "phone-refusal-then-consent",
+      "manualReview": {
+        "status": "FAIL",
+        "findings": [
+          "Callback time supplied with first phone missing from manager card.",
+          "Memory mentions experience question removed from delivered reply."
+        ]
+      },
+      "mechanicalInvariantViolations": [],
+      "handoffs": 1,
+      "phoneKnownAtEnd": true,
+      "managerCardPhoneMatchesLead": true,
+      "transcript": [
+        {
+          "actor": "USER",
+          "text": "Я в Москве. На запуск есть 400 тысяч, это весь доступный капитал, готов потратить его на аренду, залог, подготовку и текущие расходы. Хочу свой основной бизнес, начать на следующей неделе. На просмотры и договоры буду ездить сам, 3–4 часа в день выделю.",
+          "reply": "Спасибо, всё сходится — Москва подтверждённый город, формат субаренды вам подходит, время на участие есть. По расчёту с арендой ~50 000 ₽ ваш капитал позволяет запустить один объект (~180 000 ₽) или два (~310 000 ₽), при ориентире ~20 000 ₽ дохода на объект в месяц без гарантии. Подскажите удобный номер телефона, чтобы менеджер мог с вами связаться?",
+          "qualification": "HOT",
+          "phoneKnown": false,
+          "responseSource": "LLM"
+        },
+        {
+          "actor": "USER",
+          "text": "Номер пока не дам. Сначала объясните, откуда возьмутся гости и кто займётся бронированиями?",
+          "reply": "Гости приходят с площадок: компания ведёт рекламу, размещает и продвигает объявления. Бронирования обрабатывает администратор команды — принимает заявки, работает с гостями, координирует горничную. Вы при этом видите в CRM все брони и площадки, откуда они пришли, в реальном времени. После запуска подключается ещё и персональный менеджер.",
+          "qualification": "HOT",
+          "phoneKnown": false,
+          "responseSource": "LLM"
+        },
+        {
+          "actor": "USER",
+          "text": "Теперь понятно. Давайте свяжемся, 8 (999) 000-11-22. Звонить удобно после 18.",
+          "reply": "Принял номер и удобное время — Дмитрий свяжется с вами для обсуждения деталей запуска. Если до звонка появятся вопросы или что-то уточнится по объектам — пишите, помогу.",
+          "qualification": "HOT",
+          "phoneKnown": true,
+          "responseSource": "LLM"
+        }
+      ],
+      "notificationSummary": {
+        "name": null,
+        "contact": null,
+        "phoneNumber": "+79990001122",
+        "city": "Москва",
+        "budget": 400000,
+        "segment": "SMALL_BUSINESS",
+        "segmentConfidence": 0.75,
+        "availableCapital": 400000,
+        "entryBudget": null,
+        "additionalLaunchCapital": null,
+        "capitalScope": "TOTAL_LIMIT",
+        "additionalExpensesReadiness": "READY",
+        "businessModelReadiness": "ACCEPTS",
+        "launchCostAwareness": "CONFIRMED",
+        "financialReadiness": "HIGH",
+        "financialBarrier": null,
+        "startingUnits": null,
+        "scalingPotentialUnits": null,
+        "launchTiming": "WITHIN_MONTH",
+        "goal": "MAIN_BUSINESS",
+        "businessExperience": null,
+        "shortTermRentalExperience": null,
+        "ownsProperty": null,
+        "managementReadiness": "READY",
+        "availableTime": "3–4 часа в день на просмотры и договоры",
+        "desiredIncome": null,
+        "economicsEstimateUnits": null,
+        "estimatedMonthlyPartnerIncome": null,
+        "incomeEstimateGuaranteed": false,
+        "questions": [
+          "откуда возьмутся гости",
+          "кто займётся бронированиями"
+        ],
+        "objections": [],
+        "primaryBarrier": null,
+        "secondaryBarrier": null,
+        "explainedKnowledge": [
+          "supported-cities",
+          "small-business-entry",
+          "guarantees-and-economics",
+          "pricing",
+          "single-unit-start",
+          "operations-guests",
+          "launch-process",
+          "crm-visibility"
+        ],
+        "qualificationStatus": "HOT",
+        "reasonCodes": [
+          "SMALL_BUSINESS_READY"
+        ],
+        "qualificationRationale": "Критические данные для выбранного сегмента собраны, готовность к запуску подтверждена.",
+        "buyingIntent": "WANTS_NEXT_STEP",
+        "recommendedNextStep": "Связаться с лидом и перейти к предметному обсуждению запуска."
+      }
+    },
+    {
+      "id": "early-phone-correction",
+      "manualReview": {
+        "status": "PASS",
+        "findings": []
+      },
+      "mechanicalInvariantViolations": [],
+      "handoffs": 1,
+      "phoneKnownAtEnd": true,
+      "managerCardPhoneMatchesLead": true,
+      "transcript": [
+        {
+          "actor": "USER",
+          "text": "Интересует ваше предложение. Мой телефон +79990001133.",
+          "reply": "Здравствуйте! Спасибо за интерес. Суть предложения: вы запускаете собственный бизнес на посуточной сдаче квартир, а команда компании помогает с подбором объекта, рекламой, работой с гостями и операционными процессами. Услуга запуска — 50 000 ₽, аренда и залог объекта оплачиваете отдельно. По доходу: ориентир по результатам существующих объектов — около 20 000 ₽ с объекта в месяц, но гарантий дохода нет, результат зависит от конкретного объекта и условий. В каком городе планируете запуск?",
+          "qualification": "NEEDS_MORE_INFO",
+          "phoneKnown": true,
+          "responseSource": "LLM"
+        },
+        {
+          "actor": "USER",
+          "text": "В номере ошибся, верный +79990001122. Я в Москве. На запуск есть 400 тысяч, это весь доступный капитал, готов потратить его на аренду, залог, подготовку и текущие расходы. Хочу свой основной бизнес, начать на следующей неделе. На просмотры и договоры буду ездить сам, 3–4 часа в день выделю.",
+          "reply": "Принято, номер зафиксирован — +79990001122. По вашему расчёту для Москвы: старт одного объекта — около 180 000 ₽ (услуга запуска 50 000 ₽, аренда и залог по 50 000 ₽, подготовка 30 000 ₽). В рамках 400 000 ₽ доступно до двух объектов — это примерно 310 000 ₽ с резервом 90 000 ₽ на текущие расходы. Ориентир по доходу — около 20 000 ₽ с объекта в месяц, без гарантий. Дмитрий свяжется с вами по указанному номеру, чтобы обсудить подбор объекта и сроки запуска.",
+          "qualification": "HOT",
+          "phoneKnown": true,
+          "responseSource": "LLM"
+        },
+        {
+          "actor": "USER",
+          "text": "А 50 тысяч я плачу за каждую квартиру или за весь запуск?",
+          "reply": "50 000 ₽ — это единовременная плата за услугу запуска всего проекта, а не за каждую квартиру. Независимо от того, начнёте вы с одного или двух объектов, эта сумма остаётся одной.",
+          "qualification": "HOT",
+          "phoneKnown": true,
+          "responseSource": "LLM"
+        }
+      ],
+      "notificationSummary": {
+        "name": null,
+        "contact": null,
+        "phoneNumber": "+79990001122",
+        "city": "Москва",
+        "budget": 400000,
+        "segment": "SMALL_BUSINESS",
+        "segmentConfidence": 0.75,
+        "availableCapital": 400000,
+        "entryBudget": null,
+        "additionalLaunchCapital": null,
+        "capitalScope": "TOTAL_LIMIT",
+        "additionalExpensesReadiness": "UNKNOWN",
+        "businessModelReadiness": "ACCEPTS",
+        "launchCostAwareness": "UNKNOWN",
+        "financialReadiness": "HIGH",
+        "financialBarrier": null,
+        "startingUnits": null,
+        "scalingPotentialUnits": null,
+        "launchTiming": "READY_NOW",
+        "goal": "MAIN_BUSINESS",
+        "businessExperience": null,
+        "shortTermRentalExperience": null,
+        "ownsProperty": null,
+        "managementReadiness": "READY",
+        "availableTime": "3–4 часа в день",
+        "desiredIncome": null,
+        "economicsEstimateUnits": null,
+        "estimatedMonthlyPartnerIncome": null,
+        "incomeEstimateGuaranteed": false,
+        "questions": [],
+        "objections": [],
+        "primaryBarrier": null,
+        "secondaryBarrier": null,
+        "explainedKnowledge": [
+          "offer-overview",
+          "guarantees-and-economics",
+          "small-business-entry",
+          "pricing",
+          "supported-cities",
+          "launch-process"
+        ],
+        "qualificationStatus": "HOT",
+        "reasonCodes": [
+          "SMALL_BUSINESS_READY"
+        ],
+        "qualificationRationale": "Критические данные для выбранного сегмента собраны, готовность к запуску подтверждена.",
+        "buyingIntent": "READY_TO_START",
+        "recommendedNextStep": "Связаться с лидом и перейти к предметному обсуждению запуска."
+      }
+    },
+    {
+      "id": "no-fit-recovery-contact",
+      "manualReview": {
+        "status": "PASS",
+        "findings": [
+          "Intentional phone-completion generation bypass labeled FALLBACK_DRAFT; no API failure."
+        ]
+      },
+      "mechanicalInvariantViolations": [],
+      "handoffs": 1,
+      "phoneKnownAtEnd": true,
+      "managerCardPhoneMatchesLead": true,
+      "transcript": [
+        {
+          "actor": "USER",
+          "text": "Я в Москве, хочу свой бизнес, но на запуск денег вообще нет, взять тоже негде.",
+          "reply": "Понимаю, спасибо, что честно сказали. Для запуска одного объекта в Москве нужно около 180 000 ₽ — это услуга компании, аренда, залог и подготовка. Без этого стартовать, к сожалению, невозможно. Если ситуация изменится — например, появится возможность накопить или привлечь часть суммы — возвращайтесь, будем рады помочь разобраться в деталях.",
+          "qualification": "NO_FIT",
+          "phoneKnown": false,
+          "responseSource": "LLM"
+        },
+        {
+          "actor": "USER",
+          "text": "Поясню: свободных денег на карте нет, но на запуск отложено 1 миллион 200 тысяч. Это мои средства, готов оплатить аренду, залог, подготовку и текущие расходы. Начну с шести квартир в Москве на следующей неделе. Это будет мой основной бизнес, ездить на просмотры и подписывать договоры буду сам, время 3–4 часа в день есть.",
+          "reply": "Спасибо за уточнение — ситуация совершенно другая. При капитале 1 200 000 ₽ на 6 объектов в Москве полный запуск составляет ориентировочно 830 000 ₽ (услуга компании + аренда, залог и подготовка по каждой), при этом остаётся резерв около 370 000 ₽. Запас хороший, старт с шести квартир вам доступен. Раз готовы начинать на следующей неделе, разумно сразу связаться с Дмитрием — он согласует детали и порядок запуска. Подскажите, на какой номер удобнее принять звонок от Дмитрия?",
+          "qualification": "HOT",
+          "phoneKnown": false,
+          "responseSource": "LLM"
+        },
+        {
+          "actor": "USER",
+          "text": "Да, передайте менеджеру: 89990001122, это мой номер.",
+          "reply": "Спасибо, передал номер менеджеру. Подскажите, в какой день и примерно во сколько вам удобно принять звонок? Если пока не знаете, время можно согласовать уже с менеджером.",
+          "qualification": "HOT",
+          "phoneKnown": true,
+          "responseSource": "FALLBACK_DRAFT"
+        }
+      ],
+      "notificationSummary": {
+        "name": null,
+        "contact": null,
+        "phoneNumber": "+79990001122",
+        "city": "Москва",
+        "budget": 1200000,
+        "segment": "SMALL_BUSINESS",
+        "segmentConfidence": 0.75,
+        "availableCapital": 1200000,
+        "entryBudget": null,
+        "additionalLaunchCapital": null,
+        "capitalScope": "TOTAL_LIMIT",
+        "additionalExpensesReadiness": "READY",
+        "businessModelReadiness": "ACCEPTS",
+        "launchCostAwareness": "CONFIRMED",
+        "financialReadiness": "HIGH",
+        "financialBarrier": null,
+        "startingUnits": 6,
+        "scalingPotentialUnits": null,
+        "launchTiming": "WITHIN_MONTH",
+        "goal": "MAIN_BUSINESS",
+        "businessExperience": null,
+        "shortTermRentalExperience": null,
+        "ownsProperty": null,
+        "managementReadiness": "READY",
+        "availableTime": "3–4 часа в день, готов лично ездить на просмотры и подписывать договоры",
+        "desiredIncome": null,
+        "economicsEstimateUnits": 6,
+        "estimatedMonthlyPartnerIncome": 120000,
+        "incomeEstimateGuaranteed": false,
+        "questions": [],
+        "objections": [
+          "на запуск денег вообще нет, взять тоже негде"
+        ],
+        "primaryBarrier": "FEAR_LOSE_MONEY",
+        "secondaryBarrier": null,
+        "explainedKnowledge": [
+          "small-business-entry",
+          "single-unit-start",
+          "partner-time"
+        ],
+        "qualificationStatus": "HOT",
+        "reasonCodes": [
+          "SMALL_BUSINESS_READY"
+        ],
+        "qualificationRationale": "Критические данные для выбранного сегмента собраны, готовность к запуску подтверждена.",
+        "buyingIntent": "WANTS_NEXT_STEP",
+        "recommendedNextStep": "Связаться с лидом и перейти к предметному обсуждению запуска."
+      }
+    },
+    {
+      "id": "human-manager-contact-preference",
+      "manualReview": {
+        "status": "FAIL",
+        "findings": [
+          "First-write/no-call instruction missing from manager card despite assurance to customer.",
+          "Accepted substantive answer discarded with an unauthorized optional qualification move."
+        ]
+      },
+      "mechanicalInvariantViolations": [],
+      "handoffs": 1,
+      "phoneKnownAtEnd": true,
+      "managerCardPhoneMatchesLead": true,
+      "transcript": [
+        {
+          "actor": "USER",
+          "text": "Я в Москве. На запуск есть 400 тысяч, это весь доступный капитал, готов потратить его на аренду, залог, подготовку и текущие расходы. Хочу свой основной бизнес, начать на следующей неделе. На просмотры и договоры буду ездить сам, 3–4 часа в день выделю.",
+          "reply": "Спасибо, ситуация очень ясная. С капиталом 400 тысяч в Москве на старте можно закрыть 1–2 объекта (один объект — около 180 тысяч, два — около 310 тысяч), и у вас остаётся резерв. Готовность к личным просмотрам и 3–4 часа в день — как раз то, что нужно для запуска на следующей неделе. Дмитрий, наш менеджер, поможет определиться с числом объектов на старте и согласовать конкретные шаги. Подскажите, пожалуйста, номер телефона — Дмитрий свяжется с вами для обсуждения запуска.",
+          "qualification": "HOT",
+          "phoneKnown": false,
+          "responseSource": "LLM"
+        },
+        {
+          "actor": "MANAGER",
+          "text": "Я менеджер. Для обсуждения конкретного запуска оставьте, пожалуйста, номер телефона. По условиям объекта помогу разобраться лично.",
+          "reply": null,
+          "qualification": null,
+          "phoneKnown": false,
+          "responseSource": null
+        },
+        {
+          "actor": "USER",
+          "text": "А без звонка можно? Я на работе, мне удобнее переписка. И какие расходы будут каждый месяц?",
+          "reply": "Переписка — это удобно, без проблем. По ежемесячным расходам: основная сумма — аренда, в Москве это порядка 50 000 ₽ за объект в месяц. Плюс клининг, коммунальные и комиссии площадок — точные цифры зависят от конкретного объекта. Услуга запуска в 50 000 ₽ — разовая, а не ежемесячная. С учётом капитала 400 000 ₽ старт получается комфортный. На сколько объектов планируете начать?",
+          "qualification": "HOT",
+          "phoneKnown": false,
+          "responseSource": "LLM"
+        },
+        {
+          "actor": "USER",
+          "text": "Ладно, контакт +79990001122, но пожалуйста сначала напишите, звонить сейчас не надо.",
+          "reply": "Принял ваш номер, спасибо. Дмитрий напишет первым в переписку — без звонка. В чате он как раз поможет определиться с числом объектов на старте и согласовать следующие шаги.",
+          "qualification": "HOT",
+          "phoneKnown": true,
+          "responseSource": "LLM"
+        },
+        {
+          "actor": "USER",
+          "text": "Пока ждём, а доход с одной квартиры вы гарантируете?",
+          "reply": "Для 1 объект ориентир по доходу составляет около 20 000 ₽ в месяц. Это ориентир, а не гарантия: фактический результат зависит от конкретного объекта, загрузки и расходов.",
+          "qualification": "HOT",
+          "phoneKnown": true,
+          "responseSource": "FALLBACK_DRAFT"
+        }
+      ],
+      "notificationSummary": {
+        "name": null,
+        "contact": null,
+        "phoneNumber": "+79990001122",
+        "city": "Москва",
+        "budget": 400000,
+        "segment": "SMALL_BUSINESS",
+        "segmentConfidence": 0.75,
+        "availableCapital": 400000,
+        "entryBudget": null,
+        "additionalLaunchCapital": null,
+        "capitalScope": "TOTAL_LIMIT",
+        "additionalExpensesReadiness": "READY",
+        "businessModelReadiness": "ACCEPTS",
+        "launchCostAwareness": "CONFIRMED",
+        "financialReadiness": "HIGH",
+        "financialBarrier": null,
+        "startingUnits": null,
+        "scalingPotentialUnits": null,
+        "launchTiming": "WITHIN_MONTH",
+        "goal": "MAIN_BUSINESS",
+        "businessExperience": null,
+        "shortTermRentalExperience": null,
+        "ownsProperty": null,
+        "managementReadiness": "READY",
+        "availableTime": "3–4 часа в день",
+        "desiredIncome": null,
+        "economicsEstimateUnits": null,
+        "estimatedMonthlyPartnerIncome": null,
+        "incomeEstimateGuaranteed": false,
+        "questions": [
+          "А без звонка можно?",
+          "Какие расходы будут каждый месяц?"
+        ],
+        "objections": [],
+        "primaryBarrier": null,
+        "secondaryBarrier": null,
+        "explainedKnowledge": [
+          "small-business-entry",
+          "single-unit-start",
+          "supported-cities",
+          "pricing",
+          "operations-guests"
+        ],
+        "qualificationStatus": "HOT",
+        "reasonCodes": [
+          "SMALL_BUSINESS_READY"
+        ],
+        "qualificationRationale": "Критические данные для выбранного сегмента собраны, готовность к запуску подтверждена.",
+        "buyingIntent": "READY_TO_START",
+        "recommendedNextStep": "Связаться с лидом и перейти к предметному обсуждению запуска."
+      }
+    }
+  ],
+  "sourceReportSha256": "b0542bce4732c25227c0fd878c85259066820865d5a77c01d5feb2e5d6243daf",
+  "limitation": "Five scripted synthetic trajectories are not a measurement of real customer conversion. No current production configuration or availability claim."
+}

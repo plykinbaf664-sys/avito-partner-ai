@@ -32,6 +32,7 @@ export function mergeExtractedFacts(
 
   for (const field of [
     "city",
+    "contactPreferences",
     "availableCapital",
     "entryBudget",
     "additionalLaunchCapital",
@@ -63,7 +64,7 @@ export function mergeExtractedFacts(
         field === "additionalExpensesReadiness" ||
         field === "businessModelReadiness") &&
       value === "UNKNOWN";
-    if (value !== null && !isUnknownEnum) {
+    if (value !== null && value !== undefined && !isUnknownEnum) {
       Object.assign(patch, { [field]: value });
     }
   }

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { COMPACT_EXTRACTION_CONTRACT } from "./compact-contract";
+import { COMPACT_EXTRACTION_CONTRACT, CONTACT_PREFERENCES_EXTRACTION } from "./compact-contract";
 import { describeCompactExtractionSchema } from "./compact-schema";
 import { createLlmUsageTracker, type LlmCallContext, type LlmUsageTotals } from "../observability/llm-usage";
 
@@ -47,6 +47,7 @@ export const extractedMessageSchema = z
         // it avoids another nullable union in Anthropic's schema.
         phoneNumber: z.string().trim().max(40),
         phoneConfirmed: z.boolean(),
+        contactPreferences: boundedText.optional().describe("Current customer contact preferences and constraints: time, channel, whether a call is welcome. Extract on any turn, including first phone. On correction return the updated complete preference, preserving compatible earlier constraints; omit if not discussed. Not project participation/free time or a promise by the team. Do not repeat phone digits."),
         // Validate the structured field's shape, never interpret raw customer
         // language here. The model resolves locality/region and alternatives.
         city: boundedText.regex(/^[^,;()/|\r\n]+$/u,
@@ -644,6 +645,7 @@ export function createMessageExtractor({
           primaryFear: input.currentLead.primaryFear,
           secondaryFear: input.currentLead.secondaryFear,
           phoneKnown: Boolean(input.currentLead.phoneNumber && input.currentLead.phoneConfirmed),
+          contactPreferences: input.currentLead.contactPreferences ?? null,
         },
         RECENT_MESSAGES: typeof input === "string" ? [] : (input.recentMessages ?? [])
           .slice(-MAX_RECENT_LLM_MESSAGES)
@@ -654,7 +656,7 @@ export function createMessageExtractor({
           })),
       });
     const usage = createLlmUsageTracker();
-    const systemPrompt = llmProvider.promptProfile === "compact-v1" ? COMPACT_EXTRACTION_CONTRACT : EXTRACTION_SYSTEM_PROMPT;
+    const systemPrompt = (llmProvider.promptProfile === "compact-v1" ? COMPACT_EXTRACTION_CONTRACT : EXTRACTION_SYSTEM_PROMPT) + "\n" + CONTACT_PREFERENCES_EXTRACTION;
     const requestExtraction = (validationFeedback?: string) =>
       usage.call(llmProvider, {
         systemPrompt: validationFeedback ? `${systemPrompt}\n\nTRUSTED_VALIDATION_FEEDBACK: ${validationFeedback}` : systemPrompt,
@@ -663,7 +665,7 @@ export function createMessageExtractor({
         jsonSchema,
         cache: { stableFields: ["APPROVED_CITY_NAMES", "APPROVED_KNOWLEDGE"], ttl: "5m", systemPrefix: systemPrompt },
         metadata: { ...(typeof input === "string" ? {} : input.llmContext), stage: "EXTRACTION", attempt: usage.totals.calls + 1,
-          promptVersion: llmProvider.promptProfile === "compact-v1" ? "extraction-compact-v5" : "extraction-context-v3" },
+          promptVersion: llmProvider.promptProfile === "compact-v1" ? "extraction-compact-v6" : "extraction-context-v4" },
       }).catch(error => { if (error instanceof Error) Object.assign(error, { llmUsage: usage.totals }); throw error; });
     const parseExtraction = (response: LlmTextResponse): ExtractedMessage => {
       const parsed = extractedMessageSchema.safeParse(

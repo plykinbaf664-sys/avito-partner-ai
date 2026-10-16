@@ -14,6 +14,49 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it("keeps prior memory when semantic review removes a question that draft memory claims was asked", async () => {
+    const before = "Клиент уточняет работу с гостями.";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Бронирования ведёт администратор команды.",
+      qualificationQuestion: "Есть ли у Вас опыт?", nextInformationNeed: "EXPERIENCE",
+      conversationMemory: "Спросил клиента про опыт." }), JSON.stringify({ answerIsSupported: true,
+      answersCurrentRequest: true, optionalQuestionAppropriate: false, feedback: "Тема не нужна сейчас." })]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: createInitialLead("memory", "TEST", "memory", new Date()),
+      conversationMemory: before, recentMessages: [{ direction: "INBOUND", content: "Кто работает с гостями?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        allowedNextInformationNeeds: ["EXPERIENCE"], knowledgeEntryIds: ["operations-guests"], unresolvedQuestions: [] } });
+    expect(result.text).toBe("Бронирования ведёт администратор команды.");
+    expect(result.conversationMemory).toBe(before);
+  });
+
+  it("rejects a contradictory memory note without rejecting the supported answer or making an extra call", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Команда поможет подобрать объект.",
+      qualificationQuestion: "Оставите телефон для менеджера?", nextInformationNeed: "PHONE_NUMBER",
+      conversationMemory: "Телефон не запрашивали." }), JSON.stringify({ answerIsSupported: true,
+      answersCurrentRequest: true, optionalQuestionAppropriate: true, conversationMemoryIsFaithful: false,
+      previousMemoryIsFaithful: false, feedback: "" })]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: createInitialLead("memory-guard", "TEST", "memory-guard", new Date()),
+      conversationMemory: "Противоречивая старая заметка.", recentMessages: [{ direction: "INBOUND", content: "Готов начать." }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        allowedNextInformationNeeds: ["PHONE_NUMBER"], knowledgeEntryIds: ["launch-process"], unresolvedQuestions: [] } });
+    expect(result.text).toContain("Оставите телефон");
+    expect(result.conversationMemory).toBe("");
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("uses the single request selected semantically inside an optional component without inventing replacement text", async () => {
+    const onlyRequest = "Напишите номер для связи с менеджером.";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Команда поможет подобрать объект.",
+      qualificationQuestion: "Согласны передать контакт? " + onlyRequest, nextInformationNeed: "PHONE_NUMBER" }),
+      JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        optionalQuestionHasSingleRequest: false, singleOptionalQuestion: onlyRequest, feedback: "" })]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: createInitialLead("single", "TEST", "single", new Date()),
+      recentMessages: [{ direction: "INBOUND", content: "Готов начать." }], plan: { text: "", nextInformationNeed: null,
+        asksUserQuestion: false, useNaturalAdaptation: true, allowedNextInformationNeeds: ["PHONE_NUMBER"],
+        knowledgeEntryIds: ["launch-process"], unresolvedQuestions: [] } });
+    expect(result.text).toBe("Команда поможет подобрать объект. " + onlyRequest);
+    expect(llm.callCount).toBe(2);
+  });
+
   it("keeps service observations separate from customer speech and semantically reviews first contact", async () => {
     const llm = new FakeLLMProvider([JSON.stringify({ replyAction: "SEND_REPLY",
       answerText: "Здравствуйте! Помогу разобраться с запуском бизнеса на посуточной аренде. Что хотели бы узнать?",
@@ -501,7 +544,7 @@ describe("natural response generation", () => {
     expect(result.text).toContain("3–4");
     expect(llm.callCount).toBe(3);
     expect(llm.requests[0]!.maxTokens).toBeGreaterThanOrEqual(2000);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v8");
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v9");
     expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
     expect(JSON.stringify(llm.requests)).not.toContain("operations-after-capital-correction");
   });

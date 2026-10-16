@@ -944,9 +944,11 @@ describe("multi-turn qualification conversation", () => {
       }),
       reply({ facts: { phoneNumber: "+79991234567", phoneConfirmed: true } }),
       reply({
+        facts: { contactPreferences: "Завтра в 16:00" },
         signals: { previousQuestionResponse: "ANSWERED" },
       }),
       reply({
+        facts: { contactPreferences: "Завтра в 10 утра по Москве" },
         signals: { previousQuestionResponse: "ANSWERED" },
       }),
     ]);

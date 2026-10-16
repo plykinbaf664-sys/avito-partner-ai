@@ -156,6 +156,7 @@ export function createInitialLead(
     contact: null,
     phoneNumber: null,
     phoneConfirmed: false,
+    contactPreferences: null,
     city: null,
     serviceability: "NEEDS_REVIEW",
     budget: null,
@@ -948,17 +949,9 @@ export function createIncomingEventProcessor({
       // Callback preference is optional conversational context, not a
       // qualification field. Keep a concrete slot, or a semantic answer to
       // the immediately preceding scheduling question, visible in CRM.
-      const explicitCallbackSlot =
-        /(?:\u0437\u0430\u0432\u0442\u0440\u0430|\u0441\u0435\u0433\u043e\u0434\u043d\u044f|\u0443\u0442\u0440\u043e\u043c|\u0432\u0435\u0447\u0435\u0440\u043e\u043c|\u0432\u00a0?\d{1,2}\s*(?:\u0447\u0430\u0441|:)|\d{1,2}\s*:\s*\d{2})/iu.test(input.text);
-      const answeredCallbackQuestion =
-        latestOutbound !== undefined &&
-        /(?:\u043a\u0430\u043a\u043e\u0439|\u0432\u00a0?\u043a\u0430\u043a\u043e\u0439).{0,30}(?:\u0434\u0435\u043d\u044c|\u0432\u0440\u0435\u043c\u044f)|(?:\u043a\u043e\u0433\u0434\u0430|\u0432\u043e\u00a0?\u0441\u043a\u043e\u043b\u044c\u043a\u043e|\u0443\u0434\u043e\u0431\u043d).{0,35}(?:\u0437\u0432\u043e\u043d|\u0441\u0432\u044f\u0437|\u043f\u0440\u0438\u043d\u044f\u0442\u044c)/iu.test(latestOutbound.content) &&
-        extracted.extraction.signals.previousQuestionResponse === "ANSWERED";
-      const callbackPreference =
-        currentLead.handoffAt !== null &&
-        (explicitCallbackSlot || answeredCallbackQuestion)
-          ? input.text
-          : null;
+      // Semantic interpretation belongs to extraction, on any turn. The
+      // legacy questions note remains a persistence compatibility projection.
+      const callbackPreference = extracted.extraction.facts.contactPreferences ?? null;
       let evaluatedLead = mergeExtractedFacts(
         currentLead,
         extracted.extraction,
@@ -1264,9 +1257,10 @@ export function createIncomingEventProcessor({
           responseLlm !== null &&
           responseLlm.replyAction !== "NO_REPLY" &&
           responseLlm.text.trim().length > 0 &&
-          responseLlm.nextInformationNeed === transactionNextInformationNeed;
+          (responseLlm.nextInformationNeed === transactionNextInformationNeed || Boolean(responseLlm.answerText?.trim()));
+        const optionalMoveRemoved = canUseAdaptiveResponse && responseLlm!.nextInformationNeed !== transactionNextInformationNeed;
         const transactionOutboundText = canUseAdaptiveResponse
-          ? responseLlm!.text
+          ? optionalMoveRemoved ? responseLlm!.answerText! : responseLlm!.text
           : responseLlm === null &&
               transactionResponsePlan.currentTurnRequiresAnswer &&
               transactionDecision.nextAction === "CONTINUE_QUALIFICATION" &&
@@ -1295,7 +1289,7 @@ export function createIncomingEventProcessor({
             ? "NO_REPLY"
             : canUseAdaptiveResponse
               ? "LLM"
-              : !responseGenerationPlan.useNaturalAdaptation
+              : phoneFulfillsRecentStep || !responseGenerationPlan.useNaturalAdaptation
                 ? "POLICY_REPLY"
               : "FALLBACK_DRAFT";
         const qualificationCompleted = responseSuppressed
@@ -1368,6 +1362,8 @@ export function createIncomingEventProcessor({
               ),
           conversationalNotes: responseSuppressed
             ? storedMemory.conversationalNotes
+            : optionalMoveRemoved || (responseLlm !== null && responseLlm.replyAction !== "NO_REPLY" && !canUseAdaptiveResponse)
+              ? storedMemory.conversationalNotes
             : responseLlm?.conversationMemory?.slice(0, 700) ??
               storedMemory.conversationalNotes,
         };
@@ -1475,7 +1471,7 @@ export function createIncomingEventProcessor({
           if (
             existing?.deliveryStatus === "PENDING" &&
             existing.deliveryAttempts === 0 &&
-            !existing.summary.phoneNumber
+            (!existing.summary.phoneNumber || existing.summary.contactPreferences !== managerSummary.contactPreferences)
           ) {
             await repositories.managerNotifications.update({
               ...existing,
@@ -1547,8 +1543,12 @@ export function createIncomingEventProcessor({
       await settleUsage(completed.outOfOrderIgnored || completed.responseSuppressed ? "SUPPRESSED" :
         completed.responseGenerationSource === "NO_REPLY" ? "NO_REPLY" :
         completed.responseGenerationSource === "FALLBACK_DRAFT" ? "FALLBACK" : "USED");
-      if (completed.responseGenerationSource === "FALLBACK_DRAFT" && responseLlm) responseFailureCode =
-        responseLlm.text.trim() ? "RESPONSE_NOT_USED_AFTER_STATE_UPDATE" : "RESPONSE_POLICY_EMPTY_REPLY";
+      if (completed.responseGenerationSource === "FALLBACK_DRAFT" && responseLlm) {
+        responseFailureCode = responseLlm.text.trim() ? "RESPONSE_NOT_USED_AFTER_STATE_UPDATE" : "RESPONSE_POLICY_EMPTY_REPLY";
+        logger.error("response_generation.fallback", { eventId: registration.event.id,
+          leadId: completed.lead.id, conversationId: completed.conversation.id,
+          source: input.source, errorType: responseFailureCode });
+      }
 
       if (completed.outOfOrderIgnored) {
         logger.info("event.out_of_order_ignored", {

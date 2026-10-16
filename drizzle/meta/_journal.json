@@ -120,6 +120,13 @@
       "when": 1791794769781,
       "tag": "0016_recipient_operational_alerts",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1792145558391,
+      "tag": "0017_semantic_contact_preferences",
+      "breakpoints": true
     }
   ]
 }

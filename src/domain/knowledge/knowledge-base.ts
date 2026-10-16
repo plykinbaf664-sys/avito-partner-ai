@@ -552,7 +552,8 @@ export function answerFromKnowledgeBase(
       const monthlyIncome = estimate.estimatedMonthlyIncome
         .toLocaleString("ru-RU")
         .replaceAll("\u00a0", " ");
-      return `Для ${formatUnitCount(estimate.units)} ориентир по доходу составляет около ${monthlyIncome} ₽ в месяц. ${estimate.disclaimer}`;
+      const genitiveUnit = estimate.units % 10 === 1 && estimate.units % 100 !== 11 ? "объекта" : "объектов";
+      return `Для ${estimate.units} ${genitiveUnit} ориентир по доходу составляет около ${monthlyIncome} ₽ в месяц. ${estimate.disclaimer}`;
     }
     if (asksAboutEconomics && availableCapital !== null && economicsContext) {
       const incomeScenarios = economicsContext.scenarios

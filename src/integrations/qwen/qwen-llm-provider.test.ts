@@ -9,7 +9,7 @@ import { qwenApiBase, type QwenConfig } from "./config";
 import { prepareQwenContext } from "./context";
 import { createRuntimeLlmProvider } from "../llm/runtime-provider";
 import { createMessageExtractor } from "@/application/extraction/extract-message";
-import { COMPACT_EXTRACTION_CONTRACT } from "@/application/extraction/compact-contract";
+import { COMPACT_EXTRACTION_CONTRACT, CONTACT_PREFERENCES_EXTRACTION } from "@/application/extraction/compact-contract";
 import { FakeLLMProvider } from "../fake/fake-llm-provider";
 
 const config: QwenConfig = { apiKey: "synthetic-private-key", baseUrl: "https://synthetic.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
@@ -135,8 +135,8 @@ describe("Qwen API, usage and provider boundaries", () => {
   it("selects the compact extraction contract without exposing eval trajectories", async () => {
     const llm = Object.assign(new FakeLLMProvider(["{}", "{}"]), { promptProfile: "compact-v1" as const });
     await createMessageExtractor({ llmProvider: llm })("Сколько времени потребуется?");
-    expect(llm.requests[0]!.systemPrompt).toBe(COMPACT_EXTRACTION_CONTRACT);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("extraction-compact-v5");
+    expect(llm.requests[0]!.systemPrompt).toBe(COMPACT_EXTRACTION_CONTRACT + "\n" + CONTACT_PREFERENCES_EXTRACTION);
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("extraction-compact-v6");
     expect(llm.requests[0]!.systemPrompt).not.toContain("operations-after-capital-correction");
   });
 
@@ -155,5 +155,16 @@ describe("Qwen API, usage and provider boundaries", () => {
     const context = JSON.parse(llm.requests[0]!.userMessage);
     expect(context.APPROVED_KNOWLEDGE.length).toBeGreaterThan(10);
     expect(context.APPROVED_KNOWLEDGE.every((entry: Record<string, unknown>) => !Object.hasOwn(entry, "answer"))).toBe(true);
+  });
+
+  it("accepts semantic contact constraints in sparse extraction without confusing them with participation time", async () => {
+    const preferences = "Сначала написать, звонить после 18 часов.";
+    const llm = Object.assign(new FakeLLMProvider([JSON.stringify({ intent: "QUALIFICATION_INFORMATION",
+      facts: { contactPreferences: preferences, phoneNumber: "89990001122", phoneConfirmed: true },
+      signals: {}, confidence: 0.95, uncertainty: [] })]), { promptProfile: "compact-v1" as const });
+    const result = await createMessageExtractor({ llmProvider: llm })("89990001122, сначала напишите; после 18 могу поговорить.");
+    expect(result.extraction.facts).toMatchObject({ contactPreferences: preferences, phoneNumber: "+79990001122", availableTimeDetails: null });
+    expect(result.diagnostics?.status).toBe("VALID");
+    expect(llm.callCount).toBe(1);
   });
 });
