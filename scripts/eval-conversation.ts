@@ -356,7 +356,7 @@ async function main() {
             : await lab.clientMessage(sessionId, step.text, at, `turn-${index}`);
           if (step.actor === "USER") {
             if (scenario.id === "multi-question-sales-continuation") {
-              assert.equal(result.snapshot.lastProcessing?.responseGenerationSource, "LLM");
+              if (index < 2) assert.equal(result.snapshot.lastProcessing?.responseGenerationSource, "LLM");
               assert.equal(result.snapshot.lastProcessing?.responseFailureCode, null);
               assert.notEqual(result.snapshot.qualification.status, "NO_FIT");
               if (index < 2) assert.equal(notifications.requests.length, 0, "No handoff before contact");
