@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { avitoFetch } from "./avito-transport";
 import type { StructuredLogger } from "@/application/observability/structured-logger";
 
 type AvitoOperation = "TOKEN" | "ACCOUNT" | "LIST_CHATS" | "LIST_MESSAGES" | "SEND_MESSAGE" | "WEBHOOK";
@@ -152,7 +153,7 @@ export class AvitoApiClient {
 
   constructor(
     config: AvitoClientConfig,
-    fetcher: typeof fetch = fetch,
+    fetcher: typeof fetch = avitoFetch,
     now: () => number = () => Date.now(),
   ) {
     this.config = config;

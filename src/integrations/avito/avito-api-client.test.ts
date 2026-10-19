@@ -3,6 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 import { AvitoApiClient, AvitoApiError } from "./avito-api-client";
 
 describe("Avito API client", () => {
+  it("uses a scoped connection dispatcher by default and preserves cancellation", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ id: 123 }));
+    vi.stubGlobal("fetch", fetcher);
+    try {
+      await new AvitoApiClient({ clientId: "id", clientSecret: "secret" }).getOwnAccount("token");
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(fetcher.mock.calls[0][1]).toMatchObject({ dispatcher: expect.any(Object), signal: expect.any(AbortSignal) });
+    } finally { vi.unstubAllGlobals(); }
+  });
   it("retries a transient read once with safe operation diagnostics", async () => {
     vi.useFakeTimers();
     try {
