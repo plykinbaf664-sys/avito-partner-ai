@@ -45,3 +45,13 @@ Semantic completeness and continuation remain model judgments, with bounded repa
 The first server trajectory was stopped before deployment. A valid income caveat used wording outside the existing conservative financial checker; its repair unnecessarily disabled qualification. A subsequent generated answer contained corrupted foreign-script text, which the existing guard rejected without a repair attempt. Neither failure justified weakening the financial or output guard.
 
 Two additional regression cases now protect bounded repair of these defects while retaining a permitted next step. The financial disclaimer check and platform/script rejection still apply to the repaired result. Unsupported factual-claim recovery keeps its prior restrictions. The initial server candidate is not counted as a passed live evaluation.
+
+## Final verification
+
+Release `8e67fc19d72e9037992046273075d3b57ea5f410`: all 674 tests, typecheck, lint and build PASS on the server candidate. The three-turn real-Qwen trajectory passed automated assertions, semantic judging and manual coverage/contact review: 3 deliveries, 1 handoff, no fallback, and duplicate inbound caused no additional model call or delivery. The phone acknowledgement uses the existing deterministic policy response; only the first two substantive turns require LLM generation. That distinction was corrected in the new test harness without changing production behavior.
+
+The compact evidence is in [the evaluation report](../evals/2026-10-20-multi-question-sales.json). Earlier incomplete runs are not counted as passes.
+
+Production promotion completed on October 20 (Moscow time). Health/readiness and the production Qwen smoke check passed. Rollback evidence: `/opt/avito-partner-ai-backups/qwen-migration-20261019-225300/operational-release.json`; previous revision `a035090`. No test messages were sent to real customers.
+
+One presentation limitation remains visible in the passing transcript: the model mentions the internal confirmed-city list while explaining uncertain locality coverage. The caveat is factually correct and does not reject the lead, but the wording is undesirable. The focused coverage/contact pass does not claim full compliance with every style instruction or every possible conversation.
