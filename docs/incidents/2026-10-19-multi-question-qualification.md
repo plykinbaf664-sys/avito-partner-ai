@@ -39,3 +39,9 @@ The initial full suite passed 671 tests, lint and build; the additional real-pro
 The first local live run answered both financial questions and requested a phone after qualification, but its new harness assertion incorrectly expected the legacy literal QUALIFIED instead of the actual HOT status. The assertion now verifies contact eligibility and the persisted phone request, preserving the intended behavior. This incomplete run is not counted as a passed trajectory. Final live trajectory and release evidence are recorded alongside the evaluation report.
 
 Semantic completeness and continuation remain model judgments, with bounded repair rather than an unconditional question requirement. This is not a guarantee of flawless behavior on every phrasing. Existing financial, geographic, duplicate-delivery and handoff safeguards remain deterministic.
+
+## October 20 live-test findings
+
+The first server trajectory was stopped before deployment. A valid income caveat used wording outside the existing conservative financial checker; its repair unnecessarily disabled qualification. A subsequent generated answer contained corrupted foreign-script text, which the existing guard rejected without a repair attempt. Neither failure justified weakening the financial or output guard.
+
+Two additional regression cases now protect bounded repair of these defects while retaining a permitted next step. The financial disclaimer check and platform/script rejection still apply to the repaired result. Unsupported factual-claim recovery keeps its prior restrictions. The initial server candidate is not counted as a passed live evaluation.

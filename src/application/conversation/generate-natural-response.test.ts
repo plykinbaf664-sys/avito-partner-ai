@@ -14,6 +14,26 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it.each([
+    ["income caveat", "Ориентир дохода — 20 000 ₽ с объекта, гарантия не даётся.", "Ориентир дохода — 20 000 ₽ с объекта, без гарантии."],
+    ["corrupted script", "Команда поможет с подбором: 方便ный формат.", "Команда поможет с подбором объекта."],
+  ])("repairs %s without discarding a useful qualification continuation", async (_kind, draft, corrected) => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ answerText: draft, qualificationQuestion: "Когда планируете запуск?", nextInformationNeed: "LAUNCH_TIMING", interpretedQuestionKind: "BUSINESS_INFORMATION" }),
+      JSON.stringify({ answerText: corrected, qualificationQuestion: "Когда планируете запуск?", nextInformationNeed: "LAUNCH_TIMING", interpretedQuestionKind: "BUSINESS_INFORMATION" }),
+      supportedReview,
+    ]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: createInitialLead("repair", "TEST", "repair", new Date()),
+      recentMessages: [{ direction: "INBOUND", content: "Хочу начать, расскажите про доход и подбор." }],
+      plan: { text: "Доход — ориентир около 20 000 ₽, не гарантия.", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, allowedNextInformationNeeds: ["LAUNCH_TIMING"], knowledgeEntryIds: ["guarantees-and-economics", "launch-process"], unresolvedQuestions: [] },
+    });
+    expect(result.answerText).toBe(corrected);
+    expect(result.nextInformationNeed).toBe("LAUNCH_TIMING");
+    expect(JSON.parse(llm.requests[1].userMessage).answerRecovery).toBe(false);
+    expect(llm.callCount).toBe(3);
+  });
+
   it("requires explicit completeness and continuation review from a real provider", async () => {
     const fake = new FakeLLMProvider([JSON.stringify({ answerText: "Ориентир — 3–4 часа в день.", qualificationQuestion: "",
       interpretedQuestionKind: "BUSINESS_INFORMATION" }),

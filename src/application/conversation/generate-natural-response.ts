@@ -1261,6 +1261,7 @@ Judge answerText separately from qualificationQuestion: a bad optional question 
           "RESPONSE_POLICY_MISSING_QUALIFICATION_PROGRESS",
           "RESPONSE_POLICY_MISSING_CURRENT_INTENT_ANSWER",
           "RESPONSE_POLICY_INFORMAL_ADDRESS",
+          "RESPONSE_POLICY_UNAPPROVED_PLATFORM_OR_SCRIPT",
           "RESPONSE_POLICY_REPEATED_GUIDANCE_TOPIC",
           "RESPONSE_POLICY_REPEATED_KNOWLEDGE_TOPIC",
           "RESPONSE_POLICY_META_QUESTION_KNOWLEDGE",
@@ -1278,6 +1279,10 @@ Judge answerText separately from qualificationQuestion: a bad optional question 
         ? "JSON ответа оборвался или оказался невалидным. Верни полный корректный JSON; сократи text и conversationMemory, сохрани содержательный ответ на текущий вопрос."
         : diagnosticCode === "RESPONSE_POLICY_DOUBLE_COUNTED_LAUNCH_FEE"
         ? "Стоимость одного объекта в calculationFacts уже включает разовую услугу запуска. Не прибавляй её второй раз; назови верный полный ориентир и объясни экономику естественно."
+        : diagnosticCode === "RESPONSE_POLICY_MISSING_INCOME_DISCLAIMER"
+        ? "Доход — только ориентир без гарантии. Явно обозначь это, сохрани поддержанные расчёты и один уместный разрешённый следующий шаг."
+        : diagnosticCode === "RESPONSE_POLICY_UNAPPROVED_PLATFORM_OR_SCRIPT"
+        ? "Удали неутверждённые платформы и случайные иноязычные вставки. Сохрани полезный ответ по утверждённым фактам и один уместный разрешённый следующий шаг; весь ответ должен быть связным русским текстом."
         : diagnosticCode === "RESPONSE_POLICY_UNAPPROVED_UNIT_COUNT"
         ? "Названное число объектов превышает или не соответствует максимуму детерминированного калькулятора. Используй maximumAffordableObjects из calculationFacts; можешь рекомендовать начать с меньшего числа, но не увеличивай предел."
         : diagnosticCode === "RESPONSE_POLICY_UNAVAILABLE_NEXT_NEED" &&
@@ -1322,7 +1327,8 @@ Judge answerText separately from qualificationQuestion: a bad optional question 
         })();
         const reviewedTurnKind = "reviewedTurnKind" in error
           ? answerReviewSchema.shape.currentTurnKind.parse(error.reviewedTurnKind) : undefined;
-        const answerRecovery = !["RESPONSE_POLICY_INCOMPLETE_ANSWER", "RESPONSE_POLICY_MISSING_NEXT_STEP"].includes(diagnosticCode ?? "") &&
+        const answerRecovery = !["RESPONSE_POLICY_INCOMPLETE_ANSWER", "RESPONSE_POLICY_MISSING_NEXT_STEP",
+          "RESPONSE_POLICY_MISSING_INCOME_DISCLAIMER", "RESPONSE_POLICY_UNAPPROVED_PLATFORM_OR_SCRIPT"].includes(diagnosticCode ?? "") &&
           reviewedTurnKind !== "CONTRIBUTION" && reviewedTurnKind !== "CLOSING" &&
           (reviewedTurnKind === "REQUEST" || plan.currentTurnRequiresAnswer === true) &&
           (failedStructuredAnswer || ["RESPONSE_POLICY_UNAVAILABLE_NEXT_NEED", "RESPONSE_POLICY_UNREQUESTED_MANAGER_REFERRAL",
