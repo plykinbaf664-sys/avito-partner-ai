@@ -68,6 +68,50 @@ function reply({
 }
 
 describe("multi-turn qualification conversation", () => {
+  it("does not fall back to the city catalogue when a customer supplies a locality", async () => {
+    const { llm } = harness([
+      reply({ facts: { startingUnits: 40 } }),
+      reply({ facts: { city: "Путилково" }, signals: { knowledgeEntryIds: ["supported-cities"],
+        previousQuestionResponse: "ANSWERED", questionKind: "NONE" } }),
+    ]);
+    const generator = vi.fn().mockResolvedValueOnce({ text: "В каком городе рассматриваете запуск?",
+      nextInformationNeed: "CITY", replyAction: "SEND_REPLY", usedKnowledgeEntryIds: [] }).mockRejectedValueOnce(new Error("RESPONSE_POLICY_VIOLATION"));
+    const processEvent = createIncomingEventProcessor({ persistence, extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse: generator, generateId: () => `location-fallback-${++nextId}`,
+      now: () => new Date("2026-10-19T00:00:00Z") });
+    await processEvent(input(911, "Хочу сорок квартир"));
+    const result = await processEvent(input(912, "Живу в Путилково Московская область"));
+    expect(result.metrics.responseGenerationSource).toBe("FALLBACK_DRAFT");
+    expect(result.qualificationStatus).not.toBe("NO_FIT");
+    expect(result.outboundMessage).not.toMatch(/спис[ок]|подтвержд[её]нные города|автоматическ.*отказ/iu);
+    // A contribution does not mandate an unsolicited availability explanation.
+    // Existing fallback may simply continue with a useful new question.
+    expect(result.outboundMessage?.trim()).toBeTruthy();
+    expect(result.outboundMessage).not.toMatch(/В каком городе/iu);
+  });
+  it.each([40, 17])("preserves an explicit %i-object budget calculation when generation fails without a contextual flag", async (units) => {
+    const { llm } = harness([
+      reply({ facts: { startingUnits: units } }),
+      reply({ intent: "QUESTION", facts: { calculationUnits: units }, signals: {
+        questions: [`Какой нужен бюджет на ${units} квартир?`], questionKind: "BUSINESS_INFORMATION",
+        knowledgeEntryIds: ["pricing"], contextualReference: false, requiresSubstantiveAnswer: true } }),
+    ]);
+    const generator = vi.fn().mockRejectedValue(new Error("RESPONSE_POLICY_MISSING_CURRENT_INTENT_ANSWER"));
+    const processEvent = createIncomingEventProcessor({ persistence,
+      extractMessage: createMessageExtractor({ llmProvider: llm }), generateNaturalResponse: generator,
+      generateId: () => `explicit-budget-${++nextId}`, now: () => new Date("2026-10-18T14:00:00Z") });
+    await processEvent(input(901, `${units} квартир`));
+    const question = `Какой нужен бюджет на ${units} квартир?`;
+    const result = await processEvent(input(902, question));
+    expect(result.metrics.responseGenerationSource).toBe("FALLBACK_DRAFT");
+    const normalize = (n: number) => n.toLocaleString("ru-RU").replaceAll("\u00a0", " ");
+    expect(result.outboundMessage).toContain(normalize(50_000 + units * 100_000));
+    expect(result.outboundMessage).toContain(normalize(50_000 + units * 130_000));
+    expect(result.outboundMessage).toMatch(/залог.*(допущение|зависит)/iu);
+    expect(result.outboundMessage).not.toContain("CRM");
+    expect(result.shouldHandoffToManager).toBe(false);
+    expect(generator.mock.calls[1][0].currentInbound).toMatchObject({ text: question, messageId: expect.any(String) });
+  });
   it("does not reject a funded six-object calculation against a stale ten-object target and recovers after selection", async () => {
     const { processEvent } = harness([
       reply({ facts: { city: "Москва", availableCapital: 1_200_000,

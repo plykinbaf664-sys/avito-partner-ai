@@ -123,23 +123,28 @@ function compactContextualEconomicsDraft(
   economics: ApprovedEconomicsContext | undefined,
   contextualReferenceResolved = false,
 ): string | null {
+  // calculationUnits also describes income questions. Use the extractor's
+  // semantic source selection, never customer keywords, to preserve that intent.
+  const explicitCostCalculation = extraction.facts.calculationUnits !== null &&
+    extraction.signals.knowledgeEntryIds?.some(id => id === "pricing" || id === "small-business-entry");
   if (
     !economics ||
-    (!extraction.signals.contextualReference && !contextualReferenceResolved) ||
+    (!explicitCostCalculation && !extraction.signals.contextualReference && !contextualReferenceResolved) ||
     extraction.signals.questions.length === 0
   ) {
     return null;
   }
-  const scenario = economics.scenarios.find((candidate) => candidate.oneObjectLaunch !== null);
-  const launch = extraction.facts.calculationUnits !== null
-    ? scenario?.requestedUnitsLaunch : scenario?.oneObjectLaunch;
-  if (!scenario || !launch) return null;
   const format = (value: number) => value.toLocaleString("ru-RU").replaceAll("\u00a0", " ");
-  const range = launch.totalMin === launch.totalMax
-    ? `${format(launch.totalMin)} ₽`
-    : `примерно ${format(launch.totalMin)}–${format(launch.totalMax)} ₽`;
-  const units = launch.units === 1 ? "одного объекта" : `${launch.units} объектов`;
-  return `По этому ориентиру запуск ${units} — ${range}. В расчёте учтены услуга запуска, аренда, расчётный залог и базовая подготовка; фактический залог зависит от объекта и собственника.`;
+  const estimates = economics.scenarios.flatMap(scenario => {
+    const launch = extraction.facts.calculationUnits !== null ? scenario.requestedUnitsLaunch : scenario.oneObjectLaunch;
+    if (!launch) return [];
+    const range = launch.totalMin === launch.totalMax ? `${format(launch.totalMin)} ₽`
+      : `${format(launch.totalMin)}–${format(launch.totalMax)} ₽`;
+    const units = launch.units === 1 ? "одного объекта" : `${launch.units} объектов`;
+    return [`Запуск ${units} при расчётной аренде ${format(launch.rentMin)} ₽ — около ${range}`];
+  });
+  if (!estimates.length) return null;
+  return `${estimates.join("; ")}. В суммы входят услуга запуска ${format(economics.launchFee)} ₽ один раз, аренда, расчётный залог и базовая подготовка. Залог в один месяц — допущение; фактические условия зависят от объекта и собственника. Это предварительные сценарии, не точная смета; операционный резерв учитывается отдельно.`;
 }
 
 export interface ConversationResponsePlan {

@@ -11,6 +11,14 @@ import {
 } from "./economics-calculator";
 
 describe("partner economics calculator", () => {
+  it("provides both approved comparison scenarios for an unpriced locality without changing the policy reference", () => {
+    const context = buildApprovedEconomicsContext({ city: "Путилково", requestedUnits: 40,
+      ...{ includeComparisonScenarios: true } });
+    expect(context.scenarios.map(s => s.requestedUnitsLaunch?.totalMin)).toEqual([4_050_000, 5_250_000]);
+    expect(buildApprovedEconomicsContext({ city: "Путилково", requestedUnits: 40 }).scenarios).toHaveLength(1);
+    expect(buildApprovedEconomicsContext({ city: "Москва", requestedUnits: 40,
+      ...{ includeComparisonScenarios: true } }).scenarios).toHaveLength(1);
+  });
   it.each([
     [1, 20_000],
     [3, 60_000],

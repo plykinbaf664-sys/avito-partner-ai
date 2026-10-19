@@ -14,6 +14,51 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it("retains the full large-scale calculation when review rejects a garbled unrelated discovery question", async () => {
+    const answerText = "По московскому примеру запуск 40 объектов — около 5 250 000 ₽. Это ориентир при аренде 50 000 ₽; залог в один месяц — допущение, фактические условия зависят от объекта.";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText,
+      qualificationQuestion: "Чем motivated рассматривать такой масштаб?", nextInformationNeed: "GOAL",
+      interpretedQuestionKind: "BUSINESS_INFORMATION" }), JSON.stringify({ answerIsSupported: true,
+      answersCurrentRequest: true, optionalQuestionAppropriate: false,
+      feedback: "Несвязная иноязычная вставка и ненужный вопрос вместо завершения расчёта." })]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { ...createInitialLead("large", "TEST", "large", new Date()), startingUnits: 40 },
+      recentMessages: [{ direction: "INBOUND", content: "Посчитайте сорок по московскому примеру." }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, allowedNextInformationNeeds: ["GOAL"], knowledgeEntryIds: [], unresolvedQuestions: [] },
+    });
+    expect(result.answerText).toBe(answerText);
+    expect(result.qualificationQuestion).toBe("");
+    expect(result.nextInformationNeed).toBeNull();
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("anchors a queued inbound before a later AI reply in both generation and review", async () => {
+    const question = "Бюджет на 40 квартир какой должен быть?";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: "При аренде 50 000 ₽ ориентир запуска 40 объектов — 5 250 000 ₽, включая разовую услугу, аренду, расчётный залог и подготовку. Фактические условия зависят от объекта.",
+      qualificationQuestion: "", interpretedQuestionKind: "BUSINESS_INFORMATION" }), supportedReview]);
+    await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { ...createInitialLead("queued", "TEST", "queued", new Date()), startingUnits: 40 },
+      ...{ currentInbound: { messageId: "queued-question", text: question } },
+      recentMessages: [
+        { direction: "INBOUND", content: "40 квартир", ...{ id: "scale" } },
+        { direction: "INBOUND", content: question, ...{ id: "queued-question" } },
+        { direction: "OUTBOUND", actor: "AI", content: "В каком городе планируете работать?", ...{ id: "later-ai" } },
+      ],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, knowledgeEntryIds: [], unresolvedQuestions: [] },
+    });
+    expect(llm.callCount).toBe(2);
+    for (const request of llm.requests) {
+      const payload = JSON.parse(request.userMessage);
+      expect(payload.currentExchange.activeUserTurn).toContain(question);
+      expect(payload.currentExchange.previousSpeakerTurn).toBeNull();
+      expect(payload.currentExchange.subsequentMessages).toEqual([
+        { direction: "OUTBOUND", actor: "AI", content: "В каком городе планируете работать?" },
+      ]);
+    }
+  });
+
   it("keeps prior memory when semantic review removes a question that draft memory claims was asked", async () => {
     const before = "Клиент уточняет работу с гостями.";
     const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Бронирования ведёт администратор команды.",
@@ -544,7 +589,7 @@ describe("natural response generation", () => {
     expect(result.text).toContain("3–4");
     expect(llm.callCount).toBe(3);
     expect(llm.requests[0]!.maxTokens).toBeGreaterThanOrEqual(2000);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v9");
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v10");
     expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
     expect(JSON.stringify(llm.requests)).not.toContain("operations-after-capital-correction");
   });

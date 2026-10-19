@@ -35,6 +35,16 @@ async function main() {
 
   const scenarios = [
     {
+      id: "large-launch-locality-continuation",
+      criteria: "На вопрос бюджета 40 квартир дать полный предварительный расчёт: 4 050 000 при аренде 35 000 или 5 250 000 при 50 000, услуга 50 000 включена один раз, залог один месяц лишь допущение. Не заменять расчёт общей справкой. После сообщения о Путилково Московской области принять ответ о месте, не говорить о внутренних списках/статусах и не отказывать. Не приписывать Путилково дешёвый региональный сценарий как установленную местную цену и не обещать доступность. На уточнение о подмосковном расчёте можно использовать московский пример условно при аренде 50 000, сохраняя неопределённость конкретных условий. Не повторять вопрос о городе или масштабе и не обещать гарантированный доход.",
+      steps: [
+        { actor: "USER", text: "Здравствуйте! Хочу запустить 40 квартир. Бюджет на 40 квартир какой должен быть?" },
+        { actor: "MANAGER", text: "Здравствуйте, в каком городе рассматриваете запуск?" },
+        { actor: "USER", text: "Живу в Путилково Московская область" },
+        { actor: "USER", text: "Для Подмосковья посчитайте по московскому примеру. Сколько закладывать на все сорок?" },
+      ],
+    },
+    {
       id: "team-manager-pending-action",
       criteria: "Менеджер обещал сам написать завтра, следующий ход на стороне команды. Не отправлять клиенту follow-up, не перезапускать анкету и не просить телефон. Подтверждение ожидания допускает NO_REPLY или короткое подтверждение, но не новый квалификационный вопрос, не новую презентацию и не технический fallback. Никакого MISSED за ожидание обещанного действия менеджера.",
       steps: [
@@ -336,6 +346,12 @@ async function main() {
             ? await lab.managerMessage(sessionId, step.text, at, `turn-${index}`)
             : await lab.clientMessage(sessionId, step.text, at, `turn-${index}`);
           if (step.actor === "USER") {
+            if (scenario.id === "large-launch-locality-continuation") {
+              assert.equal(result.snapshot.lastProcessing?.responseGenerationSource, "LLM");
+              assert.equal(result.snapshot.lastProcessing?.responseFailureCode, null);
+              assert.notEqual(result.snapshot.qualification.status, "NO_FIT");
+              assert.equal(notifications.requests.length, 0);
+            }
             if (scenario.id === "team-manager-pending-action") {
               assert.equal(result.snapshot.lastProcessing?.responseFailureCode, null);
               assert.equal(result.snapshot.followUp.awaitingUserReply, false);
@@ -404,7 +420,8 @@ async function main() {
           userMessage: JSON.stringify({ criteria: scenario.criteria, transcript,
             approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer }) => ({ id, category, answer })),
             approvedEconomics: buildApprovedEconomicsContext({ city: evaluatedLead?.city,
-              availableCapital: evaluatedLead?.availableCapital, requestedUnits: evaluatedLead?.startingUnits }),
+              availableCapital: evaluatedLead?.availableCapital, requestedUnits: evaluatedLead?.startingUnits,
+              includeComparisonScenarios: true }),
           }),
           maxTokens: 1200,
           jsonSchema: { type: "object", properties: { pass: { type: "boolean" }, reasons: { type: "array", items: { type: "string" } } }, required: ["pass", "reasons"], additionalProperties: false },

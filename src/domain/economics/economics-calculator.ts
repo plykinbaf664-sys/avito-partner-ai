@@ -263,6 +263,8 @@ export function buildApprovedEconomicsContext(input: {
   requestedUnits?: number | null;
   city?: string | null;
   rentReference?: RentRangeReference;
+  /** Conversation capability only; does not select a local price or change qualification policy. */
+  includeComparisonScenarios?: boolean;
 } = {}): ApprovedEconomicsContext {
   const explicitReference = input.rentReference;
   const cityReference = findApprovedRentReference(input.city ?? null);
@@ -270,7 +272,7 @@ export function buildApprovedEconomicsContext(input: {
     ? [explicitReference]
     : cityReference
       ? [cityReference]
-      : input.city
+      : input.city && !input.includeComparisonScenarios
         ? [APPROVED_REGIONAL_RENT_REFERENCE]
       : [APPROVED_REGIONAL_RENT_REFERENCE, APPROVED_MOSCOW_RENT_REFERENCE];
   const uniqueReferences = [...new Map(references.map((reference) => [

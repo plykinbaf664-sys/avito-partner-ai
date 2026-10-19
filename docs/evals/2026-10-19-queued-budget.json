@@ -1,0 +1,2029 @@
+{
+  "status": "PASS_FOR_TARGETED_SCOPE",
+  "date": "2026-10-19",
+  "checks": {
+    "testFiles": 49,
+    "tests": 664,
+    "typecheck": "PASS",
+    "lint": "PASS",
+    "build": "PASS"
+  },
+  "totalCalls": 36,
+  "estimatedCostUsd": 0.053503999999999996,
+  "runtimeSourceHashes": {
+    "src/application/conversation/compact-contract.ts": "6d5c3d00003882e023cbf67459316cf300432ff837509e66198f2ab707214c47",
+    "src/application/conversation/generate-natural-response.ts": "665ff9a2d0a3a7c12ee81fec4f809f37439da3afeb975b28eab5a4aa68a3721e",
+    "src/application/workflows/process-incoming-event.ts": "047c4052c869cff92f173ac830073e010ecf20f9441da09d449fdc51d422692f",
+    "src/domain/conversation/conversation-response.ts": "f1e5eeab9727de332873834052843a4e794311ff1f0d58199d2c0d1d0ab39367",
+    "src/domain/economics/economics-calculator.ts": "f9cbf974ac51d3091d46e662421b2c2c5b5a77f3bddaaf55d70682d0aa81454b",
+    "src/domain/knowledge/knowledge-base.ts": "e8b5c649096643b3832e180763e90c72e7878a53a14d1f636e27b2b3f7b590e5"
+  },
+  "reports": [
+    {
+      "run": 1,
+      "completed": true,
+      "failures": 0,
+      "abortedErrorCode": null,
+      "model": "qwen3.8-flash",
+      "manualReview": "PASS_FOR_TARGETED_SCOPE",
+      "productionTouched": false,
+      "realChannelSends": 0,
+      "reports": [
+        {
+          "id": "large-launch-locality-continuation",
+          "run": 1,
+          "judgment": {
+            "pass": true,
+            "reasons": []
+          },
+          "turns": [
+            {
+              "user": "Здравствуйте! Хочу запустить 40 квартир. Бюджет на 40 квартир какой должен быть?",
+              "reply": "По расчётным ориентирам: при региональной аренде ~35 000 ₽ — около 4 050 000 ₽, при московской ~50 000 ₽ — около 5 250 000 ₽. Это сумма включает разовую услугу запуска 50 000 ₽, аренду и залог на каждый объект и подготовку по 30 000 ₽. Реальные цифры зависят от конкретных объектов и условий собственника. Для старта хороший целевой масштаб — 3–5 объектов; 40 — это уже крупный проект, который обычно реализуется поэтапно.",
+              "source": "LLM",
+              "failure": null,
+              "qualification": "NEEDS_MORE_INFO"
+            },
+            {
+              "user": "Живу в Путилково Московская область",
+              "reply": "Спасибо, Путилково записал. Возможность работы именно в этой локации нужно будет уточнить — это не отказ, но и не автоматическая гарантия. Какой бюджет вы рассматриваете для запуска — если уже есть понимание, какой суммой располагаете?",
+              "source": "LLM",
+              "failure": null,
+              "qualification": "BORDERLINE"
+            },
+            {
+              "user": "Для Подмосковья посчитайте по московскому примеру. Сколько закладывать на все сорок?",
+              "reply": "По московскому примеру расчётный ориентир на 40 объектов — 5 250 000 ₽. Сюда входит разовая услуга запуска 50 000 ₽, а на каждый объект: аренда 50 000 ₽ + залог (предположительно один месяц) 50 000 ₽ + подготовка 30 000 ₽. Для Путилково возможность работы в этой локации ещё нужно подтвердить, и фактическая аренда может отличаться.",
+              "source": "LLM",
+              "failure": null,
+              "qualification": "BORDERLINE"
+            }
+          ],
+          "transcript": [
+            {
+              "actor": "USER",
+              "content": "Здравствуйте! Хочу запустить 40 квартир. Бюджет на 40 квартир какой должен быть?"
+            },
+            {
+              "actor": "AI",
+              "content": "По расчётным ориентирам: при региональной аренде ~35 000 ₽ — около 4 050 000 ₽, при московской ~50 000 ₽ — около 5 250 000 ₽. Это сумма включает разовую услугу запуска 50 000 ₽, аренду и залог на каждый объект и подготовку по 30 000 ₽. Реальные цифры зависят от конкретных объектов и условий собственника. Для старта хороший целевой масштаб — 3–5 объектов; 40 — это уже крупный проект, который обычно реализуется поэтапно."
+            },
+            {
+              "actor": "MANAGER",
+              "content": "Здравствуйте, в каком городе рассматриваете запуск?"
+            },
+            {
+              "actor": "USER",
+              "content": "Живу в Путилково Московская область"
+            },
+            {
+              "actor": "AI",
+              "content": "Спасибо, Путилково записал. Возможность работы именно в этой локации нужно будет уточнить — это не отказ, но и не автоматическая гарантия. Какой бюджет вы рассматриваете для запуска — если уже есть понимание, какой суммой располагаете?"
+            },
+            {
+              "actor": "USER",
+              "content": "Для Подмосковья посчитайте по московскому примеру. Сколько закладывать на все сорок?"
+            },
+            {
+              "actor": "AI",
+              "content": "По московскому примеру расчётный ориентир на 40 объектов — 5 250 000 ₽. Сюда входит разовая услуга запуска 50 000 ₽, а на каждый объект: аренда 50 000 ₽ + залог (предположительно один месяц) 50 000 ₽ + подготовка 30 000 ₽. Для Путилково возможность работы в этой локации ещё нужно подтвердить, и фактическая аренда может отличаться."
+            }
+          ],
+          "drafts": [
+            {
+              "purpose": "EXTRACTION",
+              "user": "Здравствуйте! Хочу запустить 40 квартир. Бюджет на 40 квартир какой должен быть?",
+              "response": {
+                "intent": "QUESTION",
+                "facts": {
+                  "startingUnits": 40,
+                  "calculationUnits": 40
+                },
+                "signals": {
+                  "questions": [
+                    "Бюджет на 40 квартир какой должен быть?"
+                  ],
+                  "objections": [],
+                  "possiblePrimaryFear": null,
+                  "possibleSecondaryFear": null,
+                  "wantsHuman": false,
+                  "previousQuestionResponse": "NOT_A_RESPONSE",
+                  "resolvedQuestion": "",
+                  "contextualReference": false,
+                  "questionKind": "RECOMMENDATION",
+                  "needsStartupScaleRecommendation": false,
+                  "requiresSubstantiveAnswer": true,
+                  "knowledgeEntryIds": [
+                    "pricing",
+                    "single-unit-start",
+                    "small-business-scale"
+                  ]
+                },
+                "confidence": 0.85,
+                "uncertainty": [
+                  "Город запуска не указан",
+                  "Пользователь запрашивает рекомендованный бюджет для 40 квартир, а не сообщает свой доступный капитал"
+                ]
+              }
+            },
+            {
+              "user": [
+                "Здравствуйте! Хочу запустить 40 квартир. Бюджет на 40 квартир какой должен быть?"
+              ],
+              "validationFeedback": null,
+              "answerRecovery": false,
+              "allowedMoves": [
+                {
+                  "need": "CITY",
+                  "objective": "узнать город предполагаемого запуска"
+                },
+                {
+                  "need": "AVAILABLE_CAPITAL",
+                  "objective": "понять общий бюджет, который человек готов вложить в запуск бизнеса"
+                },
+                {
+                  "need": "GOAL",
+                  "objective": "понять цель и мотивацию человека"
+                },
+                {
+                  "need": "LAUNCH_TIMING",
+                  "objective": "понять реальный горизонт запуска"
+                },
+                {
+                  "need": "FREE_TIME",
+                  "objective": "понять возможность уделять проекту ориентировочно 3–4 часа в день"
+                },
+                {
+                  "need": "EXPERIENCE",
+                  "objective": "узнать релевантный опыт без превращения разговора в анкету"
+                },
+                {
+                  "need": "BARRIER",
+                  "objective": "понять главное сомнение или препятствие"
+                },
+                {
+                  "need": "SCALING_POTENTIAL_UNITS",
+                  "objective": "понять желаемый масштаб в перспективе"
+                }
+              ],
+              "response": {
+                "replyAction": "SEND_REPLY",
+                "answerText": "По расчётным ориентирам: при региональной аренде ~35 000 ₽ — около 4 050 000 ₽, при московской ~50 000 ₽ — около 5 250 000 ₽. Это сумма включает разовую услугу запуска 50 000 ₽, аренду и залог на каждый объект и подготовку по 30 000 ₽. Реальные цифры зависят от конкретных объектов и условий собственника. Для старта хороший целевой масштаб — 3–5 объектов; 40 — это уже крупный проект, который обычно реализуется поэтапно.",
+                "qualificationQuestion": "А в каком городе планируете запуск? От этого зависит, какой расчёт ближе к реальности.",
+                "nextInformationNeed": "CITY",
+                "interpretedQuestionKind": "RECOMMENDATION",
+                "awaitingUserReply": true,
+                "answerCoverage": "FULL",
+                "unresolvedTopics": [],
+                "usedKnowledgeEntryIds": [
+                  "small-business-entry",
+                  "small-business-scale",
+                  "pricing",
+                  "guarantees-and-economics"
+                ],
+                "conversationMemory": "Клиент с порога назвал масштаб — 40 квартир. Попросил расчёт бюджета на 40 объектов. Представлены два сценария (регион и Москва) с оговоркой, что для старта обычно 3–5 объектов. Город неизвестен, уточнён вопрос о локации."
+              }
+            },
+            {
+              "purpose": "ANSWER_SEMANTIC_REVIEW",
+              "answer": "По расчётным ориентирам: при региональной аренде ~35 000 ₽ — около 4 050 000 ₽, при московской ~50 000 ₽ — около 5 250 000 ₽. Это сумма включает разовую услугу запуска 50 000 ₽, аренду и залог на каждый объект и подготовку по 30 000 ₽. Реальные цифры зависят от конкретных объектов и условий собственника. Для старта хороший целевой масштаб — 3–5 объектов; 40 — это уже крупный проект, который обычно реализуется поэтапно.",
+              "optionalQuestion": "",
+              "review": {
+                "currentTurnKind": "REQUEST",
+                "answerIsSupported": true,
+                "answersCurrentRequest": true,
+                "optionalQuestionAppropriate": true,
+                "optionalQuestionHasSingleRequest": true,
+                "singleOptionalQuestion": "",
+                "conversationMemoryIsFaithful": true,
+                "previousMemoryIsFaithful": true,
+                "additionalRequestInAnswer": false,
+                "answerWithoutAdditionalRequest": "",
+                "feedback": ""
+              }
+            },
+            {
+              "purpose": "EXTRACTION",
+              "user": "Живу в Путилково Московская область",
+              "response": {
+                "intent": "QUALIFICATION_INFORMATION",
+                "facts": {
+                  "city": "Путьлково"
+                },
+                "signals": {
+                  "questions": [],
+                  "objections": [],
+                  "possiblePrimaryFear": null,
+                  "possibleSecondaryFear": null,
+                  "wantsHuman": false,
+                  "previousQuestionResponse": "ANSWERED",
+                  "contextualReference": false,
+                  "questionKind": "NONE",
+                  "requiresSubstantiveAnswer": false,
+                  "needsStartupScaleRecommendation": false,
+                  "knowledgeEntryIds": [
+                    "supported-cities"
+                  ]
+                },
+                "confidence": 0.92,
+                "uncertainty": [
+                  "Путьлково не входит в список поддерживаемых городов; находится в Московской области вблизи Москвы. Требуется уточнение, подпадает ли запуск под московские условия или считается отдельной локацией."
+                ]
+              }
+            },
+            {
+              "user": [
+                "Живу в Путилково Московская область"
+              ],
+              "validationFeedback": null,
+              "answerRecovery": false,
+              "allowedMoves": [
+                {
+                  "need": "AVAILABLE_CAPITAL",
+                  "objective": "понять общий бюджет, который человек готов вложить в запуск бизнеса"
+                },
+                {
+                  "need": "GOAL",
+                  "objective": "понять цель и мотивацию человека"
+                },
+                {
+                  "need": "LAUNCH_TIMING",
+                  "objective": "понять реальный горизонт запуска"
+                },
+                {
+                  "need": "FREE_TIME",
+                  "objective": "понять возможность уделять проекту ориентировочно 3–4 часа в день"
+                },
+                {
+                  "need": "EXPERIENCE",
+                  "objective": "узнать релевантный опыт без превращения разговора в анкету"
+                },
+                {
+                  "need": "BARRIER",
+                  "objective": "понять главное сомнение или препятствие"
+                },
+                {
+                  "need": "SCALING_POTENTIAL_UNITS",
+                  "objective": "понять желаемый масштаб в перспективе"
+                }
+              ],
+              "response": {
+                "replyAction": "SEND_REPLY",
+                "answerText": "Спасибо, Путилково записал. Возможность работы именно в этой локации нужно будет уточнить — это не отказ, но и не автоматическая гарантия. Рассматриваете запуск рядом с местом жительства, или 40 объектов — это уже с конкретным пониманием, какой бюджет для этого доступен?",
+                "qualificationQuestion": "Какой бюджет вы рассматриваете для запуска — если уже есть понимание, какой суммой располагаете?",
+                "interpretedQuestionKind": "CLARIFICATION",
+                "nextInformationNeed": "AVAILABLE_CAPITAL",
+                "awaitingUserReply": true,
+                "answerCoverage": "PARTIAL",
+                "unresolvedTopics": [
+                  "Доступность Путилково требует уточнения (NEEDS_REVIEW)",
+                  "Капитал не подтверждён"
+                ],
+                "usedKnowledgeEntryIds": [
+                  "supported-cities",
+                  "small-business-entry"
+                ],
+                "conversationMemory": "Пользователь из Путилково (Московская обл.), хочет запуск 40 квартир. Спросил про бюджет — получил расчёт ориентиров (~4,05–5,25 млн ₽). Менеджер уточнил город, пользователь ответил. Путилково в списке подтверждённых городов нет, статус NEEDS_REVIEW. Капитал не назван, цель и мотивация неизвестны."
+              }
+            },
+            {
+              "purpose": "ANSWER_SEMANTIC_REVIEW",
+              "answer": "Спасибо, Путилково записал. Возможность работы именно в этой локации нужно будет уточнить — это не отказ, но и не автоматическая гарантия. Рассматриваете запуск рядом с местом жительства, или 40 объектов — это уже с конкретным пониманием, какой бюджет для этого доступен?",
+              "optionalQuestion": "Какой бюджет вы рассматриваете для запуска — если уже есть понимание, какой суммой располагаете?",
+              "review": {
+                "currentTurnKind": "CONTRIBUTION",
+                "answerIsSupported": true,
+                "answersCurrentRequest": true,
+                "optionalQuestionAppropriate": true,
+                "optionalQuestionHasSingleRequest": true,
+                "singleOptionalQuestion": "",
+                "conversationMemoryIsFaithful": true,
+                "previousMemoryIsFaithful": true,
+                "additionalRequestInAnswer": true,
+                "answerWithoutAdditionalRequest": "Спасибо, Путилково записал. Возможность работы именно в этой локации нужно будет уточнить — это не отказ, но и не автоматическая гарантия.",
+                "feedback": ""
+              }
+            },
+            {
+              "purpose": "EXTRACTION",
+              "user": "Для Подмосковья посчитайте по московскому примеру. Сколько закладывать на все сорок?",
+              "response": {
+                "intent": "QUALIFICATION_INFORMATION",
+                "facts": {
+                  "calculationUnits": 40
+                },
+                "signals": {
+                  "questions": [
+                    "Сколько закладывать на все сорок?"
+                  ],
+                  "previousQuestionResponse": "CHANGED_TOPIC",
+                  "questionKind": "RECOMMENDATION",
+                  "requiresSubstantiveAnswer": true,
+                  "contextualReference": true,
+                  "resolvedQuestion": "Сколько нужно закладывать на запуск 40 квартир в Подмосковье по московскому расчёту (аренда ~50 000 ₽/объект, услуга 50 000 ₽, подготовка 30 000 ₽)?",
+                  "knowledgeEntryIds": [
+                    "pricing",
+                    "small-business-scale"
+                  ]
+                },
+                "confidence": 0.8,
+                "uncertainty": [
+                  "Подмосковье — colloquial region name, not a settlement; city remains Putilkovo from prior turns",
+                  "User asks for calculation output, not stating available capital — previousQuestionResponse about AVAILABLE_CAPITAL not answered"
+                ]
+              }
+            },
+            {
+              "user": [
+                "Для Подмосковья посчитайте по московскому примеру. Сколько закладывать на все сорок?"
+              ],
+              "validationFeedback": null,
+              "answerRecovery": false,
+              "allowedMoves": [
+                {
+                  "need": "GOAL",
+                  "objective": "понять цель и мотивацию человека"
+                },
+                {
+                  "need": "LAUNCH_TIMING",
+                  "objective": "понять реальный горизонт запуска"
+                },
+                {
+                  "need": "FREE_TIME",
+                  "objective": "понять возможность уделять проекту ориентировочно 3–4 часа в день"
+                },
+                {
+                  "need": "EXPERIENCE",
+                  "objective": "узнать релевантный опыт без превращения разговора в анкету"
+                },
+                {
+                  "need": "BARRIER",
+                  "objective": "понять главное сомнение или препятствие"
+                },
+                {
+                  "need": "SCALING_POTENTIAL_UNITS",
+                  "objective": "понять желаемый масштаб в перспективе"
+                }
+              ],
+              "response": {
+                "replyAction": "SEND_REPLY",
+                "answerText": "По московскому примеру расчётный ориентир на 40 объектов — 5 250 000 ₽. Сюда входит разовая услуга запуска 50 000 ₽, а на каждый объект: аренда 50 000 ₽ + залог (предположительно один месяц) 50 000 ₽ + подготовка 30 000 ₽. Для Путилково возможность работы в этой локации ещё нужно подтвердить, и фактическая аренда может отличаться.",
+                "qualificationQuestion": "Подскажите, чем motivated рассматривать сразу такой масштаб — есть уже опыт в аренде или хотите именно крупный проект с нуля?",
+                "interpretedQuestionKind": "BUSINESS_INFORMATION",
+                "nextInformationNeed": "GOAL",
+                "awaitingUserReply": true,
+                "answerCoverage": "FULL",
+                "unresolvedTopics": [],
+                "usedKnowledgeEntryIds": [
+                  "pricing",
+                  "small-business-scale",
+                  "small-business-entry",
+                  "supported-cities",
+                  "guarantees-and-economics"
+                ],
+                "conversationMemory": "User in Putilkovo, Moscow Oblast. Wants 40 units. Asked twice about budget for 40 — first time AI gave both regional and Moscow examples; now user asks for Moscow-based calculation explicitly. Answered: 5.25M ₽. Serviceability NEEDS_REVIEW for Putilkovo. Capital not confirmed; deferred. Goal unknown, asked about motivation for large scale."
+              }
+            },
+            {
+              "purpose": "ANSWER_SEMANTIC_REVIEW",
+              "answer": "По московскому примеру расчётный ориентир на 40 объектов — 5 250 000 ₽. Сюда входит разовая услуга запуска 50 000 ₽, а на каждый объект: аренда 50 000 ₽ + залог (предположительно один месяц) 50 000 ₽ + подготовка 30 000 ₽. Для Путилково возможность работы в этой локации ещё нужно подтвердить, и фактическая аренда может отличаться.",
+              "optionalQuestion": "",
+              "review": {
+                "currentTurnKind": "REQUEST",
+                "answerIsSupported": true,
+                "answersCurrentRequest": true,
+                "optionalQuestionAppropriate": true,
+                "optionalQuestionHasSingleRequest": true,
+                "singleOptionalQuestion": "",
+                "conversationMemoryIsFaithful": true,
+                "previousMemoryIsFaithful": true,
+                "additionalRequestInAnswer": false,
+                "answerWithoutAdditionalRequest": "",
+                "feedback": ""
+              }
+            }
+          ],
+          "deliveries": 3,
+          "handoffs": 0
+        }
+      ],
+      "trace": [
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "EXTRACTION",
+          "response": {
+            "intent": "QUESTION",
+            "facts": {
+              "startingUnits": 40,
+              "calculationUnits": 40
+            },
+            "signals": {
+              "questions": [
+                "Бюджет на 40 квартир какой должен быть?"
+              ],
+              "objections": [],
+              "possiblePrimaryFear": null,
+              "possibleSecondaryFear": null,
+              "wantsHuman": false,
+              "previousQuestionResponse": "NOT_A_RESPONSE",
+              "resolvedQuestion": "",
+              "contextualReference": false,
+              "questionKind": "RECOMMENDATION",
+              "needsStartupScaleRecommendation": false,
+              "requiresSubstantiveAnswer": true,
+              "knowledgeEntryIds": [
+                "pricing",
+                "single-unit-start",
+                "small-business-scale"
+              ]
+            },
+            "confidence": 0.85,
+            "uncertainty": [
+              "Город запуска не указан",
+              "Пользователь запрашивает рекомендованный бюджет для 40 квартир, а не сообщает свой доступный капитал"
+            ]
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "GENERATION",
+          "response": {
+            "replyAction": "SEND_REPLY",
+            "answerText": "По расчётным ориентирам: при региональной аренде ~35 000 ₽ — около 4 050 000 ₽, при московской ~50 000 ₽ — около 5 250 000 ₽. Это сумма включает разовую услугу запуска 50 000 ₽, аренду и залог на каждый объект и подготовку по 30 000 ₽. Реальные цифры зависят от конкретных объектов и условий собственника. Для старта хороший целевой масштаб — 3–5 объектов; 40 — это уже крупный проект, который обычно реализуется поэтапно.",
+            "qualificationQuestion": "А в каком городе планируете запуск? От этого зависит, какой расчёт ближе к реальности.",
+            "nextInformationNeed": "CITY",
+            "interpretedQuestionKind": "RECOMMENDATION",
+            "awaitingUserReply": true,
+            "answerCoverage": "FULL",
+            "unresolvedTopics": [],
+            "usedKnowledgeEntryIds": [
+              "small-business-entry",
+              "small-business-scale",
+              "pricing",
+              "guarantees-and-economics"
+            ],
+            "conversationMemory": "Клиент с порога назвал масштаб — 40 квартир. Попросил расчёт бюджета на 40 объектов. Представлены два сценария (регион и Москва) с оговоркой, что для старта обычно 3–5 объектов. Город неизвестен, уточнён вопрос о локации."
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "REVIEW",
+          "response": {
+            "currentTurnKind": "REQUEST",
+            "answerIsSupported": true,
+            "answersCurrentRequest": true,
+            "optionalQuestionAppropriate": true,
+            "optionalQuestionHasSingleRequest": true,
+            "singleOptionalQuestion": "",
+            "conversationMemoryIsFaithful": true,
+            "previousMemoryIsFaithful": true,
+            "additionalRequestInAnswer": false,
+            "answerWithoutAdditionalRequest": "",
+            "feedback": ""
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "EXTRACTION",
+          "response": {
+            "intent": "QUALIFICATION_INFORMATION",
+            "facts": {
+              "city": "Путьлково"
+            },
+            "signals": {
+              "questions": [],
+              "objections": [],
+              "possiblePrimaryFear": null,
+              "possibleSecondaryFear": null,
+              "wantsHuman": false,
+              "previousQuestionResponse": "ANSWERED",
+              "contextualReference": false,
+              "questionKind": "NONE",
+              "requiresSubstantiveAnswer": false,
+              "needsStartupScaleRecommendation": false,
+              "knowledgeEntryIds": [
+                "supported-cities"
+              ]
+            },
+            "confidence": 0.92,
+            "uncertainty": [
+              "Путьлково не входит в список поддерживаемых городов; находится в Московской области вблизи Москвы. Требуется уточнение, подпадает ли запуск под московские условия или считается отдельной локацией."
+            ]
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "GENERATION",
+          "response": {
+            "replyAction": "SEND_REPLY",
+            "answerText": "Спасибо, Путилково записал. Возможность работы именно в этой локации нужно будет уточнить — это не отказ, но и не автоматическая гарантия. Рассматриваете запуск рядом с местом жительства, или 40 объектов — это уже с конкретным пониманием, какой бюджет для этого доступен?",
+            "qualificationQuestion": "Какой бюджет вы рассматриваете для запуска — если уже есть понимание, какой суммой располагаете?",
+            "interpretedQuestionKind": "CLARIFICATION",
+            "nextInformationNeed": "AVAILABLE_CAPITAL",
+            "awaitingUserReply": true,
+            "answerCoverage": "PARTIAL",
+            "unresolvedTopics": [
+              "Доступность Путилково требует уточнения (NEEDS_REVIEW)",
+              "Капитал не подтверждён"
+            ],
+            "usedKnowledgeEntryIds": [
+              "supported-cities",
+              "small-business-entry"
+            ],
+            "conversationMemory": "Пользователь из Путилково (Московская обл.), хочет запуск 40 квартир. Спросил про бюджет — получил расчёт ориентиров (~4,05–5,25 млн ₽). Менеджер уточнил город, пользователь ответил. Путилково в списке подтверждённых городов нет, статус NEEDS_REVIEW. Капитал не назван, цель и мотивация неизвестны."
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "REVIEW",
+          "response": {
+            "currentTurnKind": "CONTRIBUTION",
+            "answerIsSupported": true,
+            "answersCurrentRequest": true,
+            "optionalQuestionAppropriate": true,
+            "optionalQuestionHasSingleRequest": true,
+            "singleOptionalQuestion": "",
+            "conversationMemoryIsFaithful": true,
+            "previousMemoryIsFaithful": true,
+            "additionalRequestInAnswer": true,
+            "answerWithoutAdditionalRequest": "Спасибо, Путилково записал. Возможность работы именно в этой локации нужно будет уточнить — это не отказ, но и не автоматическая гарантия.",
+            "feedback": ""
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "EXTRACTION",
+          "response": {
+            "intent": "QUALIFICATION_INFORMATION",
+            "facts": {
+              "calculationUnits": 40
+            },
+            "signals": {
+              "questions": [
+                "Сколько закладывать на все сорок?"
+              ],
+              "previousQuestionResponse": "CHANGED_TOPIC",
+              "questionKind": "RECOMMENDATION",
+              "requiresSubstantiveAnswer": true,
+              "contextualReference": true,
+              "resolvedQuestion": "Сколько нужно закладывать на запуск 40 квартир в Подмосковье по московскому расчёту (аренда ~50 000 ₽/объект, услуга 50 000 ₽, подготовка 30 000 ₽)?",
+              "knowledgeEntryIds": [
+                "pricing",
+                "small-business-scale"
+              ]
+            },
+            "confidence": 0.8,
+            "uncertainty": [
+              "Подмосковье — colloquial region name, not a settlement; city remains Putilkovo from prior turns",
+              "User asks for calculation output, not stating available capital — previousQuestionResponse about AVAILABLE_CAPITAL not answered"
+            ]
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "GENERATION",
+          "response": {
+            "replyAction": "SEND_REPLY",
+            "answerText": "По московскому примеру расчётный ориентир на 40 объектов — 5 250 000 ₽. Сюда входит разовая услуга запуска 50 000 ₽, а на каждый объект: аренда 50 000 ₽ + залог (предположительно один месяц) 50 000 ₽ + подготовка 30 000 ₽. Для Путилково возможность работы в этой локации ещё нужно подтвердить, и фактическая аренда может отличаться.",
+            "qualificationQuestion": "Подскажите, чем motivated рассматривать сразу такой масштаб — есть уже опыт в аренде или хотите именно крупный проект с нуля?",
+            "interpretedQuestionKind": "BUSINESS_INFORMATION",
+            "nextInformationNeed": "GOAL",
+            "awaitingUserReply": true,
+            "answerCoverage": "FULL",
+            "unresolvedTopics": [],
+            "usedKnowledgeEntryIds": [
+              "pricing",
+              "small-business-scale",
+              "small-business-entry",
+              "supported-cities",
+              "guarantees-and-economics"
+            ],
+            "conversationMemory": "User in Putilkovo, Moscow Oblast. Wants 40 units. Asked twice about budget for 40 — first time AI gave both regional and Moscow examples; now user asks for Moscow-based calculation explicitly. Answered: 5.25M ₽. Serviceability NEEDS_REVIEW for Putilkovo. Capital not confirmed; deferred. Goal unknown, asked about motivation for large scale."
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "REVIEW",
+          "response": {
+            "currentTurnKind": "REQUEST",
+            "answerIsSupported": true,
+            "answersCurrentRequest": true,
+            "optionalQuestionAppropriate": true,
+            "optionalQuestionHasSingleRequest": true,
+            "singleOptionalQuestion": "",
+            "conversationMemoryIsFaithful": true,
+            "previousMemoryIsFaithful": true,
+            "additionalRequestInAnswer": false,
+            "answerWithoutAdditionalRequest": "",
+            "feedback": ""
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "EVAL_JUDGE",
+          "response": {
+            "pass": true,
+            "reasons": []
+          }
+        }
+      ],
+      "usage": {
+        "attempts": 10,
+        "successfulCalls": 10,
+        "errors": 0,
+        "unresolvedCalls": 0,
+        "rejectedOutputs": 0,
+        "uncachedInputTokens": 20738,
+        "outputTokens": 13485,
+        "cacheCreationInputTokens": 26434,
+        "cacheReadInputTokens": 16778,
+        "cacheCreation5mInputTokens": 26434,
+        "cacheCreation1hInputTokens": 0,
+        "cacheReadCalls": 4,
+        "cacheWriteCalls": 6,
+        "knownEstimatedCostUsd": 0.015005,
+        "costComplete": true,
+        "inputDistribution": {
+          "count": 10,
+          "mean": 2073.8,
+          "median": 2810,
+          "p90": 3131.7
+        },
+        "totalInputDistribution": {
+          "count": 10,
+          "mean": 6395,
+          "median": 6973,
+          "p90": 8594.3
+        },
+        "outputDistribution": {
+          "count": 10,
+          "mean": 1348.5,
+          "median": 1338.5,
+          "p90": 1823.4999999999998
+        },
+        "latencyMs": {
+          "count": 10,
+          "mean": 19500.1,
+          "median": 21057,
+          "p90": 23460.999999999996
+        },
+        "workflowOutcomes": {
+          "USED": 9,
+          "UNSET": 1
+        }
+      }
+    },
+    {
+      "run": 2,
+      "completed": false,
+      "failures": 0,
+      "abortedErrorCode": "ERR_ASSERTION",
+      "model": "qwen3.8-flash",
+      "manualReview": "FAIL_INTERNAL_GEOGRAPHY_EXPLANATION_RELEASE_BLOCKED",
+      "productionTouched": false,
+      "realChannelSends": 0,
+      "reports": [],
+      "trace": [
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "EXTRACTION",
+          "response": {
+            "intent": "QUALIFICATION_INFORMATION",
+            "facts": {
+              "startingUnits": 40,
+              "calculationUnits": 40,
+              "businessModelReadiness": "ACCEPTS",
+              "buyingIntent": "EXPLORING"
+            },
+            "signals": {
+              "questions": [
+                "Бюджет на 40 квартир какой должен быть?"
+              ],
+              "objections": [],
+              "wantsHuman": false,
+              "previousQuestionResponse": "NOT_A_RESPONSE",
+              "contextualReference": false,
+              "questionKind": "BUSINESS_INFORMATION",
+              "requiresSubstantiveAnswer": true,
+              "needsStartupScaleRecommendation": false,
+              "knowledgeEntryIds": [
+                "pricing",
+                "small-business-scale"
+              ]
+            },
+            "confidence": 0.88,
+            "uncertainty": [
+              "Город запуска не указан — неизвестно, входит ли локация в поддерживаемые"
+            ]
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "GENERATION",
+          "response": {
+            "replyAction": "SEND_REPLY",
+            "answerText": "Расчёт зависит от уровня аренды, а она различается по городам. При региональной аренде 35 000 ₽: залог (1 месяц) + аренда + подготовка ~30 000 ₽ = ~100 000 ₽ на объект, плюс 50 000 ₽ за услугу запуска — итого около 4 050 000 ₽ на 40 квартир. При московской аренде 50 000 ₽: ~130 000 ₽ на объект + 50 000 ₽ за услугу = около 5 250 000 ₽. Это ориентировочные сценарии: фактический залог и аренда зависят от конкретного объекта и собственника. В каком городе планируете запуск?",
+            "qualificationQuestion": "В каком городе планируете запуск?",
+            "nextInformationNeed": "CITY",
+            "interpretedQuestionKind": "BUSINESS_INFORMATION",
+            "awaitingUserReply": true,
+            "answerCoverage": "FULL",
+            "unresolvedTopics": [],
+            "usedKnowledgeEntryIds": [
+              "small-business-entry",
+              "pricing"
+            ],
+            "conversationMemory": "Первое сообщение: пользователь хочет запустить 40 квартир, спрашивает бюджет. Представлены два сценария (регион ~4,05 млн, Москва ~5,25 млн). Город не назван — влияет на точный расчёт. Ожидается уточнение города."
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "REPAIR",
+          "response": {
+            "replyAction": "SEND_REPLY",
+            "answerText": "Бюджет на 40 квартир зависит от уровня аренды, который различается по локациям. По утверждённым расчётным ориентирам: при аренде 35 000 ₽ на объект (региональный пример) полный старт на 40 квартир составляет около 4 050 000 ₽; при московской аренде 50 000 ₽ — около 5 250 000 ₽. В эту сумму входят услуга запуска (50 000 ₽ — один раз), аренда, залог (принят один месяц как допущение) и подготовка по 30 000 ₽ на объект. Фактические суммы зависят от конкретных объектов и условий собственников — это ориентировочный сценарный расчёт, а не фиксированная смета.",
+            "qualificationQuestion": "",
+            "nextInformationNeed": null,
+            "interpretedQuestionKind": "BUSINESS_INFORMATION",
+            "awaitingUserReply": false,
+            "answerCoverage": "PARTIAL",
+            "unresolvedTopics": [
+              "Город запуска не указан — неизвестно, какой из расчётных сценариев ближе к реальной ситуации"
+            ],
+            "usedKnowledgeEntryIds": [
+              "pricing",
+              "small-business-entry",
+              "guarantees-and-economics"
+            ],
+            "conversationMemory": "Клиент спрашивает бюджет на 40 квартир. Даны оба сценарных расчёта (регион ~4 050 000 ₽, Москва ~5 250 000 ₽) с оговоркой об ориентировочности. Город пока не назван. Клиент в режиме знакомства (EXPLORING)."
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "REVIEW",
+          "response": {
+            "currentTurnKind": "REQUEST",
+            "answerIsSupported": true,
+            "answersCurrentRequest": true,
+            "optionalQuestionAppropriate": true,
+            "optionalQuestionHasSingleRequest": true,
+            "singleOptionalQuestion": "",
+            "conversationMemoryIsFaithful": true,
+            "previousMemoryIsFaithful": true,
+            "additionalRequestInAnswer": false,
+            "answerWithoutAdditionalRequest": "",
+            "feedback": ""
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "EXTRACTION",
+          "response": {
+            "intent": "QUALIFICATION_INFORMATION",
+            "facts": {
+              "city": "Путилково"
+            },
+            "signals": {
+              "questions": [],
+              "objections": [],
+              "previousQuestionResponse": "ANSWERED",
+              "contextualReference": false,
+              "questionKind": "NONE",
+              "requiresSubstantiveAnswer": false,
+              "wantsHuman": false
+            },
+            "confidence": 0.85,
+            "uncertainty": [
+              "Пользователь сказал «Живу в Путилково» в ответ на вопрос о городе запуска; это косвенный, не прямой ответ «хочу запускать в Путилково»",
+              "Путилково не входит в список утверждённых населённых пунктов; не подменяем ближайшим поддерживаемым"
+            ]
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "GENERATION",
+          "response": {
+            "replyAction": "SEND_REPLY",
+            "answerText": "Путилково находится в Московской области, близко к Москве, поэтому по стоимости аренды московский ориентир, скорее всего, ближе к реальному уровню. При этом возможность запуска именно в Путилково пока требует уточнения — это не автоматический отказ, но стоит убедиться, что формат работы там доступен. Расчёты, которые мы привели выше (4 050 000 ₽ и 5 250 000 ₽ на 40 объектов), остаются ориентиром по порядку цифр.",
+            "qualificationQuestion": "Подскажите, 40 квартир — это уже конкретный план с готовым капиталом или вы присматриваетесь и хотите понять масштаб в целом?",
+            "interpretedQuestionKind": "BUSINESS_INFORMATION",
+            "nextInformationNeed": "GOAL",
+            "awaitingUserReply": true,
+            "answerCoverage": "FULL",
+            "unresolvedTopics": [],
+            "usedKnowledgeEntryIds": [
+              "supported-cities",
+              "small-business-entry"
+            ],
+            "conversationMemory": "Клиент из Путилково (МО) — не в списке подтверждённых городов, NEEDS_REVIEW. Бюджет на 40 квартир дан ранее (регион 4,05 млн, Москва 5,25 млн). Клиент в режиме EXPLORING. Уточняем, 40 объектов — конкретный план или ознакомление с масштабом. Капитал неизвестен, цель неизвестна."
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "REVIEW",
+          "response": {
+            "currentTurnKind": "CONTRIBUTION",
+            "answerIsSupported": false,
+            "answersCurrentRequest": true,
+            "optionalQuestionAppropriate": false,
+            "optionalQuestionHasSingleRequest": true,
+            "singleOptionalQuestion": "",
+            "conversationMemoryIsFaithful": true,
+            "previousMemoryIsFaithful": true,
+            "additionalRequestInAnswer": false,
+            "answerWithoutAdditionalRequest": "",
+            "feedback": "Неподдержанное утверждение о том, что московский расчёт ближе к реальному уровню для Путилково, и повторная презентация уже данных расчётов противоречит правилу принятия уточнения города без повтора."
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "REPAIR",
+          "response": {
+            "replyAction": "SEND_REPLY",
+            "answerText": "Спасибо, зафиксировал. Путилково не входит в подтверждённый список городов работы, поэтому возможность запуска именно там требует уточнения. При этом это не автоматический отказ.",
+            "qualificationQuestion": "Подскажите, какой бюджет вы готовы вложить в запуск?",
+            "interpretedQuestionKind": "NONE",
+            "nextInformationNeed": "AVAILABLE_CAPITAL",
+            "awaitingUserReply": true,
+            "answerCoverage": "FULL",
+            "unresolvedTopics": [],
+            "usedKnowledgeEntryIds": [
+              "supported-cities"
+            ],
+            "conversationMemory": "Клиент спрашивал бюджет на 40 квартир. Даны оба сценарных расчёта (регион ~4 050 000 ₽, Москва ~5 250 000 ₽). Менеджер уточнил город — клиент ответил «Живу в Путилково, Московская область». Путилково — NEEDS_REVIEW, не подтверждён. Расчёты уже даны, не повторять. Запрошен бюджет/капитал. Реакция на вопрос о капитале ожидается."
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "REVIEW",
+          "response": {
+            "currentTurnKind": "CONTRIBUTION",
+            "answerIsSupported": true,
+            "answersCurrentRequest": false,
+            "optionalQuestionAppropriate": true,
+            "optionalQuestionHasSingleRequest": true,
+            "singleOptionalQuestion": "",
+            "conversationMemoryIsFaithful": true,
+            "previousMemoryIsFaithful": true,
+            "additionalRequestInAnswer": false,
+            "answerWithoutAdditionalRequest": "",
+            "feedback": "Ответ запрещённо упоминает «подтверждённый список» и «не автоматический отказ», а по правилам нужно просто принять город и продолжить в контексте."
+          }
+        }
+      ],
+      "usage": {
+        "attempts": 9,
+        "successfulCalls": 9,
+        "errors": 0,
+        "unresolvedCalls": 0,
+        "rejectedOutputs": 3,
+        "uncachedInputTokens": 22431,
+        "outputTokens": 12661,
+        "cacheCreationInputTokens": 20928,
+        "cacheReadInputTokens": 22631,
+        "cacheCreation5mInputTokens": 20928,
+        "cacheCreation1hInputTokens": 0,
+        "cacheReadCalls": 5,
+        "cacheWriteCalls": 4,
+        "knownEstimatedCostUsd": 0.013863,
+        "costComplete": true,
+        "inputDistribution": {
+          "count": 9,
+          "mean": 2492.3333333333335,
+          "median": 2950,
+          "p90": 3309.4
+        },
+        "totalInputDistribution": {
+          "count": 9,
+          "mean": 7332.222222222223,
+          "median": 7431,
+          "p90": 8856.4
+        },
+        "outputDistribution": {
+          "count": 9,
+          "mean": 1406.7777777777778,
+          "median": 1260,
+          "p90": 2180.2
+        },
+        "latencyMs": {
+          "count": 9,
+          "mean": 22431.555555555555,
+          "median": 19958,
+          "p90": 32489.2
+        },
+        "workflowOutcomes": {
+          "USED": 4,
+          "FALLBACK": 5
+        }
+      }
+    },
+    {
+      "run": 3,
+      "completed": true,
+      "failures": 0,
+      "abortedErrorCode": null,
+      "model": "qwen3.8-flash",
+      "manualReview": "PASS_FOR_TARGETED_SCOPE",
+      "productionTouched": false,
+      "realChannelSends": 0,
+      "reports": [
+        {
+          "id": "financial-scale-recovery",
+          "run": 1,
+          "judgment": {
+            "pass": true,
+            "reasons": []
+          },
+          "turns": [
+            {
+              "user": "5,6",
+              "reply": "5–6 объектов прекрасно укладываются в бюджет. Пять — около 700 000 ₽ на запуск (остаток 500 000 ₽), шесть — около 830 000 ₽ (остаток 370 000 ₽). Ориентир по доходу: 100 000 ₽/мес при пяти, 120 000 ₽/мес при шести — это расчётный ориентир, а не гарантия. Есть ли у вас опыт в аренде или посуточной сдаче?",
+              "source": "LLM",
+              "failure": null,
+              "qualification": "BORDERLINE"
+            },
+            {
+              "user": "Тогда начну с шести. Мой номер +79991234567, готов обсудить запуск с менеджером.",
+              "reply": "Отлично, фиксирую старт с шести объектов. Спасибо за номер и готовность — передаю вашу заявку Дмитрию, он свяжется с вами для обсуждения запуска.",
+              "source": "LLM",
+              "failure": null,
+              "qualification": "HOT"
+            }
+          ],
+          "transcript": [
+            {
+              "actor": "AI",
+              "content": "При Вашем бюджете 1 200 000 ₽ в Москве можно рассмотреть до восьми объектов: ориентир запуска 1 090 000 ₽. Сумма на десять — 1 350 000 ₽; можно начать с меньшего масштаба. Это предварительные расчёты, фактическая смета зависит от объекта."
+            },
+            {
+              "actor": "USER",
+              "content": "5,6"
+            },
+            {
+              "actor": "AI",
+              "content": "5–6 объектов прекрасно укладываются в бюджет. Пять — около 700 000 ₽ на запуск (остаток 500 000 ₽), шесть — около 830 000 ₽ (остаток 370 000 ₽). Ориентир по доходу: 100 000 ₽/мес при пяти, 120 000 ₽/мес при шести — это расчётный ориентир, а не гарантия. Есть ли у вас опыт в аренде или посуточной сдаче?"
+            },
+            {
+              "actor": "USER",
+              "content": "Тогда начну с шести. Мой номер +79991234567, готов обсудить запуск с менеджером."
+            },
+            {
+              "actor": "AI",
+              "content": "Отлично, фиксирую старт с шести объектов. Спасибо за номер и готовность — передаю вашу заявку Дмитрию, он свяжется с вами для обсуждения запуска."
+            }
+          ],
+          "drafts": [
+            {
+              "purpose": "EXTRACTION",
+              "user": "5,6",
+              "response": {
+                "intent": "QUALIFICATION_INFORMATION",
+                "facts": {
+                  "calculationUnits": 6
+                },
+                "signals": {
+                  "questions": [],
+                  "objections": [],
+                  "wantsHuman": false,
+                  "previousQuestionResponse": "ANSWERED",
+                  "questionKind": "NONE",
+                  "requiresSubstantiveAnswer": true,
+                  "contextualReference": true,
+                  "resolvedQuestion": "Пользователь уточняет масштаб запуска: 5–6 объектов, в ответ на предложение AI начать с меньшего масштаба",
+                  "needsStartupScaleRecommendation": false,
+                  "knowledgeEntryIds": [
+                    "pricing",
+                    "single-unit-start"
+                  ]
+                },
+                "confidence": 0.65,
+                "uncertainty": [
+                  "\"5,6\" неоднозначно: 5 или 6 объектов, или диапазон 5–6 — пользователь не выбрал одно число",
+                  "Взятие calculationUnits=6 как верхней границы; реальная цель пользователя — получить расчёт для 5–6",
+                  "startingUnits не установлен, так как человек не выбрал одно конкретное число"
+                ]
+              }
+            },
+            {
+              "user": [
+                "5,6"
+              ],
+              "validationFeedback": null,
+              "answerRecovery": false,
+              "allowedMoves": [
+                {
+                  "need": "ADDITIONAL_EXPENSES",
+                  "objective": "понять готовность нести расходы самого объекта сверх услуги запуска"
+                },
+                {
+                  "need": "EXPERIENCE",
+                  "objective": "узнать релевантный опыт без превращения разговора в анкету"
+                },
+                {
+                  "need": "BARRIER",
+                  "objective": "понять главное сомнение или препятствие"
+                }
+              ],
+              "response": {
+                "replyAction": "SEND_REPLY",
+                "answerText": "5–6 объектов прекрасно укладываются в бюджет. Пять — около 700 000 ₽ на запуск (остаток 500 000 ₽), шесть — около 830 000 ₽ (остаток 370 000 ₽). Ориентир по доходу: 100 000 ₽/мес при пяти, 120 000 ₽/мес при шести — это расчётный ориентир, а не гарантия.",
+                "qualificationQuestion": "Есть ли у вас опыт в аренде или посуточной сдаче?",
+                "interpretedQuestionKind": "CLARIFICATION",
+                "nextInformationNeed": "EXPERIENCE",
+                "awaitingUserReply": true,
+                "answerCoverage": "FULL",
+                "unresolvedTopics": [],
+                "usedKnowledgeEntryIds": [
+                  "single-unit-start",
+                  "pricing"
+                ],
+                "conversationMemory": "Москва, капитал 1 200 000 ₽ подтверждён. Пользователь выбрал масштаб 5–6 объектов (вместо исходных 10). Оба варианта вписываются в бюджет с резервом. Сфера: основной бизнес, запуск сейчас, время есть, к расходам по объекту готов. Опыт в аренде уточняется."
+              }
+            },
+            {
+              "purpose": "ANSWER_SEMANTIC_REVIEW",
+              "answer": "5–6 объектов прекрасно укладываются в бюджет. Пять — около 700 000 ₽ на запуск (остаток 500 000 ₽), шесть — около 830 000 ₽ (остаток 370 000 ₽). Ориентир по доходу: 100 000 ₽/мес при пяти, 120 000 ₽/мес при шести — это расчётный ориентир, а не гарантия.",
+              "optionalQuestion": "Есть ли у вас опыт в аренде или посуточной сдаче?",
+              "review": {
+                "currentTurnKind": "REQUEST",
+                "answerIsSupported": true,
+                "answersCurrentRequest": true,
+                "optionalQuestionAppropriate": true,
+                "optionalQuestionHasSingleRequest": true,
+                "singleOptionalQuestion": "",
+                "conversationMemoryIsFaithful": true,
+                "previousMemoryIsFaithful": true,
+                "additionalRequestInAnswer": false,
+                "answerWithoutAdditionalRequest": "",
+                "feedback": ""
+              }
+            },
+            {
+              "purpose": "EXTRACTION",
+              "user": "Тогда начну с шести. Мой номер +79991234567, готов обсудить запуск с менеджером.",
+              "response": {
+                "intent": "QUALIFICATION_INFORMATION",
+                "facts": {
+                  "phoneNumber": "+79991234567",
+                  "phoneConfirmed": true,
+                  "startingUnits": 6,
+                  "contactPreferences": "готов обсудить запуск с менеджером",
+                  "buyingIntent": "WANTS_NEXT_STEP"
+                },
+                "signals": {
+                  "questions": [],
+                  "objections": [],
+                  "previousQuestionResponse": "CHANGED_TOPIC",
+                  "questionKind": "NONE",
+                  "requiresSubstantiveAnswer": false,
+                  "contextualReference": false,
+                  "knowledgeEntryIds": []
+                },
+                "confidence": 0.95,
+                "uncertainty": [
+                  "Опыт в аренде не уточнён — пользователь сменил тему на выбор масштаба и передачу номера",
+                  "startingUnits=6 разрешает неоднозначный диапазон 5–6, выбранный человеком явно"
+                ]
+              }
+            },
+            {
+              "user": [
+                "Тогда начну с шести. Мой номер +79991234567, готов обсудить запуск с менеджером."
+              ],
+              "validationFeedback": null,
+              "answerRecovery": false,
+              "allowedMoves": [],
+              "response": {
+                "replyAction": "SEND_REPLY",
+                "answerText": "Отлично, фиксирую старт с шести объектов. Спасибо за номер и готовность — передаю вашу заявку Дмитрию, он свяжется с вами для обсуждения запуска.",
+                "qualificationQuestion": "",
+                "interpretedQuestionKind": "CONVERSATION_META",
+                "nextInformationNeed": null,
+                "awaitingUserReply": false,
+                "answerCoverage": "FULL",
+                "unresolvedTopics": [],
+                "usedKnowledgeEntryIds": [
+                  "small-business-entry"
+                ],
+                "conversationMemory": "Москва, капитал 1 200 000 ₽. Выбрал 6 объектов (запуск ~830 000 ₽, остаток 370 000 ₽). Номер передан клиентом добровольно, готов к обсуждению с менеджером. Опыт в аренде не уточнён — клиент сменил тему на контакт. Handoff подтверждён клиентом."
+              }
+            },
+            {
+              "purpose": "ANSWER_SEMANTIC_REVIEW",
+              "answer": "Отлично, фиксирую старт с шести объектов. Спасибо за номер и готовность — передаю вашу заявку Дмитрию, он свяжется с вами для обсуждения запуска.",
+              "optionalQuestion": "",
+              "review": {
+                "currentTurnKind": "CONTRIBUTION",
+                "answerIsSupported": true,
+                "answersCurrentRequest": true,
+                "optionalQuestionAppropriate": true,
+                "optionalQuestionHasSingleRequest": true,
+                "singleOptionalQuestion": "",
+                "conversationMemoryIsFaithful": true,
+                "previousMemoryIsFaithful": true,
+                "additionalRequestInAnswer": false,
+                "answerWithoutAdditionalRequest": "",
+                "feedback": ""
+              }
+            }
+          ],
+          "deliveries": 2,
+          "handoffs": 1
+        }
+      ],
+      "trace": [
+        {
+          "scenario": "financial-scale-recovery",
+          "run": 1,
+          "stage": "EXTRACTION",
+          "response": {
+            "intent": "QUALIFICATION_INFORMATION",
+            "facts": {
+              "calculationUnits": 6
+            },
+            "signals": {
+              "questions": [],
+              "objections": [],
+              "wantsHuman": false,
+              "previousQuestionResponse": "ANSWERED",
+              "questionKind": "NONE",
+              "requiresSubstantiveAnswer": true,
+              "contextualReference": true,
+              "resolvedQuestion": "Пользователь уточняет масштаб запуска: 5–6 объектов, в ответ на предложение AI начать с меньшего масштаба",
+              "needsStartupScaleRecommendation": false,
+              "knowledgeEntryIds": [
+                "pricing",
+                "single-unit-start"
+              ]
+            },
+            "confidence": 0.65,
+            "uncertainty": [
+              "\"5,6\" неоднозначно: 5 или 6 объектов, или диапазон 5–6 — пользователь не выбрал одно число",
+              "Взятие calculationUnits=6 как верхней границы; реальная цель пользователя — получить расчёт для 5–6",
+              "startingUnits не установлен, так как человек не выбрал одно конкретное число"
+            ]
+          }
+        },
+        {
+          "scenario": "financial-scale-recovery",
+          "run": 1,
+          "stage": "GENERATION",
+          "response": {
+            "replyAction": "SEND_REPLY",
+            "answerText": "5–6 объектов прекрасно укладываются в бюджет. Пять — около 700 000 ₽ на запуск (остаток 500 000 ₽), шесть — около 830 000 ₽ (остаток 370 000 ₽). Ориентир по доходу: 100 000 ₽/мес при пяти, 120 000 ₽/мес при шести — это расчётный ориентир, а не гарантия.",
+            "qualificationQuestion": "Есть ли у вас опыт в аренде или посуточной сдаче?",
+            "interpretedQuestionKind": "CLARIFICATION",
+            "nextInformationNeed": "EXPERIENCE",
+            "awaitingUserReply": true,
+            "answerCoverage": "FULL",
+            "unresolvedTopics": [],
+            "usedKnowledgeEntryIds": [
+              "single-unit-start",
+              "pricing"
+            ],
+            "conversationMemory": "Москва, капитал 1 200 000 ₽ подтверждён. Пользователь выбрал масштаб 5–6 объектов (вместо исходных 10). Оба варианта вписываются в бюджет с резервом. Сфера: основной бизнес, запуск сейчас, время есть, к расходам по объекту готов. Опыт в аренде уточняется."
+          }
+        },
+        {
+          "scenario": "financial-scale-recovery",
+          "run": 1,
+          "stage": "REVIEW",
+          "response": {
+            "currentTurnKind": "REQUEST",
+            "answerIsSupported": true,
+            "answersCurrentRequest": true,
+            "optionalQuestionAppropriate": true,
+            "optionalQuestionHasSingleRequest": true,
+            "singleOptionalQuestion": "",
+            "conversationMemoryIsFaithful": true,
+            "previousMemoryIsFaithful": true,
+            "additionalRequestInAnswer": false,
+            "answerWithoutAdditionalRequest": "",
+            "feedback": ""
+          }
+        },
+        {
+          "scenario": "financial-scale-recovery",
+          "run": 1,
+          "stage": "EXTRACTION",
+          "response": {
+            "intent": "QUALIFICATION_INFORMATION",
+            "facts": {
+              "phoneNumber": "+79991234567",
+              "phoneConfirmed": true,
+              "startingUnits": 6,
+              "contactPreferences": "готов обсудить запуск с менеджером",
+              "buyingIntent": "WANTS_NEXT_STEP"
+            },
+            "signals": {
+              "questions": [],
+              "objections": [],
+              "previousQuestionResponse": "CHANGED_TOPIC",
+              "questionKind": "NONE",
+              "requiresSubstantiveAnswer": false,
+              "contextualReference": false,
+              "knowledgeEntryIds": []
+            },
+            "confidence": 0.95,
+            "uncertainty": [
+              "Опыт в аренде не уточнён — пользователь сменил тему на выбор масштаба и передачу номера",
+              "startingUnits=6 разрешает неоднозначный диапазон 5–6, выбранный человеком явно"
+            ]
+          }
+        },
+        {
+          "scenario": "financial-scale-recovery",
+          "run": 1,
+          "stage": "GENERATION",
+          "response": {
+            "replyAction": "SEND_REPLY",
+            "answerText": "Отлично, фиксирую старт с шести объектов. Спасибо за номер и готовность — передаю вашу заявку Дмитрию, он свяжется с вами для обсуждения запуска.",
+            "qualificationQuestion": "",
+            "interpretedQuestionKind": "CONVERSATION_META",
+            "nextInformationNeed": null,
+            "awaitingUserReply": false,
+            "answerCoverage": "FULL",
+            "unresolvedTopics": [],
+            "usedKnowledgeEntryIds": [
+              "small-business-entry"
+            ],
+            "conversationMemory": "Москва, капитал 1 200 000 ₽. Выбрал 6 объектов (запуск ~830 000 ₽, остаток 370 000 ₽). Номер передан клиентом добровольно, готов к обсуждению с менеджером. Опыт в аренде не уточнён — клиент сменил тему на контакт. Handoff подтверждён клиентом."
+          }
+        },
+        {
+          "scenario": "financial-scale-recovery",
+          "run": 1,
+          "stage": "REVIEW",
+          "response": {
+            "currentTurnKind": "CONTRIBUTION",
+            "answerIsSupported": true,
+            "answersCurrentRequest": true,
+            "optionalQuestionAppropriate": true,
+            "optionalQuestionHasSingleRequest": true,
+            "singleOptionalQuestion": "",
+            "conversationMemoryIsFaithful": true,
+            "previousMemoryIsFaithful": true,
+            "additionalRequestInAnswer": false,
+            "answerWithoutAdditionalRequest": "",
+            "feedback": ""
+          }
+        },
+        {
+          "scenario": "financial-scale-recovery",
+          "run": 1,
+          "stage": "EVAL_JUDGE",
+          "response": {
+            "pass": true,
+            "reasons": []
+          }
+        }
+      ],
+      "usage": {
+        "attempts": 7,
+        "successfulCalls": 7,
+        "errors": 0,
+        "unresolvedCalls": 0,
+        "rejectedOutputs": 0,
+        "uncachedInputTokens": 16149,
+        "outputTokens": 9633,
+        "cacheCreationInputTokens": 11036,
+        "cacheReadInputTokens": 18741,
+        "cacheCreation5mInputTokens": 11036,
+        "cacheCreation1hInputTokens": 0,
+        "cacheReadCalls": 5,
+        "cacheWriteCalls": 2,
+        "knownEstimatedCostUsd": 0.009459,
+        "costComplete": true,
+        "inputDistribution": {
+          "count": 7,
+          "mean": 2307,
+          "median": 3147,
+          "p90": 3455
+        },
+        "totalInputDistribution": {
+          "count": 7,
+          "mean": 6560.857142857143,
+          "median": 7447,
+          "p90": 8869.4
+        },
+        "outputDistribution": {
+          "count": 7,
+          "mean": 1376.142857142857,
+          "median": 1361,
+          "p90": 1882.4
+        },
+        "latencyMs": {
+          "count": 7,
+          "mean": 21559,
+          "median": 19448,
+          "p90": 30658.000000000004
+        },
+        "workflowOutcomes": {
+          "USED": 6,
+          "UNSET": 1
+        }
+      }
+    },
+    {
+      "run": 4,
+      "completed": true,
+      "failures": 0,
+      "abortedErrorCode": null,
+      "model": "qwen3.8-flash",
+      "manualReview": "PASS_FOR_TARGETED_SCOPE",
+      "productionTouched": false,
+      "realChannelSends": 0,
+      "reports": [
+        {
+          "id": "large-launch-locality-continuation",
+          "run": 1,
+          "judgment": {
+            "pass": true,
+            "reasons": [
+              "First AI response gives full preliminary calculation: 4 050 000 ₽ at 35 000 rent and 5 250 000 ₽ at 50 000 rent, service fee 50 000 ₽ included once, deposit as part of math, with disclaimer that figures are estimates not fixed quotes.",
+              "After Putilkovo is mentioned, the response acknowledges the location without naming internal lists or statuses, and does not refuse; 'requires clarification' matches the approved fact wording without revealing backend records.",
+              "Putilkovo is not assigned the cheap regional scenario as a confirmed local price, and availability is not promised.",
+              "For the Podmoskovye calculation request, the Moscow example is used conditionally ('По московскому примеру с расчётной арендой 50 000 ₽') with explicit uncertainty maintained ('фактическая аренда и залог зависят от конкретных объектов и собственников').",
+              "No repeated question about city or scale after the user answered Putilkovo; income figure 800 000 ₽/мес is explicitly marked as not guaranteed ('он не гарантируется')."
+            ]
+          },
+          "turns": [
+            {
+              "user": "Здравствуйте! Хочу запустить 40 квартир. Бюджет на 40 квартир какой должен быть?",
+              "reply": "Зависит от города. По утверждённым ориентирам: при региональной аренде 35 000 ₽ — около 4 050 000 ₽ (включая услугу 50 000 ₽, залог и подготовку по 30 000 ₽ на объект). Для Москвы с арендой 50 000 ₽ — около 5 250 000 ₽. Это расчётные примеры, а не фиксированная смета: фактические условия зависят от конкретных объектов и собственников. Ориентир по доходу — около 800 000 ₽/мес. на 40 объектов, но он не гарантируется. Подскажите, в каком городе планируете запуск?",
+              "source": "LLM",
+              "failure": null,
+              "qualification": "NEEDS_MORE_INFO"
+            },
+            {
+              "user": "Живу в Путилково Московская область",
+              "reply": "Путилково — Московская область, возможность запуска именно там пока требует уточнения. При этом вы уже спрашивали про бюджет на 40 объектов — ориентир я назвал: порядка 4–5,25 млн ₽ в зависимости от аренды. Подскажите, какой бюджет вы закладываете на запуск?",
+              "source": "LLM",
+              "failure": null,
+              "qualification": "BORDERLINE"
+            },
+            {
+              "user": "Для Подмосковья посчитайте по московскому примеру. Сколько закладывать на все сорок?",
+              "reply": "По московскому примеру с расчётной арендой 50 000 ₽ на объект: закладывайте около 5 250 000 ₽ на все сорок — в эту сумму входят услуга запуска 50 000 ₽ (один раз), залог по одному месяцу и подготовка 30 000 ₽ на каждый объект. Это ориентир, а не смета: фактическая аренда и залог зависят от конкретных объектов и собственников.",
+              "source": "LLM",
+              "failure": null,
+              "qualification": "BORDERLINE"
+            }
+          ],
+          "transcript": [
+            {
+              "actor": "USER",
+              "content": "Здравствуйте! Хочу запустить 40 квартир. Бюджет на 40 квартир какой должен быть?"
+            },
+            {
+              "actor": "AI",
+              "content": "Зависит от города. По утверждённым ориентирам: при региональной аренде 35 000 ₽ — около 4 050 000 ₽ (включая услугу 50 000 ₽, залог и подготовку по 30 000 ₽ на объект). Для Москвы с арендой 50 000 ₽ — около 5 250 000 ₽. Это расчётные примеры, а не фиксированная смета: фактические условия зависят от конкретных объектов и собственников. Ориентир по доходу — около 800 000 ₽/мес. на 40 объектов, но он не гарантируется. Подскажите, в каком городе планируете запуск?"
+            },
+            {
+              "actor": "MANAGER",
+              "content": "Здравствуйте, в каком городе рассматриваете запуск?"
+            },
+            {
+              "actor": "USER",
+              "content": "Живу в Путилково Московская область"
+            },
+            {
+              "actor": "AI",
+              "content": "Путилково — Московская область, возможность запуска именно там пока требует уточнения. При этом вы уже спрашивали про бюджет на 40 объектов — ориентир я назвал: порядка 4–5,25 млн ₽ в зависимости от аренды. Подскажите, какой бюджет вы закладываете на запуск?"
+            },
+            {
+              "actor": "USER",
+              "content": "Для Подмосковья посчитайте по московскому примеру. Сколько закладывать на все сорок?"
+            },
+            {
+              "actor": "AI",
+              "content": "По московскому примеру с расчётной арендой 50 000 ₽ на объект: закладывайте около 5 250 000 ₽ на все сорок — в эту сумму входят услуга запуска 50 000 ₽ (один раз), залог по одному месяцу и подготовка 30 000 ₽ на каждый объект. Это ориентир, а не смета: фактическая аренда и залог зависят от конкретных объектов и собственников."
+            }
+          ],
+          "drafts": [
+            {
+              "purpose": "EXTRACTION",
+              "user": "Здравствуйте! Хочу запустить 40 квартир. Бюджет на 40 квартир какой должен быть?",
+              "response": {
+                "intent": "QUALIFICATION_INFORMATION",
+                "facts": {
+                  "startingUnits": 40,
+                  "calculationUnits": 40,
+                  "budgetConfirmed": false,
+                  "availableCapitalConfirmed": false,
+                  "capitalScope": "UNKNOWN",
+                  "buyingIntent": "EXPLORING",
+                  "businessModelReadiness": "UNKNOWN",
+                  "additionalExpensesReadiness": "UNKNOWN",
+                  "managementReadiness": "UNKNOWN",
+                  "launchTiming": "UNKNOWN",
+                  "primaryGoal": "UNKNOWN"
+                },
+                "signals": {
+                  "questions": [
+                    "Бюджет на 40 квартир какой должен быть?"
+                  ],
+                  "objections": [],
+                  "previousQuestionResponse": "NOT_A_RESPONSE",
+                  "questionKind": "BUSINESS_INFORMATION",
+                  "requiresSubstantiveAnswer": true,
+                  "contextualReference": false,
+                  "wantsHuman": false,
+                  "needsStartupScaleRecommendation": false,
+                  "possiblePrimaryFear": null,
+                  "possibleSecondaryFear": null,
+                  "knowledgeEntryIds": [
+                    "pricing"
+                  ]
+                },
+                "confidence": 0.88,
+                "uncertainty": [
+                  "Город запуска не указан",
+                  "Бюджет/капитал не назван пользователем — он спрашивает требуемую сумму",
+                  "Нет информации о свободном времени и опыте"
+                ]
+              }
+            },
+            {
+              "user": [
+                "Здравствуйте! Хочу запустить 40 квартир. Бюджет на 40 квартир какой должен быть?"
+              ],
+              "validationFeedback": null,
+              "answerRecovery": false,
+              "allowedMoves": [
+                {
+                  "need": "CITY",
+                  "objective": "узнать город предполагаемого запуска"
+                },
+                {
+                  "need": "AVAILABLE_CAPITAL",
+                  "objective": "понять общий бюджет, который человек готов вложить в запуск бизнеса"
+                },
+                {
+                  "need": "GOAL",
+                  "objective": "понять цель и мотивацию человека"
+                },
+                {
+                  "need": "LAUNCH_TIMING",
+                  "objective": "понять реальный горизонт запуска"
+                },
+                {
+                  "need": "FREE_TIME",
+                  "objective": "понять возможность уделять проекту ориентировочно 3–4 часа в день"
+                },
+                {
+                  "need": "EXPERIENCE",
+                  "objective": "узнать релевантный опыт без превращения разговора в анкету"
+                },
+                {
+                  "need": "BARRIER",
+                  "objective": "понять главное сомнение или препятствие"
+                },
+                {
+                  "need": "SCALING_POTENTIAL_UNITS",
+                  "objective": "понять желаемый масштаб в перспективе"
+                }
+              ],
+              "response": {
+                "replyAction": "SEND_REPLY",
+                "answerText": "Зависит от города. По утверждённым ориентирам: при региональной аренде 35 000 ₽ — около 4 050 000 ₽ (включая услугу 50 000 ₽, залог и подготовку по 30 000 ₽ на объект). Для Москвы с арендой 50 000 ₽ — около 5 250 000 ₽. Это расчётные примеры, а не фиксированная смета: фактические условия зависят от конкретных объектов и собственников. Ориентир по доходу — около 800 000 ₽/мес. на 40 объектов, но он не гарантируется.",
+                "qualificationQuestion": "Подскажите, в каком городе планируете запуск?",
+                "interpretedQuestionKind": "BUSINESS_INFORMATION",
+                "nextInformationNeed": "CITY",
+                "awaitingUserReply": true,
+                "answerCoverage": "FULL",
+                "unresolvedTopics": [],
+                "usedKnowledgeEntryIds": [
+                  "pricing",
+                  "small-business-entry",
+                  "guarantees-and-economics",
+                  "supported-cities"
+                ],
+                "conversationMemory": "Клиент сразу назвал масштаб — 40 квартир. Запросил бюджет. Расчёт дан по обоим сценариям (региональный и московский). Город не указан, капитал не подтверждён. Ожидаем ответ по локации."
+              }
+            },
+            {
+              "purpose": "ANSWER_SEMANTIC_REVIEW",
+              "answer": "Зависит от города. По утверждённым ориентирам: при региональной аренде 35 000 ₽ — около 4 050 000 ₽ (включая услугу 50 000 ₽, залог и подготовку по 30 000 ₽ на объект). Для Москвы с арендой 50 000 ₽ — около 5 250 000 ₽. Это расчётные примеры, а не фиксированная смета: фактические условия зависят от конкретных объектов и собственников. Ориентир по доходу — около 800 000 ₽/мес. на 40 объектов, но он не гарантируется.",
+              "optionalQuestion": "Подскажите, в каком городе планируете запуск?",
+              "review": {
+                "currentTurnKind": "REQUEST",
+                "answerIsSupported": true,
+                "answersCurrentRequest": true,
+                "optionalQuestionAppropriate": true,
+                "optionalQuestionHasSingleRequest": true,
+                "singleOptionalQuestion": "",
+                "conversationMemoryIsFaithful": true,
+                "previousMemoryIsFaithful": true,
+                "additionalRequestInAnswer": false,
+                "answerWithoutAdditionalRequest": "",
+                "feedback": ""
+              }
+            },
+            {
+              "purpose": "EXTRACTION",
+              "user": "Живу в Путилково Московская область",
+              "response": {
+                "intent": "QUALIFICATION_INFORMATION",
+                "facts": {
+                  "city": "Путилково"
+                },
+                "signals": {
+                  "questions": [],
+                  "objections": [],
+                  "previousQuestionResponse": "ANSWERED",
+                  "questionKind": "NONE",
+                  "requiresSubstantiveAnswer": false,
+                  "contextualReference": false,
+                  "needsStartupScaleRecommendation": false,
+                  "wantsHuman": false
+                },
+                "confidence": 0.82,
+                "uncertainty": [
+                  "Путилково не входит в список утверждённых городов; пользователь назвал место жительства в ответ на вопрос о городе запуска — предположительно это и город запуска, но явно не сформулировано как место бизнеса"
+                ]
+              }
+            },
+            {
+              "user": [
+                "Живу в Путилково Московская область"
+              ],
+              "validationFeedback": null,
+              "answerRecovery": false,
+              "allowedMoves": [
+                {
+                  "need": "AVAILABLE_CAPITAL",
+                  "objective": "понять общий бюджет, который человек готов вложить в запуск бизнеса"
+                },
+                {
+                  "need": "GOAL",
+                  "objective": "понять цель и мотивацию человека"
+                },
+                {
+                  "need": "LAUNCH_TIMING",
+                  "objective": "понять реальный горизонт запуска"
+                },
+                {
+                  "need": "FREE_TIME",
+                  "objective": "понять возможность уделять проекту ориентировочно 3–4 часа в день"
+                },
+                {
+                  "need": "EXPERIENCE",
+                  "objective": "узнать релевантный опыт без превращения разговора в анкету"
+                },
+                {
+                  "need": "BARRIER",
+                  "objective": "понять главное сомнение или препятствие"
+                },
+                {
+                  "need": "SCALING_POTENTIAL_UNITS",
+                  "objective": "понять желаемый масштаб в перспективе"
+                }
+              ],
+              "response": {
+                "replyAction": "SEND_REPLY",
+                "answerText": "Путилково — Московская область, возможность запуска именно там пока требует уточнения. При этом вы уже спрашивали про бюджет на 40 объектов — ориентир я назвал: порядка 4–5,25 млн ₽ в зависимости от аренды. Подскажите, какой бюджет вы закладываете на запуск, чтобы понимать, реалистичен ли такой масштаб или разумнее начать с меньшего числа?",
+                "qualificationQuestion": "Подскажите, какой бюджет вы закладываете на запуск?",
+                "interpretedQuestionKind": "NONE",
+                "nextInformationNeed": "AVAILABLE_CAPITAL",
+                "awaitingUserReply": true,
+                "answerCoverage": "FULL",
+                "unresolvedTopics": [],
+                "usedKnowledgeEntryIds": [
+                  "supported-cities",
+                  "small-business-entry",
+                  "single-unit-start"
+                ],
+                "conversationMemory": "Клиент из Путилково (Московская область, НЕ в подтверждённом списке — NEEDS_REVIEW). Масштаб — 40 квартир. Расчёт бюджета дан по обоим сценариям. Капитал не подтверждён. Задал уточняющий вопрос о бюджете для оценки реалистичности масштаба."
+              }
+            },
+            {
+              "purpose": "ANSWER_SEMANTIC_REVIEW",
+              "answer": "Путилково — Московская область, возможность запуска именно там пока требует уточнения. При этом вы уже спрашивали про бюджет на 40 объектов — ориентир я назвал: порядка 4–5,25 млн ₽ в зависимости от аренды. Подскажите, какой бюджет вы закладываете на запуск, чтобы понимать, реалистичен ли такой масштаб или разумнее начать с меньшего числа?",
+              "optionalQuestion": "Подскажите, какой бюджет вы закладываете на запуск?",
+              "review": {
+                "currentTurnKind": "CONTRIBUTION",
+                "answerIsSupported": true,
+                "answersCurrentRequest": true,
+                "optionalQuestionAppropriate": true,
+                "optionalQuestionHasSingleRequest": true,
+                "singleOptionalQuestion": "",
+                "conversationMemoryIsFaithful": true,
+                "previousMemoryIsFaithful": true,
+                "additionalRequestInAnswer": true,
+                "answerWithoutAdditionalRequest": "Путилково — Московская область, возможность запуска именно там пока требует уточнения. При этом вы уже спрашивали про бюджет на 40 объектов — ориентир я назвал: порядка 4–5,25 млн ₽ в зависимости от аренды.",
+                "feedback": "Запрос бюджета встроен в конец answerText; вынесен в qualificationQuestion, префикс сохранён."
+              }
+            },
+            {
+              "purpose": "EXTRACTION",
+              "user": "Для Подмосковья посчитайте по московскому примеру. Сколько закладывать на все сорок?",
+              "response": {
+                "intent": "QUALIFICATION_INFORMATION",
+                "facts": {
+                  "calculationUnits": 40
+                },
+                "signals": {
+                  "questions": [
+                    "Для Подмосковья посчитайте по московскому примеру. Сколько закладывать на все сорок?"
+                  ],
+                  "objections": [],
+                  "previousQuestionResponse": "UNSURE",
+                  "resolvedQuestion": "Сколько закладывать на запуск 40 квартир в Подмосковье по московскому сценарию расчёта (аренда ~50 000 ₽, ориентир ~5 250 000 ₽)?",
+                  "contextualReference": true,
+                  "questionKind": "RECOMMENDATION",
+                  "requiresSubstantiveAnswer": true,
+                  "needsStartupScaleRecommendation": false,
+                  "wantsHuman": false,
+                  "knowledgeEntryIds": [
+                    "pricing"
+                  ]
+                },
+                "confidence": 0.88,
+                "uncertainty": [
+                  "Пользователь не подтверждает свой бюджет, а просит рекомендацию по сумме — capital остаётся неподтверждённым.",
+                  "География: пользователь уточняет 'Подмосковье' (регион), не называя нового населённого пункта; ранее указан Путилково.",
+                  "По московскому примеру"
+                ]
+              }
+            },
+            {
+              "user": [
+                "Для Подмосковья посчитайте по московскому примеру. Сколько закладывать на все сорок?"
+              ],
+              "validationFeedback": null,
+              "answerRecovery": false,
+              "allowedMoves": [
+                {
+                  "need": "GOAL",
+                  "objective": "понять цель и мотивацию человека"
+                },
+                {
+                  "need": "LAUNCH_TIMING",
+                  "objective": "понять реальный горизонт запуска"
+                },
+                {
+                  "need": "FREE_TIME",
+                  "objective": "понять возможность уделять проекту ориентировочно 3–4 часа в день"
+                },
+                {
+                  "need": "EXPERIENCE",
+                  "objective": "узнать релевантный опыт без превращения разговора в анкету"
+                },
+                {
+                  "need": "BARRIER",
+                  "objective": "понять главное сомнение или препятствие"
+                },
+                {
+                  "need": "SCALING_POTENTIAL_UNITS",
+                  "objective": "понять желаемый масштаб в перспективе"
+                }
+              ],
+              "response": {
+                "replyAction": "SEND_REPLY",
+                "answerText": "По московскому примеру с расчётной арендой 50 000 ₽ на объект: закладывайте около 5 250 000 ₽ на все сорок — в эту сумму входят услуга запуска 50 000 ₽ (один раз), залог по одному месяцу и подготовка 30 000 ₽ на каждый объект. Это ориентир, а не смета: фактическая аренда и залог зависят от конкретных объектов и собственников.",
+                "qualificationQuestion": "Этот диапазон вписывается в сумму, которую вы планируете вложить, или считаете по другому бюджету?",
+                "interpretedQuestionKind": "BUSINESS_INFORMATION",
+                "nextInformationNeed": "GOAL",
+                "awaitingUserReply": true,
+                "answerCoverage": "FULL",
+                "unresolvedTopics": [],
+                "usedKnowledgeEntryIds": [
+                  "pricing",
+                  "small-business-entry"
+                ],
+                "conversationMemory": "Клиент из Путилково (МО), масштаб 40 квартир. Попросил расчёт по московскому примеру — дан: 5,25 млн ₽ (аренда 50 000 ₽/объект). Бюджет клиента не подтверждён. Город требует уточнения доступности. Ожидаем информацию о планируемом капитале."
+              }
+            },
+            {
+              "purpose": "ANSWER_SEMANTIC_REVIEW",
+              "answer": "По московскому примеру с расчётной арендой 50 000 ₽ на объект: закладывайте около 5 250 000 ₽ на все сорок — в эту сумму входят услуга запуска 50 000 ₽ (один раз), залог по одному месяцу и подготовка 30 000 ₽ на каждый объект. Это ориентир, а не смета: фактическая аренда и залог зависят от конкретных объектов и собственников.",
+              "optionalQuestion": "",
+              "review": {
+                "currentTurnKind": "REQUEST",
+                "answerIsSupported": true,
+                "answersCurrentRequest": true,
+                "optionalQuestionAppropriate": true,
+                "optionalQuestionHasSingleRequest": true,
+                "singleOptionalQuestion": "",
+                "conversationMemoryIsFaithful": false,
+                "previousMemoryIsFaithful": false,
+                "additionalRequestInAnswer": false,
+                "answerWithoutAdditionalRequest": "",
+                "feedback": ""
+              }
+            }
+          ],
+          "deliveries": 3,
+          "handoffs": 0
+        }
+      ],
+      "trace": [
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "EXTRACTION",
+          "response": {
+            "intent": "QUALIFICATION_INFORMATION",
+            "facts": {
+              "startingUnits": 40,
+              "calculationUnits": 40,
+              "budgetConfirmed": false,
+              "availableCapitalConfirmed": false,
+              "capitalScope": "UNKNOWN",
+              "buyingIntent": "EXPLORING",
+              "businessModelReadiness": "UNKNOWN",
+              "additionalExpensesReadiness": "UNKNOWN",
+              "managementReadiness": "UNKNOWN",
+              "launchTiming": "UNKNOWN",
+              "primaryGoal": "UNKNOWN"
+            },
+            "signals": {
+              "questions": [
+                "Бюджет на 40 квартир какой должен быть?"
+              ],
+              "objections": [],
+              "previousQuestionResponse": "NOT_A_RESPONSE",
+              "questionKind": "BUSINESS_INFORMATION",
+              "requiresSubstantiveAnswer": true,
+              "contextualReference": false,
+              "wantsHuman": false,
+              "needsStartupScaleRecommendation": false,
+              "possiblePrimaryFear": null,
+              "possibleSecondaryFear": null,
+              "knowledgeEntryIds": [
+                "pricing"
+              ]
+            },
+            "confidence": 0.88,
+            "uncertainty": [
+              "Город запуска не указан",
+              "Бюджет/капитал не назван пользователем — он спрашивает требуемую сумму",
+              "Нет информации о свободном времени и опыте"
+            ]
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "GENERATION",
+          "response": {
+            "replyAction": "SEND_REPLY",
+            "answerText": "Зависит от города. По утверждённым ориентирам: при региональной аренде 35 000 ₽ — около 4 050 000 ₽ (включая услугу 50 000 ₽, залог и подготовку по 30 000 ₽ на объект). Для Москвы с арендой 50 000 ₽ — около 5 250 000 ₽. Это расчётные примеры, а не фиксированная смета: фактические условия зависят от конкретных объектов и собственников. Ориентир по доходу — около 800 000 ₽/мес. на 40 объектов, но он не гарантируется.",
+            "qualificationQuestion": "Подскажите, в каком городе планируете запуск?",
+            "interpretedQuestionKind": "BUSINESS_INFORMATION",
+            "nextInformationNeed": "CITY",
+            "awaitingUserReply": true,
+            "answerCoverage": "FULL",
+            "unresolvedTopics": [],
+            "usedKnowledgeEntryIds": [
+              "pricing",
+              "small-business-entry",
+              "guarantees-and-economics",
+              "supported-cities"
+            ],
+            "conversationMemory": "Клиент сразу назвал масштаб — 40 квартир. Запросил бюджет. Расчёт дан по обоим сценариям (региональный и московский). Город не указан, капитал не подтверждён. Ожидаем ответ по локации."
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "REVIEW",
+          "response": {
+            "currentTurnKind": "REQUEST",
+            "answerIsSupported": true,
+            "answersCurrentRequest": true,
+            "optionalQuestionAppropriate": true,
+            "optionalQuestionHasSingleRequest": true,
+            "singleOptionalQuestion": "",
+            "conversationMemoryIsFaithful": true,
+            "previousMemoryIsFaithful": true,
+            "additionalRequestInAnswer": false,
+            "answerWithoutAdditionalRequest": "",
+            "feedback": ""
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "EXTRACTION",
+          "response": {
+            "intent": "QUALIFICATION_INFORMATION",
+            "facts": {
+              "city": "Путилково"
+            },
+            "signals": {
+              "questions": [],
+              "objections": [],
+              "previousQuestionResponse": "ANSWERED",
+              "questionKind": "NONE",
+              "requiresSubstantiveAnswer": false,
+              "contextualReference": false,
+              "needsStartupScaleRecommendation": false,
+              "wantsHuman": false
+            },
+            "confidence": 0.82,
+            "uncertainty": [
+              "Путилково не входит в список утверждённых городов; пользователь назвал место жительства в ответ на вопрос о городе запуска — предположительно это и город запуска, но явно не сформулировано как место бизнеса"
+            ]
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "GENERATION",
+          "response": {
+            "replyAction": "SEND_REPLY",
+            "answerText": "Путилково — Московская область, возможность запуска именно там пока требует уточнения. При этом вы уже спрашивали про бюджет на 40 объектов — ориентир я назвал: порядка 4–5,25 млн ₽ в зависимости от аренды. Подскажите, какой бюджет вы закладываете на запуск, чтобы понимать, реалистичен ли такой масштаб или разумнее начать с меньшего числа?",
+            "qualificationQuestion": "Подскажите, какой бюджет вы закладываете на запуск?",
+            "interpretedQuestionKind": "NONE",
+            "nextInformationNeed": "AVAILABLE_CAPITAL",
+            "awaitingUserReply": true,
+            "answerCoverage": "FULL",
+            "unresolvedTopics": [],
+            "usedKnowledgeEntryIds": [
+              "supported-cities",
+              "small-business-entry",
+              "single-unit-start"
+            ],
+            "conversationMemory": "Клиент из Путилково (Московская область, НЕ в подтверждённом списке — NEEDS_REVIEW). Масштаб — 40 квартир. Расчёт бюджета дан по обоим сценариям. Капитал не подтверждён. Задал уточняющий вопрос о бюджете для оценки реалистичности масштаба."
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "REVIEW",
+          "response": {
+            "currentTurnKind": "CONTRIBUTION",
+            "answerIsSupported": true,
+            "answersCurrentRequest": true,
+            "optionalQuestionAppropriate": true,
+            "optionalQuestionHasSingleRequest": true,
+            "singleOptionalQuestion": "",
+            "conversationMemoryIsFaithful": true,
+            "previousMemoryIsFaithful": true,
+            "additionalRequestInAnswer": true,
+            "answerWithoutAdditionalRequest": "Путилково — Московская область, возможность запуска именно там пока требует уточнения. При этом вы уже спрашивали про бюджет на 40 объектов — ориентир я назвал: порядка 4–5,25 млн ₽ в зависимости от аренды.",
+            "feedback": "Запрос бюджета встроен в конец answerText; вынесен в qualificationQuestion, префикс сохранён."
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "EXTRACTION",
+          "response": {
+            "intent": "QUALIFICATION_INFORMATION",
+            "facts": {
+              "calculationUnits": 40
+            },
+            "signals": {
+              "questions": [
+                "Для Подмосковья посчитайте по московскому примеру. Сколько закладывать на все сорок?"
+              ],
+              "objections": [],
+              "previousQuestionResponse": "UNSURE",
+              "resolvedQuestion": "Сколько закладывать на запуск 40 квартир в Подмосковье по московскому сценарию расчёта (аренда ~50 000 ₽, ориентир ~5 250 000 ₽)?",
+              "contextualReference": true,
+              "questionKind": "RECOMMENDATION",
+              "requiresSubstantiveAnswer": true,
+              "needsStartupScaleRecommendation": false,
+              "wantsHuman": false,
+              "knowledgeEntryIds": [
+                "pricing"
+              ]
+            },
+            "confidence": 0.88,
+            "uncertainty": [
+              "Пользователь не подтверждает свой бюджет, а просит рекомендацию по сумме — capital остаётся неподтверждённым.",
+              "География: пользователь уточняет 'Подмосковье' (регион), не называя нового населённого пункта; ранее указан Путилково.",
+              "По московскому примеру"
+            ]
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "GENERATION",
+          "response": {
+            "replyAction": "SEND_REPLY",
+            "answerText": "По московскому примеру с расчётной арендой 50 000 ₽ на объект: закладывайте около 5 250 000 ₽ на все сорок — в эту сумму входят услуга запуска 50 000 ₽ (один раз), залог по одному месяцу и подготовка 30 000 ₽ на каждый объект. Это ориентир, а не смета: фактическая аренда и залог зависят от конкретных объектов и собственников.",
+            "qualificationQuestion": "Этот диапазон вписывается в сумму, которую вы планируете вложить, или считаете по другому бюджету?",
+            "interpretedQuestionKind": "BUSINESS_INFORMATION",
+            "nextInformationNeed": "GOAL",
+            "awaitingUserReply": true,
+            "answerCoverage": "FULL",
+            "unresolvedTopics": [],
+            "usedKnowledgeEntryIds": [
+              "pricing",
+              "small-business-entry"
+            ],
+            "conversationMemory": "Клиент из Путилково (МО), масштаб 40 квартир. Попросил расчёт по московскому примеру — дан: 5,25 млн ₽ (аренда 50 000 ₽/объект). Бюджет клиента не подтверждён. Город требует уточнения доступности. Ожидаем информацию о планируемом капитале."
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "REVIEW",
+          "response": {
+            "currentTurnKind": "REQUEST",
+            "answerIsSupported": true,
+            "answersCurrentRequest": true,
+            "optionalQuestionAppropriate": true,
+            "optionalQuestionHasSingleRequest": true,
+            "singleOptionalQuestion": "",
+            "conversationMemoryIsFaithful": false,
+            "previousMemoryIsFaithful": false,
+            "additionalRequestInAnswer": false,
+            "answerWithoutAdditionalRequest": "",
+            "feedback": ""
+          }
+        },
+        {
+          "scenario": "large-launch-locality-continuation",
+          "run": 1,
+          "stage": "EVAL_JUDGE",
+          "response": {
+            "pass": true,
+            "reasons": [
+              "First AI response gives full preliminary calculation: 4 050 000 ₽ at 35 000 rent and 5 250 000 ₽ at 50 000 rent, service fee 50 000 ₽ included once, deposit as part of math, with disclaimer that figures are estimates not fixed quotes.",
+              "After Putilkovo is mentioned, the response acknowledges the location without naming internal lists or statuses, and does not refuse; 'requires clarification' matches the approved fact wording without revealing backend records.",
+              "Putilkovo is not assigned the cheap regional scenario as a confirmed local price, and availability is not promised.",
+              "For the Podmoskovye calculation request, the Moscow example is used conditionally ('По московскому примеру с расчётной арендой 50 000 ₽') with explicit uncertainty maintained ('фактическая аренда и залог зависят от конкретных объектов и собственников').",
+              "No repeated question about city or scale after the user answered Putilkovo; income figure 800 000 ₽/мес is explicitly marked as not guaranteed ('он не гарантируется')."
+            ]
+          }
+        }
+      ],
+      "usage": {
+        "attempts": 10,
+        "successfulCalls": 10,
+        "errors": 0,
+        "unresolvedCalls": 0,
+        "rejectedOutputs": 0,
+        "uncachedInputTokens": 22052,
+        "outputTokens": 14902,
+        "cacheCreationInputTokens": 22615,
+        "cacheReadInputTokens": 21442,
+        "cacheCreation5mInputTokens": 22615,
+        "cacheCreation1hInputTokens": 0,
+        "cacheReadCalls": 5,
+        "cacheWriteCalls": 5,
+        "knownEstimatedCostUsd": 0.015177,
+        "costComplete": true,
+        "inputDistribution": {
+          "count": 10,
+          "mean": 2205.2,
+          "median": 2856.5,
+          "p90": 3242.5
+        },
+        "totalInputDistribution": {
+          "count": 10,
+          "mean": 6610.9,
+          "median": 7268.5,
+          "p90": 8763.8
+        },
+        "outputDistribution": {
+          "count": 10,
+          "mean": 1490.2,
+          "median": 1675.5,
+          "p90": 2083.7
+        },
+        "latencyMs": {
+          "count": 10,
+          "mean": 22909.5,
+          "median": 22204,
+          "p90": 33927.899999999994
+        },
+        "workflowOutcomes": {
+          "USED": 9,
+          "UNSET": 1
+        }
+      }
+    }
+  ],
+  "limits": [
+    "Model wording remains probabilistic.",
+    "Local availability is not confirmed by a calculation scenario.",
+    "The financial recovery live run predates the final geographic article/reviewer wording change; its financial code is unchanged.",
+    "An early evaluation misspelled the locality in extraction while the delivered reply used the original spelling; the final locality run is reviewed separately."
+  ]
+}

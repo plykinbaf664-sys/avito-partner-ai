@@ -127,7 +127,7 @@ export const PARTNER_KNOWLEDGE_BASE: readonly KnowledgeEntry[] = [
   {
     id: "supported-cities",
     category: "LIMITATIONS",
-    answer: `Подтверждённые города работы: ${SERVICEABILITY_POLICY.supportedCities.join(", ")}. По другим городам возможность запуска нужно проверять отдельно; отсутствие города в списке не означает автоматический отказ.`,
+    answer: `Подтверждённые города работы: ${SERVICEABILITY_POLICY.supportedCities.join(", ")}. Возможность запуска в другом населённом пункте требует уточнения.`,
     matches: (text) =>
       /(?:можно|работ|запуск|схем).{0,35}(?:москв|город)|(?:москв|город).{0,35}(?:можно|работ|запуск|схем)/u.test(text),
   },
@@ -524,6 +524,7 @@ export function answerFromKnowledgeBase(
         requestedUnits,
         city,
         rentReference: effectiveRentReference ?? undefined,
+        includeComparisonScenarios: true,
       })
     : undefined;
   const affordableObjects = asksAboutAffordableObjects && availableCapital !== null

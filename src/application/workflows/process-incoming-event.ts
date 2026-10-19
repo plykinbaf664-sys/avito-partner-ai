@@ -1101,7 +1101,9 @@ export function createIncomingEventProcessor({
             lead: evaluatedLead,
             plan: responseGenerationPlan,
             conversationMemory: storedConversationMemory.conversationalNotes,
-            recentMessages: history.map(({ direction, actor, content }) => ({
+            currentInbound: { messageId: currentInbound?.id ?? null, text: input.text },
+            recentMessages: history.map(({ id, direction, actor, content }) => ({
+              id,
               direction,
               actor,
               content,
