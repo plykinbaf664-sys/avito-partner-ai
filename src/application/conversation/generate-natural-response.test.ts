@@ -14,6 +14,58 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it("requires explicit completeness and continuation review from a real provider", async () => {
+    const fake = new FakeLLMProvider([JSON.stringify({ answerText: "Ориентир — 3–4 часа в день.", qualificationQuestion: "",
+      interpretedQuestionKind: "BUSINESS_INFORMATION" }),
+      JSON.stringify({ ...JSON.parse(supportedReview), additionalRequestInAnswer: false, answerWithoutAdditionalRequest: "" })]);
+    const llm = { async generateText(request: Parameters<typeof fake.generateText>[0]) {
+      return { ...await fake.generateText(request), provider: "qwen" as const };
+    } };
+    await expect(createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Сколько времени нужно?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true },
+    })).rejects.toMatchObject({ code: "RESPONSE_POLICY_SEMANTIC_REVIEW_UNAVAILABLE",
+      reviewFailureCode: "REVIEW_COMPLETENESS_FIELDS_MISSING" });
+  });
+
+  it("repairs a skipped question from a multi-message turn and keeps a useful next step", async () => {
+    const full = "Ориентир дохода — около 20 000 ₽ в месяц с объекта, без гарантии. По московскому примеру запуск одного объекта — около 180 000 ₽, включая услугу, аренду, расчётный залог и подготовку; условия зависят от объекта.";
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ answerText: "Запуск одного объекта — около 180 000 ₽ по московскому примеру.", qualificationQuestion: "" }),
+      JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        unansweredRequests: ["Доход одного объекта"], nextStepMissing: true, currentTurnKind: "REQUEST", feedback: "Пропущен вопрос о доходе." }),
+      JSON.stringify({ answerText: full, qualificationQuestion: "Когда Вы планируете запуск?", nextInformationNeed: "LAUNCH_TIMING" }),
+      supportedReview,
+    ]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { ...createInitialLead("multi", "TEST", "multi", new Date()), city: "Москва", availableCapital: 1_000_000 },
+      recentMessages: [{ direction: "INBOUND", content: "Один объект какую сумму приносит?" },
+        { direction: "INBOUND", content: "И какие вложения требуются?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, allowedNextInformationNeeds: ["LAUNCH_TIMING"], knowledgeEntryIds: [], unresolvedQuestions: [] },
+    });
+    expect(result.answerText).toBe(full);
+    expect(result.nextInformationNeed).toBe("LAUNCH_TIMING");
+    expect(JSON.parse(llm.requests[2].userMessage).answerRecovery).toBe(false);
+    expect(llm.callCount).toBe(4);
+  });
+
+  it("repairs an unjustified conversational stop without disabling qualification in repair", async () => {
+    const answerText = "Ориентир дохода — около 20 000 ₽ в месяц с объекта, без гарантии.";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText, qualificationQuestion: "" }),
+      JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        unansweredRequests: [], nextStepMissing: true, currentTurnKind: "REQUEST", feedback: "Активный интерес, но нет полезного следующего шага." }),
+      JSON.stringify({ answerText, qualificationQuestion: "Когда планируете запуск?", nextInformationNeed: "LAUNCH_TIMING" }), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: createInitialLead("step", "TEST", "step", new Date()),
+      recentMessages: [{ direction: "INBOUND", content: "Хочу начать, сколько приносит один объект?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, allowedNextInformationNeeds: ["LAUNCH_TIMING"], knowledgeEntryIds: [], unresolvedQuestions: [] } });
+    expect(result.answerText).toBe(answerText);
+    expect(result.nextInformationNeed).toBe("LAUNCH_TIMING");
+    expect(llm.callCount).toBe(4);
+  });
+
   it("retains the full large-scale calculation when review rejects a garbled unrelated discovery question", async () => {
     const answerText = "По московскому примеру запуск 40 объектов — около 5 250 000 ₽. Это ориентир при аренде 50 000 ₽; залог в один месяц — допущение, фактические условия зависят от объекта.";
     const llm = new FakeLLMProvider([JSON.stringify({ answerText,
@@ -589,7 +641,7 @@ describe("natural response generation", () => {
     expect(result.text).toContain("3–4");
     expect(llm.callCount).toBe(3);
     expect(llm.requests[0]!.maxTokens).toBeGreaterThanOrEqual(2000);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v10");
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v11");
     expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
     expect(JSON.stringify(llm.requests)).not.toContain("operations-after-capital-correction");
   });

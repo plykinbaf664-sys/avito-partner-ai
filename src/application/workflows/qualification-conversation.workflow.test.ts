@@ -68,6 +68,33 @@ function reply({
 }
 
 describe("multi-turn qualification conversation", () => {
+  it("keeps an unanswered income request visible after a cancelled draft and a later cost question", async () => {
+    const { llm } = harness([
+      reply({ intent: "QUESTION", facts: { city: "Москва", availableCapital: 1_000_000, availableCapitalConfirmed: true },
+        signals: { questions: ["Доход с объекта?"], requiresSubstantiveAnswer: true } }),
+      reply({ intent: "QUESTION", signals: { questions: ["А вложения?"], requiresSubstantiveAnswer: true } }),
+    ]);
+    const cancelledText = "Этот ответ не был доставлен клиенту.";
+    const generator = vi.fn().mockResolvedValueOnce({ text: cancelledText, answerText: cancelledText,
+      nextInformationNeed: null, replyAction: "SEND_REPLY", conversationMemory: "Я уже ответил про доход." })
+      .mockResolvedValueOnce({ text: "Доход и вложения объяснены. Когда планируете запуск?",
+        nextInformationNeed: "LAUNCH_TIMING", replyAction: "SEND_REPLY" });
+    const outboundProvider = { deliver: vi.fn().mockResolvedValueOnce({ status: "FAILED", retryable: false,
+      errorCode: "CANCELLED_BY_INBOUND", attempted: false }).mockResolvedValue({ status: "SENT", externalId: "sent" }) };
+    const processEvent = createIncomingEventProcessor({ persistence, extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse: generator, outboundProvider, generateId: () => `burst-${++nextId}`,
+      now: () => new Date(1_790_000_000_000 + nextId * 1_000) });
+    await processEvent(input(921, "Москва, бюджет миллион. Доход с объекта?"));
+    await processEvent(input(922, "А вложения?"));
+    const extraction = JSON.parse(llm.requests[1].userMessage);
+    expect(extraction.RECENT_MESSAGES.map((m: { content: string }) => m.content)).not.toContain(cancelledText);
+    expect(generator.mock.calls[1][0].recentMessages.map((m: { content: string }) => m.content)).not.toContain(cancelledText);
+    expect(generator.mock.calls[1][0].recentMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ content: "Москва, бюджет миллион. Доход с объекта?" }),
+      expect.objectContaining({ content: "А вложения?" }),
+    ]));
+    expect(generator.mock.calls[1][0].conversationMemory ?? "").not.toContain("уже ответил про доход");
+  });
   it("does not fall back to the city catalogue when a customer supplies a locality", async () => {
     const { llm } = harness([
       reply({ facts: { startingUnits: 40 } }),

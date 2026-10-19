@@ -35,6 +35,15 @@ async function main() {
 
   const scenarios = [
     {
+      id: "multi-question-sales-continuation",
+      criteria: "Первый ответ закрывает ОБА вопроса: доход около 20 000 рублей с объекта в месяц без гарантии и полный запуск одного объекта по московскому примеру около 180 000 рублей, включая разовую услугу 50 000. Московская аренда 50 000 и залог один месяц — расчётные допущения, не цена Путилково; доступность Путилково не обещать. После ответа один новый уместный следующий шаг квалификации, без повторного вопроса об известном бюджете/городе и без преждевременного телефона. После уточнения запуска именно в Москве, двух объектов, цели основного бизнеса, скорого старта и личного участия — естественно запросить телефон, не растягивать анкету необязательными полями. После номера одна передача менеджеру, номер повторно не просить, сроки звонка не обещать.",
+      steps: [
+        { actor: "USER", text: "Меня зовут Мила, бюджет миллион. Живу в Путилково Московской области. Один объект сколько приносит в месяц? И какие вложения нужны на один объект по московскому примеру?" },
+        { actor: "USER", text: "Запуск рассматриваю именно в Москве. Хочу основной бизнес, начну с двух квартир в ближайшие дни. Готова сама ездить на просмотры и заключать договоры, уделять 3–4 часа в день. Миллион — общий доступный капитал, из него оплачиваю аренду, залог, подготовку и текущие расходы." },
+        { actor: "USER", text: "Да, мой номер +79991234567." },
+      ],
+    },
+    {
       id: "large-launch-locality-continuation",
       criteria: "На вопрос бюджета 40 квартир дать полный предварительный расчёт: 4 050 000 при аренде 35 000 или 5 250 000 при 50 000, услуга 50 000 включена один раз, залог один месяц лишь допущение. Не заменять расчёт общей справкой. После сообщения о Путилково Московской области принять ответ о месте, не говорить о внутренних списках/статусах и не отказывать. Не приписывать Путилково дешёвый региональный сценарий как установленную местную цену и не обещать доступность. На уточнение о подмосковном расчёте можно использовать московский пример условно при аренде 50 000, сохраняя неопределённость конкретных условий. Не повторять вопрос о городе или масштабе и не обещать гарантированный доход.",
       steps: [
@@ -346,6 +355,16 @@ async function main() {
             ? await lab.managerMessage(sessionId, step.text, at, `turn-${index}`)
             : await lab.clientMessage(sessionId, step.text, at, `turn-${index}`);
           if (step.actor === "USER") {
+            if (scenario.id === "multi-question-sales-continuation") {
+              assert.equal(result.snapshot.lastProcessing?.responseGenerationSource, "LLM");
+              assert.equal(result.snapshot.lastProcessing?.responseFailureCode, null);
+              assert.notEqual(result.snapshot.qualification.status, "NO_FIT");
+              if (index < 2) assert.equal(notifications.requests.length, 0, "No handoff before contact");
+              if (index === 1) {
+                assert.equal(result.snapshot.currentNextStep, "PHONE_NUMBER", "Qualified profile is ready for contact");
+                assert.equal(result.snapshot.conversation?.pendingInformationNeed, "PHONE_NUMBER", "Response actually requests contact");
+              }
+            }
             if (scenario.id === "large-launch-locality-continuation") {
               assert.equal(result.snapshot.lastProcessing?.responseGenerationSource, "LLM");
               assert.equal(result.snapshot.lastProcessing?.responseFailureCode, null);
@@ -391,7 +410,7 @@ async function main() {
           assert.equal(snapshot.phone, "+79991234567");
           assert.equal(notifications.requests.length, 1, "Recovered qualified phone hands off once");
         }
-        if (scenario.id === "phone-handoff-continuation" || scenario.id === "ready-contact-after-follow-on-request" || scenario.id === "ready-profile-contextual-next-step" || scenario.id === "financial-scale-recovery") {
+        if (scenario.id === "multi-question-sales-continuation" || scenario.id === "phone-handoff-continuation" || scenario.id === "ready-contact-after-follow-on-request" || scenario.id === "ready-profile-contextual-next-step" || scenario.id === "financial-scale-recovery") {
           assert.equal(snapshot.phone, "+79991234567");
           assert.equal(notifications.requests.length, 1, "Qualified phone must hand off exactly once");
         }

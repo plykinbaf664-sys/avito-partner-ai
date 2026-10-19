@@ -2,6 +2,7 @@ import { z } from "zod";
 import { settleLlmUsage, type LlmUsageTotals } from "../observability/llm-usage";
 
 import type { NaturalResponseGenerator } from "../conversation/generate-natural-response";
+import { customerVisibleHistory } from "../conversation/customer-visible-history";
 import { EventProcessingRejectedError } from "../errors/event-processing-error";
 import { RetryableInfrastructureError } from "../errors/infrastructure-error";
 import { createManagerNotificationDelivery } from "../delivery/deliver-manager-notification";
@@ -794,17 +795,19 @@ export function createIncomingEventProcessor({
 
     let extracted: ExtractMessageResult;
     try {
-      const extractionHistory = await persistence.messages.listRecentByLeadId(
+      const extractionContext = customerVisibleHistory(await persistence.messages.listRecentByLeadId(
         prepared.lead!.id,
-        MAX_RECENT_LLM_MESSAGES,
-      );
+        100,
+      ), !outboundProvider);
       extracted = await extractMessage({
         llmContext,
-        conversationMemory: parseStoredConversationMemory(prepared.conversation!.summary).conversationalNotes,
+        conversationMemory: extractionContext.notesReliable
+          ? parseStoredConversationMemory(prepared.conversation!.summary).conversationalNotes : undefined,
         text: input.text,
         currentLead: prepared.lead!,
         pendingInformationNeed: prepared.conversation!.pendingInformationNeed,
-        recentMessages: extractionHistory.map(({ direction, actor, content }) => ({ direction, actor, content })),
+        recentMessages: extractionContext.messages.slice(-MAX_RECENT_LLM_MESSAGES)
+          .map(({ direction, actor, content }) => ({ direction, actor, content })),
       });
       workflowCallIds.push(...(extracted.llmUsage?.callIds ?? []));
     } catch (error) {
@@ -937,10 +940,11 @@ export function createIncomingEventProcessor({
       }
 
       const evaluatedAt = clock();
-      const history = await persistence.messages.listRecentByLeadId(
+      const visibleContext = customerVisibleHistory(await persistence.messages.listRecentByLeadId(
         currentLead.id,
         100,
-      );
+      ), !outboundProvider);
+      const history = visibleContext.messages;
       const latestOutbound = history.findLast(
         (message) => message.direction === "OUTBOUND",
       );
@@ -1100,7 +1104,7 @@ export function createIncomingEventProcessor({
             llmContext,
             lead: evaluatedLead,
             plan: responseGenerationPlan,
-            conversationMemory: storedConversationMemory.conversationalNotes,
+            conversationMemory: visibleContext.notesReliable ? storedConversationMemory.conversationalNotes : undefined,
             currentInbound: { messageId: currentInbound?.id ?? null, text: input.text },
             recentMessages: history.map(({ id, direction, actor, content }) => ({
               id,
