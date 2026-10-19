@@ -362,7 +362,6 @@ async function main() {
               if (index < 2) assert.equal(notifications.requests.length, 0, "No handoff before contact");
               if (index === 1) {
                 assert.equal(result.snapshot.currentNextStep, "PHONE_NUMBER", "Qualified profile is ready for contact");
-                assert.equal(result.snapshot.conversation?.pendingInformationNeed, "PHONE_NUMBER", "Response actually requests contact");
               }
             }
             if (scenario.id === "large-launch-locality-continuation") {
@@ -383,6 +382,10 @@ async function main() {
             const persistedLead = await persistence.leads.findByExternalIdentity("TEST_CHAT_LAB", sessionId);
             assert(persistedLead && await persistence.crm.findLeadSnapshot(persistedLead.id),
               "Every valid inbound must be accessible through the CRM repository");
+            if (scenario.id === "multi-question-sales-continuation" && index === 1) {
+              const conversation = await persistence.conversations.findOpenByLeadId(persistedLead.id);
+              assert.equal(conversation?.pendingInformationNeed, "PHONE_NUMBER", "Response actually requests contact");
+            }
             if (scenario.id === "phone-handoff-continuation" && index === 0) {
               assert.equal(notifications.requests.length, 0, "Phone alone must not qualify");
             }
