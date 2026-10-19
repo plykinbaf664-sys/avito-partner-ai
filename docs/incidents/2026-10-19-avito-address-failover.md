@@ -31,3 +31,22 @@ can be reused. Release checks include the full suite, types, lint, build, Linux
 checks and read-only Avito probes with the failing DNS address placed first.
 No test messages are sent to Avito or Telegram. A completed TCP connection followed
 by an HTTP 502 or slow response remains a separate provider/path issue.
+
+## Verified release
+
+Deployed `a035090bf5fbabeb4c0e4c32246924dc56073cc8` on 2026-10-19 at 10:21 UTC.
+Local and Linux checks passed: 668 tests in 50 files, typecheck, lint and build.
+With global autoselection disabled and the failing address forced first, the
+candidate connected to another current DNS address and received HTTP 404 from the
+unauthenticated diagnostic endpoint in 810 ms. Auth, account and chat reads passed.
+No customer messages or additional paid model calls were made by these checks;
+unchanged conversation/provider evidence was reused and recorded in the manifest.
+
+Production readiness returned HTTP 200 with no issues; the first four polling
+cycles passed. Pending/failed inbound and unresolved outbound were zero; two old
+failed deliveries were unchanged. Production checkout was clean.
+
+Server evidence: `/root/.config/avito-partner-ai/avito-network-smoke-a035090bf5fb.json`.
+Backup and rollback manifest:
+`/opt/avito-partner-ai-backups/qwen-migration-20261019-102113/operational-release.json`.
+The only runtime dependency addition is Undici; rollback can leave it unused.
