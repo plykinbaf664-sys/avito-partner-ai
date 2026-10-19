@@ -4,6 +4,13 @@ import { formatOperationalStatus, readOperationalStatus, HEALTHY_ALERT_FINGERPRI
 import type { ProviderDeliveryResult } from "../ports/channels";
 import { createHash } from "node:crypto";
 
+const TRANSIENT_ALERT_GRACE_MS = 5 * 60_000;
+const TRANSIENT_AVITO_ISSUES = new Set([
+  "AVITO_POLLING:AVITO_POLL_FAILED",
+  ...["AVITO_NETWORK_ERROR", "AVITO_RATE_LIMITED", "AVITO_HTTP_500", "AVITO_HTTP_502", "AVITO_HTTP_503", "AVITO_HTTP_504"]
+    .map(code => `AVITO_MESSENGER:${code}`),
+]);
+
 export async function runProductionWatchdog({ persistence, sender, now = new Date(), probeHttp }: {
   persistence: Persistence; sender?: TelegramTextSender; now?: Date; probeHttp: () => Promise<boolean>;
 }) {
@@ -11,6 +18,16 @@ export async function runProductionWatchdog({ persistence, sender, now = new Dat
   await persistence.operations!.observe("APPLICATION_HTTP", httpOk ? "OK" : "BLOCKED", httpOk ? null : "APPLICATION_HTTP_UNAVAILABLE", now);
   const status = await readOperationalStatus(persistence, now);
   if (!sender) return { status, alerted: false, alertDelivery: "DISABLED" };
+  // Readiness remains strict. Telegram should not turn a short provider hiccup
+  // into an incident/recovery pair. Persistent access or delivery failures still
+  // alert immediately; absent successful evidence must not be hidden.
+  if (!status.ready && status.issues.every(issue => TRANSIENT_AVITO_ISSUES.has(issue))) {
+    const failing = status.observations.filter(row => row.state !== "OK");
+    if (failing.length && failing.every(row => row.lastSuccessAt !== null &&
+      now.getTime() - row.lastSuccessAt.getTime() < TRANSIENT_ALERT_GRACE_MS)) {
+      return { status, alerted: false, alertDelivery: "TRANSIENT_PENDING" };
+    }
+  }
   // Readiness tolerates an isolated degraded observation. It is not evidence
   // of recovery: wait for fresh, actually successful component observations.
   if (status.ready && status.observations.some(row => row.state !== "OK")) {

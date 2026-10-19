@@ -100,4 +100,33 @@ an estimated total cost of USD 0.053504.
 Full synthetic transcripts, model judgments, traces, usage and source hashes are
 in `docs/evals/2026-10-19-queued-budget.json`. These are scoped behavioral evidence,
 not a claim that every future model response is correct. Server deployment evidence
-will be appended after promotion and readiness checks.
+is recorded below.
+
+## Deployment and notification follow-up
+
+Revision `291f813260a9e7531f86953886067c6475620b55` was deployed on October 19.
+Linux typecheck, all 664 tests, lint and build passed. Server Test Chat Lab
+`inbound-delivery-smoke` passed with two deliveries to fake channels, no handoff,
+seven calls and estimated cost USD 0.008817; both answers were manually reviewed.
+Evidence: `/root/.config/avito-partner-ai/operational-e2e-291f813260a9.json`.
+Two production provider smoke calls succeeded. Backup/release manifest:
+`/opt/avito-partner-ai-backups/qwen-migration-20261019-093126/operational-release.json`.
+
+During observation, Avito token/account requests intermittently timed out or
+returned HTTP 502. Readiness temporarily became 503, then polling and Messenger
+recovered without configuration changes. At 09:40 UTC all components were OK,
+readiness was 200, pending/failed inbound and unresolved outbound were zero.
+Two historical failed deliveries remained unchanged.
+
+The owner requested fewer incident/recovery notifications during this release.
+Previously three transient observations could trigger Telegram before a quick
+recovery. A new SQLite watchdog regression first failed on that behavior.
+Transient polling/Messenger network, rate-limit and common HTTP 5xx alerts now
+wait until five minutes without a known successful component observation.
+Readiness is unchanged. Access blocks, stale polling, processing failures and
+unresolved delivery failures remain immediately actionable. No recovery is sent
+for a suppressed incident. Missing successful evidence is not suppressed.
+The test also checks that a sustained outage is delivered once per recipient.
+
+The notification-only follow-up does not change conversation behavior; its server
+release may reuse the reviewed live report after verifying the application diff.

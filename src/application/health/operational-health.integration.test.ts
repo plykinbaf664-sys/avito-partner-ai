@@ -23,6 +23,32 @@ describe("operational safety with real SQLite", () => {
     await persistence.operations.observe("AVITO_MESSENGER", "BLOCKED", "AVITO_UNAUTHORIZED", at);
   }
 
+  it("keeps brief network failures and their recovery silent but reports a sustained outage", async () => {
+    await authorizeTwoManagers();
+    await persistence.operations.observe("AVITO_MESSENGER", "OK", null, at);
+    const sender = { sendMessage: vi.fn().mockResolvedValue({ status: "SENT", externalId: "alert" }) };
+    const run = (now: Date) => runProductionWatchdog({ persistence, sender, now, probeHttp: async () => true });
+    for (let minute = 1; minute <= 3; minute++) {
+      const now = new Date(at.getTime() + minute * 60_000);
+      await persistence.operations.observe("AVITO_MESSENGER", "DEGRADED", "AVITO_NETWORK_ERROR", now);
+      await persistence.operations.observe("AVITO_POLLING", "DEGRADED", "AVITO_POLL_FAILED", now);
+      await run(now);
+    }
+    expect(sender.sendMessage).not.toHaveBeenCalled();
+    const recovered = new Date(at.getTime() + 4 * 60_000);
+    await persistence.operations.observe("AVITO_MESSENGER", "OK", null, recovered);
+    await persistence.operations.observe("AVITO_POLLING", "OK", null, recovered);
+    await run(recovered);
+    expect(sender.sendMessage).not.toHaveBeenCalled();
+    for (let minute = 5; minute <= 10; minute++) {
+      const now = new Date(at.getTime() + minute * 60_000);
+      await persistence.operations.observe("AVITO_MESSENGER", "DEGRADED", "AVITO_NETWORK_ERROR", now);
+      await persistence.operations.observe("AVITO_POLLING", "DEGRADED", "AVITO_POLL_FAILED", now);
+      await run(now);
+    }
+    expect(sender.sendMessage).toHaveBeenCalledTimes(2); // once per recipient
+  });
+
   it("retries only failed recipients and sends recovery only to recipients who saw the outage", async () => {
     await authorizeTwoManagers();
     const sender = { sendMessage: vi.fn().mockImplementation(async (chat: string) => chat === "available"
