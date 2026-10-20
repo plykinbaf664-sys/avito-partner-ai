@@ -14,6 +14,93 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it.each([true,false])("retries only a malformed review once, keeping business judgments strict: recovery=%s", async (recovers) => {
+    const invalidReview=JSON.stringify({answerIsSupported:true,answersCurrentRequest:"yes",optionalQuestionAppropriate:true});
+    const llm=Object.assign(new FakeLLMProvider([JSON.stringify({answerText:"Команда ведёт бронирования."}),
+      invalidReview,recovers?supportedReview:invalidReview]),{promptProfile:"compact-v1" as const});
+    const generate=createNaturalResponseGenerator({llmProvider:llm});
+    const pending=generate({lead:{} as Lead,recentMessages:[{direction:"INBOUND",content:"Кто ведёт бронирования?"}],
+      plan:{text:"",nextInformationNeed:null,asksUserQuestion:false,knowledgeEntryIds:[],unresolvedQuestions:[],useNaturalAdaptation:true}});
+    if(recovers) expect((await pending).text).toContain("бронирования");
+    else await expect(pending).rejects.toMatchObject({code:"RESPONSE_POLICY_SEMANTIC_REVIEW_UNAVAILABLE"});
+    expect(llm.callCount).toBe(3);
+    expect(llm.requests.slice(1).map(r=>JSON.parse(r.userMessage).purpose)).toEqual(["ANSWER_SEMANTIC_REVIEW","ANSWER_SEMANTIC_REVIEW"]);
+    expect(JSON.parse(llm.requests[2]!.userMessage).validationFeedback).toContain("answersCurrentRequest:invalid_type");
+  });
+
+  it("keeps essential reply fields strict and identifies the invalid field for bounded repair", async () => {
+    const llm = Object.assign(new FakeLLMProvider([
+      JSON.stringify({answerText:{invalid:true}}),
+      JSON.stringify({answerText:"Команда ведёт бронирования."}), supportedReview,
+    ]), {promptProfile:"compact-v1" as const});
+    const result = await createNaturalResponseGenerator({llmProvider:llm})({lead:{} as Lead,
+      recentMessages:[{direction:"INBOUND",content:"Кто ведёт брони?"}],
+      plan:{text:"",nextInformationNeed:null,asksUserQuestion:false,knowledgeEntryIds:[],unresolvedQuestions:[],useNaturalAdaptation:true}});
+    expect(result.text).toContain("бронирования");
+    expect(llm.callCount).toBe(3);
+    expect(JSON.parse(llm.requests[1]!.userMessage).validationFeedback).toContain("answerText:invalid_type");
+  });
+
+  it("reviews compact text-only replies instead of applying obsolete knowledge-topic vetoes", async () => {
+    const text = "Команда ведёт бронирования и работу с гостями.";
+    const llm = Object.assign(new FakeLLMProvider([JSON.stringify({ text, usedKnowledgeEntryIds: ["operations-guests"] }), supportedReview]),
+      { promptProfile: "compact-v1" as const });
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: createInitialLead("legacy", "TEST", "legacy", new Date()),
+      recentMessages: [{ direction: "INBOUND", content: "Да, а с гостями кто общается?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        knowledgeEntryIds: [], unresolvedQuestions: [], currentTurnRequiresAnswer: false, currentQuestionKind: "NONE",
+        previouslyExplainedKnowledgeEntryIds: ["operations-guests"], approvedFacts: [...PARTNER_KNOWLEDGE_BASE] } });
+    expect(result.text).toBe(text);
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("does not append the same explicit question twice when a compact full reply already contains it", async () => {
+    const answer="Команда помогает с запуском.";
+    const question="Какой бюджет рассматриваете?";
+    const llm=Object.assign(new FakeLLMProvider([JSON.stringify({text:answer+" "+question,
+      qualificationQuestion:question,nextInformationNeed:"AVAILABLE_CAPITAL"}),supportedReview]),{promptProfile:"compact-v1" as const});
+    const result=await createNaturalResponseGenerator({llmProvider:llm})({lead:{} as Lead,
+      recentMessages:[{direction:"INBOUND",content:"Расскажите о запуске."}],
+      plan:{text:"",nextInformationNeed:null,asksUserQuestion:false,knowledgeEntryIds:[],unresolvedQuestions:[],
+        useNaturalAdaptation:true,allowedNextInformationNeeds:["AVAILABLE_CAPITAL"]}});
+    expect(result.text).toBe(answer+" "+question);
+    expect(result.answerText).toBe(answer);
+    expect(JSON.parse(llm.requests[1]!.userMessage).answerText).toBe(answer);
+  });
+
+  it("preserves a semantically approved two-sentence question in a compact complete reply", async () => {
+    const answer = "Команда помогает запустить бизнес и ведёт бронирования.";
+    const question = "Когда планируете начать? Уже есть примерный срок?";
+    const llm = Object.assign(new FakeLLMProvider([JSON.stringify({ text: answer + " " + question,
+      nextInformationNeed: "LAUNCH_TIMING" }), JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
+      optionalQuestionAppropriate: true, additionalRequestInAnswer: true, answerWithoutAdditionalRequest: answer,
+      optionalQuestionHasSingleRequest: true, feedback: "" })]), { promptProfile: "compact-v1" as const });
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: createInitialLead("punctuation", "TEST", "punctuation", new Date()),
+      recentMessages: [{ direction: "INBOUND", content: "Хорошо, расскажите про запуск." }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        knowledgeEntryIds: [], unresolvedQuestions: [], currentTurnRequiresAnswer: true, allowedNextInformationNeeds: ["LAUNCH_TIMING"] } });
+    expect(result.answerText).toBe(answer);
+    expect(result.qualificationQuestion).toBe(question);
+    expect(result.text).toContain(question);
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("does not lose the reply or its reviewed question when optional compact annotations are invalid", async () => {
+    const llm = Object.assign(new FakeLLMProvider([JSON.stringify({ answerText: "Команда занимается гостями и бронированиями.",
+      qualificationQuestion: "Какую цель ставите перед запуском?", nextInformationNeed: "UNKNOWN_TAG",
+      conversationMemory: "x".repeat(800), awaitingUserReply: null, usedKnowledgeEntryIds: null,
+      extraAnnotation: true }), supportedReview]), { promptProfile: "compact-v1" as const });
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: createInitialLead("annotations", "TEST", "annotations", new Date()),
+      recentMessages: [{ direction: "INBOUND", content: "Понятно, кто будет работать с гостями?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        knowledgeEntryIds: [], unresolvedQuestions: [], currentTurnRequiresAnswer: true, allowedNextInformationNeeds: ["GOAL"] } });
+    expect(result.text).toContain("бронированиями");
+    expect(result.qualificationQuestion).toContain("цель");
+    expect(result.awaitingUserReply).toBe(true);
+    expect(result.nextInformationNeed).toBeNull();
+    expect(llm.callCount).toBe(2);
+  });
+
   it("does not discard a useful answer because optional coverage notes contain unfilled CRM topics", async () => {
     const answer = "Команда ведёт бронирования и работу с гостями.";
     const llm = Object.assign(new FakeLLMProvider([JSON.stringify({ answerText: answer,
@@ -239,7 +326,7 @@ describe("natural response generation", () => {
     const before = "Клиент уточняет работу с гостями.";
     const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Бронирования ведёт администратор команды.",
       qualificationQuestion: "Есть ли у Вас опыт?", nextInformationNeed: "EXPERIENCE",
-      conversationMemory: "Спросил клиента про опыт." }), JSON.stringify({ answerIsSupported: true,
+      awaitingUserReply: true, conversationMemory: "Спросил клиента про опыт." }), JSON.stringify({ answerIsSupported: true,
       answersCurrentRequest: true, optionalQuestionAppropriate: false, feedback: "Тема не нужна сейчас." })]);
     const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: createInitialLead("memory", "TEST", "memory", new Date()),
       conversationMemory: before, recentMessages: [{ direction: "INBOUND", content: "Кто работает с гостями?" }],
@@ -247,6 +334,7 @@ describe("natural response generation", () => {
         allowedNextInformationNeeds: ["EXPERIENCE"], knowledgeEntryIds: ["operations-guests"], unresolvedQuestions: [] } });
     expect(result.text).toBe("Бронирования ведёт администратор команды.");
     expect(result.conversationMemory).toBe(before);
+    expect(result.awaitingUserReply).toBe(false);
   });
 
   it("rejects a contradictory memory note without rejecting the supported answer or making an extra call", async () => {
@@ -747,14 +835,14 @@ describe("natural response generation", () => {
     expect(JSON.parse(llm.requests[1]!.userMessage).qualificationQuestion).toBe("");
   });
 
-  it("keeps bounded structured fields and a complete Qwen envelope after an oversized rationale", async () => {
+  it("keeps bounded structured fields and reviews the answer despite an oversized optional rationale", async () => {
     const safe = { text: "", answerText: "Ориентир участия — около 3–4 часов в день.", qualificationQuestion: "",
       interpretedQuestionKind: "BUSINESS_INFORMATION", nextInformationNeed: null, conversationAction: "ANSWER",
       qualificationMoveDecision: "DEFER", qualificationMoveRationale: "Сначала ответ на текущий вопрос.",
       answerCoverage: "FULL", unresolvedTopics: [], usedKnowledgeEntryIds: ["partner-time"] };
     const llm = Object.assign(new FakeLLMProvider([
       JSON.stringify({ ...safe, qualificationMoveRationale: "x".repeat(241) }),
-      JSON.stringify(safe), supportedReview,
+      supportedReview,
     ]), { promptProfile: "compact-v1" as const });
     const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
       recentMessages: [{ direction: "INBOUND", content: "Сколько времени потребуется?" }],
@@ -764,10 +852,10 @@ describe("natural response generation", () => {
       },
     });
     expect(result.text).toContain("3–4");
-    expect(llm.callCount).toBe(3);
+    expect(llm.callCount).toBe(2);
     expect(llm.requests[0]!.maxTokens).toBeGreaterThanOrEqual(2000);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-autonomy-v2");
-    expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-autonomy-v3");
+    expect(JSON.parse(llm.requests[1]!.userMessage).purpose).toBe("ANSWER_SEMANTIC_REVIEW");
     expect(JSON.stringify(llm.requests)).not.toContain("operations-after-capital-correction");
   });
 

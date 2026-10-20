@@ -319,6 +319,7 @@ describe("isolated Test Chat Lab workflow", () => {
     const conversation = Object.assign(new FakeLLMProvider([
       JSON.stringify({ answerText: "Вы готовы участвовать в запуске. Команда поможет подобрать объект в Москве.",
         qualificationQuestion: "", nextInformationNeed: null, interpretedQuestionKind: "NONE" }),
+      JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: true, feedback: "" }),
       JSON.stringify({ answerText: "Команда помогает подобрать объект; Вы посещаете просмотры и заключаете договор аренды.",
         qualificationQuestion: "Оставите номер для связи с менеджером по запуску?", nextInformationNeed: "PHONE_NUMBER",
         interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["launch-process"] }),
