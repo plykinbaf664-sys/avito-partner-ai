@@ -35,6 +35,16 @@ async function main() {
 
   const scenarios = [
     {
+      id: "geography-owner-process-contact",
+      criteria: "На сообщение о Набережных Челнах и цели дополнительного дохода принять факты и естественно продолжить: не говорить о внутренних списках/статусах и не поручать клиенту уточнять географию. На следующий составной вопрос прямо ответить, что доступность города подтверждает наша команда, не клиент; не обещать, что проверка уже началась. Также объяснить процесс (помощь с подбором, личный просмотр и договор партнёра, затем объявления/бронирования/гости команды), цену услуги 50 000 один раз и отдельные расходы, доход около 20 000 с объекта в месяц без гарантии. Не повторять каталог городов, не обещать доступность Набережных Челнов. После полного ответа один полезный следующий шаг, без повторов известного. После явного выбора Москвы, двух объектов, миллиона общего капитала, скорого старта и личного участия — попросить телефон. После телефона передача менеджеру ровно один раз, без повторного запроса номера и обещания срока звонка.",
+      steps: [
+        { actor: "USER", text: "Здравствуйте, Набережные Челны. Интересует дополнительный доход." },
+        { actor: "USER", text: "Если возможность работы в городе надо проверять, кто будет уточнять — вы или я? Можете весь процесс от начала до конца рассказать, расценки и доходность?" },
+        { actor: "USER", text: "Для запуска выбираю именно Москву. Начну с двух квартир в ближайшие дни, хочу основной бизнес. Общий доступный капитал миллион на всё, включая аренду, залог, подготовку и текущие расходы. Готов сам ездить на просмотры, заключать договоры и уделять 3–4 часа в день." },
+        { actor: "USER", text: "Да, мой номер +79991234567." },
+      ],
+    },
+    {
       id: "multi-question-sales-continuation",
       criteria: "Первый ответ закрывает ОБА вопроса: доход около 20 000 рублей с объекта в месяц без гарантии и полный запуск одного объекта по московскому примеру около 180 000 рублей, включая разовую услугу 50 000. Московская аренда 50 000 и залог один месяц — расчётные допущения, не цена Путилково; доступность Путилково не обещать. После ответа один новый уместный следующий шаг квалификации, без повторного вопроса об известном бюджете/городе и без преждевременного телефона. После уточнения запуска именно в Москве, двух объектов, цели основного бизнеса, скорого старта и личного участия — естественно запросить телефон, не растягивать анкету необязательными полями. После номера одна передача менеджеру, номер повторно не просить, сроки звонка не обещать.",
       steps: [
@@ -355,6 +365,15 @@ async function main() {
             ? await lab.managerMessage(sessionId, step.text, at, `turn-${index}`)
             : await lab.clientMessage(sessionId, step.text, at, `turn-${index}`);
           if (step.actor === "USER") {
+            const deliveredText = result.snapshot.lastProcessing?.outboundMessage;
+            if (deliveredText) assert(deliveredText.length <= 1000, "Entire outbound must fit Avito's message limit");
+            if (scenario.id === "geography-owner-process-contact") {
+              if (index < 3) assert.equal(result.snapshot.lastProcessing?.responseGenerationSource, "LLM");
+              assert.equal(result.snapshot.lastProcessing?.responseFailureCode, null);
+              assert.notEqual(result.snapshot.qualification.status, "NO_FIT");
+              if (index < 3) assert.equal(notifications.requests.length, 0);
+              if (index === 2) assert.equal(result.snapshot.currentNextStep, "PHONE_NUMBER");
+            }
             if (scenario.id === "multi-question-sales-continuation") {
               if (index < 2) assert.equal(result.snapshot.lastProcessing?.responseGenerationSource, "LLM");
               assert.equal(result.snapshot.lastProcessing?.responseFailureCode, null);
@@ -382,7 +401,8 @@ async function main() {
             const persistedLead = await persistence.leads.findByExternalIdentity("TEST_CHAT_LAB", sessionId);
             assert(persistedLead && await persistence.crm.findLeadSnapshot(persistedLead.id),
               "Every valid inbound must be accessible through the CRM repository");
-            if (scenario.id === "multi-question-sales-continuation" && index === 1) {
+            if ((scenario.id === "multi-question-sales-continuation" && index === 1) ||
+                (scenario.id === "geography-owner-process-contact" && index === 2)) {
               const conversation = await persistence.conversations.findOpenByLeadId(persistedLead.id);
               assert.equal(conversation?.pendingInformationNeed, "PHONE_NUMBER", "Response actually requests contact");
             }
@@ -413,7 +433,7 @@ async function main() {
           assert.equal(snapshot.phone, "+79991234567");
           assert.equal(notifications.requests.length, 1, "Recovered qualified phone hands off once");
         }
-        if (scenario.id === "multi-question-sales-continuation" || scenario.id === "phone-handoff-continuation" || scenario.id === "ready-contact-after-follow-on-request" || scenario.id === "ready-profile-contextual-next-step" || scenario.id === "financial-scale-recovery") {
+        if (scenario.id === "geography-owner-process-contact" || scenario.id === "multi-question-sales-continuation" || scenario.id === "phone-handoff-continuation" || scenario.id === "ready-contact-after-follow-on-request" || scenario.id === "ready-profile-contextual-next-step" || scenario.id === "financial-scale-recovery") {
           assert.equal(snapshot.phone, "+79991234567");
           assert.equal(notifications.requests.length, 1, "Qualified phone must hand off exactly once");
         }

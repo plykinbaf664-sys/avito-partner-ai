@@ -3,6 +3,7 @@ import {
   type InformationNeed,
   type InformationNeedsAssessment,
 } from "./information-needs";
+import { boundedApprovedReply } from "./bounded-approved-reply";
 import type { ExtractedMessage } from "../extraction/extracted-message";
 import type { MessageIntent } from "../extraction/extracted-message";
 import type { Lead } from "../lead/lead";
@@ -377,7 +378,7 @@ export function buildConversationResponse(params: {
       customerFacingDecisionDraft,
     ];
     return {
-      text: answeredThenRejected.join(" "),
+      text: boundedApprovedReply(answeredThenRejected),
       nextInformationNeed: null,
       asksUserQuestion: false,
       knowledgeEntryIds: knowledgeEntryIdsForCurrentTurn,
@@ -466,7 +467,7 @@ export function buildConversationResponse(params: {
 
   const prefix = extraction.intent === "GREETING" ? "Здравствуйте! " : "";
   return {
-    text: `${prefix}${parts.join(" ")}`.trim(),
+    text: boundedApprovedReply(prefix ? [prefix.trim(), ...parts] : parts),
     nextInformationNeed,
     asksUserQuestion:
       !decision.shouldHandoffToManager && nextInformationNeed !== null && !phoneDeclined,

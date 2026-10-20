@@ -14,6 +14,36 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it("answers who owns a geographic check without treating the role explanation as an unsolicited handoff", async () => {
+    const answer = "Это уточняет менеджер нашей команды, от Вас отдельная проверка не нужна. Возможность запуска пока не подтверждена.";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: answer, qualificationQuestion: "Какой бюджет рассматриваете?",
+      nextInformationNeed: "AVAILABLE_CAPITAL", interpretedQuestionKind: "BUSINESS_INFORMATION" }), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: createInitialLead("geo", "TEST", "geo", new Date()),
+      recentMessages: [{ direction: "OUTBOUND", content: "Возможность запуска требует уточнения." }, { direction: "INBOUND", content: "А кто должен проверить, вы или я?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        allowedNextInformationNeeds: ["AVAILABLE_CAPITAL"], knowledgeEntryIds: [], unresolvedQuestions: [] } });
+    expect(result.answerText).toBe(answer);
+    expect(result.nextInformationNeed).toBe("AVAILABLE_CAPITAL");
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("repairs the combined reply length before delivery without dropping the continuation", async () => {
+    const longAnswer = "Команда помогает подобрать объект. ".repeat(28).trim();
+    const question = "Когда Вы планируете запускать первый объект и начинать работу?";
+    expect(longAnswer.length).toBeLessThanOrEqual(1000);
+    expect((longAnswer + " " + question).length).toBeGreaterThan(1000);
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ answerText: longAnswer, qualificationQuestion: question, nextInformationNeed: "LAUNCH_TIMING", interpretedQuestionKind: "BUSINESS_INFORMATION" }),
+      JSON.stringify({ answerText: "Команда помогает подобрать объект.", qualificationQuestion: "Когда планируете запуск?", nextInformationNeed: "LAUNCH_TIMING", interpretedQuestionKind: "BUSINESS_INFORMATION" }), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: createInitialLead("length", "TEST", "length", new Date()),
+      recentMessages: [{ direction: "INBOUND", content: "Как проходит запуск?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        allowedNextInformationNeeds: ["LAUNCH_TIMING"], knowledgeEntryIds: [], unresolvedQuestions: [] } });
+    expect(result.text.length).toBeLessThanOrEqual(1000);
+    expect(result.nextInformationNeed).toBe("LAUNCH_TIMING");
+    expect(JSON.parse(llm.requests[1].userMessage).answerRecovery).toBe(false);
+  });
+
   it.each([
     ["income caveat", "Ориентир дохода — 20 000 ₽ с объекта, гарантия не даётся.", "Ориентир дохода — 20 000 ₽ с объекта, без гарантии."],
     ["corrupted script", "Команда поможет с подбором: 方便ный формат.", "Команда поможет с подбором объекта."],
@@ -661,7 +691,7 @@ describe("natural response generation", () => {
     expect(result.text).toContain("3–4");
     expect(llm.callCount).toBe(3);
     expect(llm.requests[0]!.maxTokens).toBeGreaterThanOrEqual(2000);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v11");
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v12");
     expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
     expect(JSON.stringify(llm.requests)).not.toContain("operations-after-capital-correction");
   });

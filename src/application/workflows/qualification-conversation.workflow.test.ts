@@ -68,6 +68,26 @@ function reply({
 }
 
 describe("multi-turn qualification conversation", () => {
+  it("delivers a bounded fallback covering process, pricing and income when generation fails", async () => {
+    const { llm } = harness([reply({ intent: "QUESTION", facts: { city: "Набережные Челны" }, signals: {
+      questions: ["Весь процесс?", "Расценки?", "Доходность?"], requiresSubstantiveAnswer: true,
+      knowledgeEntryIds: ["guarantees-and-economics", "offer-overview", "pricing"] } })]);
+    const outboundProvider = { deliver: vi.fn(async (request: { text: string }) => request.text.length > 1000
+      ? { status: "FAILED" as const, retryable: false, errorCode: "AVITO_INVALID_MESSAGE_TEXT" }
+      : { status: "SENT" as const, externalId: "delivered" }) };
+    const processEvent = createIncomingEventProcessor({ persistence, extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse: vi.fn().mockRejectedValue(new Error("RESPONSE_POLICY_VIOLATION")), outboundProvider,
+      generateId: () => `bounded-${++nextId}`, now: () => new Date("2026-10-20T08:00:00Z") });
+    await processEvent(input(930, "Расскажите весь процесс, расценки и доходность."));
+    const text = outboundProvider.deliver.mock.calls[0][0].text;
+    expect(text.length).toBeLessThanOrEqual(1000);
+    expect(text).toMatch(/20\s*000/u);
+    expect(text).toMatch(/50\s*000/u);
+    expect(text).toMatch(/не гарант|без гарант|Гарантированного дохода нет/u);
+    expect(text).toMatch(/подбор|подобрать|поиск/u);
+    expect(text).toMatch(/бронир|гост/u);
+    await expect(outboundProvider.deliver.mock.results[0].value).resolves.toMatchObject({ status: "SENT" });
+  });
   it("keeps an unanswered income request visible after a cancelled draft and a later cost question", async () => {
     const { llm } = harness([
       reply({ intent: "QUESTION", facts: { city: "Москва", availableCapital: 1_000_000, availableCapitalConfirmed: true },
