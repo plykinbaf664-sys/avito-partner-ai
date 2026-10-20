@@ -170,15 +170,26 @@ export function createTestChatLabService({
   async function clientMessage(sessionId: string, text: string, now: Date, turnId = generateId(), suppressOutbound = false): Promise<TestChatLabActionResult> {
     setTime(now);
     responseFailureCode = null;
-    const result: ProcessIncomingEventResult = await processIncomingEvent({
-      source: TEST_CHAT_LAB_SOURCE,
-      externalEventId: `${sessionId}:client:${turnId}`,
-      externalLeadId: sessionId,
-      messageId: `${sessionId}:client-message:${turnId}`,
-      text,
-      rawPayload: { testChatLab: true, actor: "USER" },
-      receivedAt: now,
-    }, { suppressOutbound });
+    let result: ProcessIncomingEventResult;
+    try {
+      result = await processIncomingEvent({
+        source: TEST_CHAT_LAB_SOURCE,
+        externalEventId: `${sessionId}:client:${turnId}`,
+        externalLeadId: sessionId,
+        messageId: `${sessionId}:client-message:${turnId}`,
+        text,
+        rawPayload: { testChatLab: true, actor: "USER" },
+        receivedAt: now,
+      }, { suppressOutbound });
+    } catch (error) {
+      const event = await persistence.incomingEvents.findByIdentity(TEST_CHAT_LAB_SOURCE, `${sessionId}:client:${turnId}`);
+      if (event?.status !== "FAILED") throw error;
+      // A persisted failed turn is an observable test outcome, not an empty
+      // successful answer or an exception that hides the whole conversation.
+      lastProcessing = { outboundMessage: null, replyAction: "NO_REPLY", eventStatus: "FAILED",
+        responseFailureCode: responseFailureCode ?? event.error ?? "TEST_CHAT_LAB_FAILED", responseGenerationSource: "FAILED" };
+      return { snapshot: await snapshot(sessionId), followUp: null };
+    }
     lastProcessing = {
       outboundMessage: result.outboundMessage,
       replyAction: result.outboundMessage === null ? "NO_REPLY" : "SEND_REPLY",
@@ -232,6 +243,7 @@ export function createTestChatLabService({
             `${scenarioId}-${index}`,
             isBurst && index < scenario.steps.length - 1,
           );
+      if (result.snapshot.lastProcessing?.eventStatus === "FAILED") return result;
     }
     return result;
   }

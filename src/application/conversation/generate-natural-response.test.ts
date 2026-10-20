@@ -14,6 +14,41 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it("does not discard a useful answer because optional coverage notes contain unfilled CRM topics", async () => {
+    const answer = "Команда ведёт бронирования и работу с гостями.";
+    const llm = Object.assign(new FakeLLMProvider([JSON.stringify({ answerText: answer,
+      qualificationQuestion: "Какую цель ставите перед запуском?", nextInformationNeed: "GOAL",
+      interpretedQuestionKind: "BUSINESS_INFORMATION", answerCoverage: "FULL",
+      unresolvedTopics: ["launch timing", "primary goal"] }), JSON.stringify({ answerIsSupported: true,
+      answersCurrentRequest: true, optionalQuestionAppropriate: true, answerCoverage: "FULL", unresolvedTopics: [], feedback: "" })]),
+      { promptProfile: "compact-v1" as const });
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: createInitialLead("coverage", "TEST", "coverage", new Date()),
+      recentMessages: [{ direction: "INBOUND", content: "Кто общается с гостями?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        knowledgeEntryIds: [], unresolvedQuestions: [], currentTurnRequiresAnswer: true, allowedNextInformationNeeds: ["GOAL"] } });
+    expect(result.answerText).toBe(answer);
+    expect(result.qualificationQuestion).toContain("цель");
+    expect(result.answerCoverage).toBe("FULL");
+    expect(result.unresolvedTopics).toEqual([]);
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("uses independently reviewed partial coverage instead of the draft's full-coverage label", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: "С гостями работает администратор. Условия страхования мне неизвестны.",
+      qualificationQuestion: "", interpretedQuestionKind: "BUSINESS_INFORMATION", answerCoverage: "FULL", unresolvedTopics: [] }),
+      JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: true,
+        answerCoverage: "PARTIAL", unresolvedTopics: ["Условия страхования"], feedback: "" })]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: createInitialLead("partial", "TEST", "partial", new Date()),
+      recentMessages: [{ direction: "INBOUND", content: "Кто работает с гостями и какая страховка?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        knowledgeEntryIds: [], unresolvedQuestions: [], currentTurnRequiresAnswer: true } });
+    expect(result.answerCoverage).toBe("PARTIAL");
+    expect(result.unresolvedTopics).toEqual(["Условия страхования"]);
+    expect(result.answerText).toContain("администратор");
+  });
+
   it("lets semantic understanding close an exchange despite stale qualification flags", async () => {
     const llm = new FakeLLMProvider([JSON.stringify({ replyAction: "NO_REPLY", answerText: "", qualificationQuestion: "",
       nextInformationNeed: null }), JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
@@ -731,7 +766,7 @@ describe("natural response generation", () => {
     expect(result.text).toContain("3–4");
     expect(llm.callCount).toBe(3);
     expect(llm.requests[0]!.maxTokens).toBeGreaterThanOrEqual(2000);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-autonomy-v1");
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-autonomy-v2");
     expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
     expect(JSON.stringify(llm.requests)).not.toContain("operations-after-capital-correction");
   });

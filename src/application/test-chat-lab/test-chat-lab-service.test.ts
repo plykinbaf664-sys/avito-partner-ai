@@ -90,6 +90,18 @@ describe("isolated Test Chat Lab workflow", () => {
   });
   afterEach(() => persistence.close());
 
+  it("shows a persisted failed turn and its history instead of crashing the laboratory on rejected model output", async () => {
+    const llm = new FakeLLMProvider([extractionReply(), "not-json", "not-json"]);
+    const outbound = new FakeOutboundProvider();
+    const lab = createTestChatLabService({ persistence, llmProvider: llm, outboundProvider: outbound,
+      managerNotificationProvider: new FakeManagerNotificationProvider() });
+    const result = await lab.clientMessage("failed-turn-visible", "Хочу узнать условия", at(0), "failed");
+    expect(result.snapshot.lastProcessing).toMatchObject({ eventStatus: "FAILED", outboundMessage: null,
+      responseFailureCode: expect.any(String), responseGenerationSource: "FAILED" });
+    expect(result.snapshot.messages).toEqual([expect.objectContaining({ actor: "USER", content: "Хочу узнать условия" })]);
+    expect(outbound.requests).toHaveLength(0);
+  });
+
   it("repairs a region-qualified city, persists canonical geography, then answers a side question without another city request", async () => {
     const extractor = Object.assign(new FakeLLMProvider([
       extractionReply({ city: "Химки, Подмосковье" }, { previousQuestionResponse: "ANSWERED", questionKind: "NONE" }),

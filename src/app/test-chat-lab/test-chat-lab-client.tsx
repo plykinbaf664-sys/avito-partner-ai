@@ -54,6 +54,9 @@ export function TestChatLabClient() {
       const result = await readTestChatLabResponse(response);
       setState(result.snapshot);
       setVirtualNow(result.snapshot.virtualNow);
+      if (result.snapshot.lastProcessing?.eventStatus === "FAILED") {
+        setError(`Ответ не сформирован: ${result.snapshot.lastProcessing.responseFailureCode ?? "MODEL_RESPONSE_FAILED"}. Входящее сообщение сохранено, клиенту ничего не отправлено.`);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "LAB_FAILED");
     } finally {

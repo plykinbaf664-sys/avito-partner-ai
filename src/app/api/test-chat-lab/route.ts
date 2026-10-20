@@ -6,6 +6,7 @@ import { createRuntimeLlmProvider } from "@/integrations/llm/runtime-provider";
 import { FakeManagerNotificationProvider } from "@/integrations/fake/fake-manager-notification-provider";
 import { FakeOutboundProvider } from "@/integrations/fake/fake-outbound-provider";
 import { SqlitePersistence } from "@/infrastructure/database/sqlite-persistence";
+import { ConsoleStructuredLogger } from "@/application/observability/structured-logger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -39,6 +40,7 @@ async function withLab<T>(operation: (service: ReturnType<typeof createTestChatL
       conversationLlmProvider: createRuntimeLlmProvider(process.env, "conversation", { usage: persistence.llmUsage, workload: "TEST_LAB" }),
       outboundProvider,
       managerNotificationProvider,
+      logger: new ConsoleStructuredLogger(),
     });
     return await operation(service);
   } finally {
