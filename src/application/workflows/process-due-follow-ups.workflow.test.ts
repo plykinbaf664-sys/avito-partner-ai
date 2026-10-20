@@ -119,6 +119,34 @@ describe("due qualification follow-ups workflow", () => {
     text,
   });
 
+  it.each(["FAILED", "PENDING"] as const)("keeps %s drafts out of follow-up understanding while retaining delivery guards", async (status) => {
+    const { processEvent } = harness([extractionReply()]);
+    const first = await processEvent(input("visible-history", "Здравствуйте"));
+    const conversation = (await persistence.conversations.findById(first.conversationId!))!;
+    const messages = await persistence.messages.listByConversationId(first.conversationId!);
+    const delivered = messages.findLast(message => message.direction === "OUTBOUND")!;
+    await persistence.messages.insert({ ...delivered, id: "undelivered-draft", deduplicationKey: "undelivered-draft",
+      content: "Недоставленный вопрос и ложное обещание.", deliveryStatus: status, sentAt: null,
+      createdAt: new Date("2026-09-01T10:01:00Z") });
+    const calls: Parameters<NaturalResponseGenerator>[0][] = [];
+    const processor = createDueFollowUpsProcessor({ persistence,
+      outboundProvider: new FakeOutboundProvider([{ status: "FAILED", retryable: false, errorCode: "ACCESS_DENIED" }]),
+      generateNaturalResponse: async request => {
+        calls.push(request);
+        return { text: "Когда планируете запуск?", conversationMemory: "Задал новый вопрос о сроках.",
+          nextInformationNeed: "LAUNCH_TIMING", model: "fake", inputTokens: 1, outputTokens: 1 };
+      } });
+    await processor(new Date("2026-09-02T10:00:00Z"));
+    expect(calls).toHaveLength(status === "PENDING" ? 0 : 1);
+    if (status === "FAILED") {
+      expect(calls[0].recentMessages.map(message => message.content)).not.toContain("Недоставленный вопрос и ложное обещание.");
+      expect(calls[0].conversationMemory).toBeUndefined();
+    }
+    const after = await persistence.conversations.findById(first.conversationId!);
+    expect(after?.summary).toBe(conversation.summary);
+    expect(after?.pendingInformationNeed).toBe(conversation.pendingInformationNeed);
+  });
+
   it("sends two reminders at 24/48 hours, marks MISSED at 72, and resumes the same conversation", async () => {
     const { processEvent, processDue, outboundProvider } = harness([extractionReply(), extractionReply({ city: "Москва" })]);
     const first = await processEvent(input("silence-start", "Здравствуйте"));

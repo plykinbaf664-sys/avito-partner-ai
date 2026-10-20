@@ -1,0 +1,27 @@
+[
+  {
+    "id": "independent-evening-reference",
+    "criteria": "Understand current intent against actual delivered history, answer all current questions with approved facts/calculations, no guarantees or invented commitments. Do not repeat known/addressed/deferred topics or replace a clear question with a questionnaire. A useful optional next step is allowed, not mandatory. Preserve corrections and known contacts. Phone alone does not qualify; eligible confirmed phone hands off exactly once. Respect manager agreements and customer contact constraints without inventing team promises.",
+    "steps": [
+      { "actor": "MANAGER", "text": "Мы помогаем со стартом и операционкой. Как у Вас со временем на проект?" },
+      { "actor": "USER", "text": "Пока я в сменах, освобождаюсь к ночи. А сколько его реально потребуется и что останется на мне после запуска?" },
+      { "actor": "USER", "text": "Понятно. Тогда вернусь к этому после отпуска, пока дату назвать не могу." }
+    ]
+  },
+  {
+    "id": "independent-capital-correction",
+    "criteria": "Understand current intent against actual delivered history, answer all current questions with approved facts/calculations, no guarantees or invented commitments. Do not repeat known/addressed/deferred topics or replace a clear question with a questionnaire. A useful optional next step is allowed, not mandatory. Preserve corrections and known contacts. Phone alone does not qualify; eligible confirmed phone hands off exactly once. Respect manager agreements and customer contact constraints without inventing team promises.",
+    "steps": [
+      { "actor": "USER", "text": "Есть 420 тысяч на всё, город Видное. Своей квартиры нет. Кто ищет и кто потом занимается гостями?" },
+      { "actor": "USER", "text": "Исправлюсь: всего доступно 540 тысяч. Хочу две квартиры. Посчитайте по Вашему московскому ориентиру и какой примерно доход без обещаний будет?" }
+    ]
+  },
+  {
+    "id": "independent-contact-continuation",
+    "criteria": "Understand current intent against actual delivered history, answer all current questions with approved facts/calculations, no guarantees or invented commitments. Do not repeat known/addressed/deferred topics or replace a clear question with a questionnaire. A useful optional next step is allowed, not mandatory. Preserve corrections and known contacts. Phone alone does not qualify; eligible confirmed phone hands off exactly once. Respect manager agreements and customer contact constraints without inventing team promises.",
+    "steps": [
+      { "actor": "USER", "text": "Москва, есть миллион на аренду, залог, подготовку и остальное отдельно. Готов начать бизнес по посуточной субаренде. Хочу с двух квартир под Вашу команду, сам готов посещать объекты. По времени могу выделять ежедневно 4 часа. Кому оплачивается помощь по запуску и платится это один раз?" },
+      { "actor": "USER", "text": "Хорошо, для продолжения мой номер +79991234567. Пусть сначала напишут, я днём могу не ответить." }
+    ]
+  }
+]

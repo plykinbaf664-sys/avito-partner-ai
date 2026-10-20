@@ -338,47 +338,6 @@ function withExtractionDefaults(value: unknown, sparse = false): unknown {
   };
 }
 
-function normalizeSignalEvidence(value: string): string {
-  return value
-    .toLocaleLowerCase("ru-RU")
-    .replaceAll("ё", "е")
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim()
-    .replace(/\s+/gu, " ");
-}
-
-function isGroundedInCurrentMessage(signal: string, currentMessage: string): boolean {
-  const normalizedSignal = normalizeSignalEvidence(signal);
-  const normalizedMessage = normalizeSignalEvidence(currentMessage);
-  if (!normalizedSignal || !normalizedMessage) return false;
-  if (
-    normalizedMessage.includes(normalizedSignal) ||
-    normalizedSignal.includes(normalizedMessage)
-  ) return true;
-
-  const signalTokens = new Set(
-    normalizedSignal.split(" ").filter((token) => token.length >= 3),
-  );
-  const messageTokens = new Set(
-    normalizedMessage.split(" ").filter((token) => token.length >= 3),
-  );
-  if (signalTokens.size === 0 || messageTokens.size === 0) return false;
-  const overlap = [...signalTokens].filter((token) => messageTokens.has(token)).length;
-  return overlap / signalTokens.size >= 0.6;
-}
-
-function ungroundedCurrentMessageSignals(
-  extraction: ExtractedMessage,
-  currentMessage: string,
-): string[] {
-  return [
-    ...extraction.signals.questions.map((value) => ({ field: "questions", value })),
-    ...extraction.signals.objections.map((value) => ({ field: "objections", value })),
-  ]
-    .filter(({ value }) => !isGroundedInCurrentMessage(value, currentMessage))
-    .map(({ field }) => field);
-}
-
 function hasContradictoryConversationSignals(
   extraction: ExtractedMessage,
 ): boolean {
@@ -396,12 +355,8 @@ function hasContradictoryConversationSignals(
 
 function invalidConversationSignalReasons(
   extraction: ExtractedMessage,
-  currentMessage: string,
 ): ExtractionFailureReason[] {
   return [
-    ...(ungroundedCurrentMessageSignals(extraction, currentMessage).length > 0
-      ? ["UNGROUNDED_SIGNALS" as const]
-      : []),
     ...(hasContradictoryConversationSignals(extraction)
       ? ["CONTRADICTORY_SIGNALS" as const]
       : []),
@@ -410,88 +365,6 @@ function invalidConversationSignalReasons(
       ? ["UNRESOLVED_CONTEXTUAL_REFERENCE" as const]
       : []),
   ];
-}
-
-function keepContextualSurfaceSeparateFromReferent(
-  extraction: ExtractedMessage,
-  currentMessage: string,
-  hasPreviousSpeaker: boolean,
-): ExtractedMessage {
-  if (
-    !hasPreviousSpeaker ||
-    extraction.signals.contextualReference !== true ||
-    extraction.signals.requiresSubstantiveAnswer !== true ||
-    !extraction.signals.resolvedQuestion?.trim() ||
-    extraction.signals.questions.length !== 1 ||
-    isGroundedInCurrentMessage(extraction.signals.questions[0]!, currentMessage)
-  ) return extraction;
-  // The model sometimes writes its semantic expansion into `questions` as
-  // well as `resolvedQuestion`. The former is surface evidence and the latter
-  // is interpretation. Preserve both roles instead of discarding a valid
-  // contextual turn after two lexical-overlap retries.
-  return {
-    ...extraction,
-    signals: {
-      ...extraction.signals,
-      questions: [currentMessage.trim().slice(0, MAX_EXTRACTED_TEXT_LENGTH)],
-    },
-  };
-}
-
-function sanitizeUntrustedConversationSignals(
-  extraction: ExtractedMessage,
-  currentMessage: string,
-): { extraction: ExtractedMessage; discardedSignalFields: string[] } {
-  const groundedQuestions = extraction.signals.questions.filter((value) =>
-    isGroundedInCurrentMessage(value, currentMessage)
-  );
-  const groundedObjections = extraction.signals.objections.filter((value) =>
-    isGroundedInCurrentMessage(value, currentMessage)
-  );
-  const discarded = new Set<string>();
-  if (groundedQuestions.length !== extraction.signals.questions.length) {
-    discarded.add("questions");
-  }
-  if (groundedObjections.length !== extraction.signals.objections.length) {
-    discarded.add("objections");
-  }
-  if (extraction.signals.resolvedQuestion) discarded.add("resolvedQuestion");
-  if (extraction.signals.contextualReference) discarded.add("contextualReference");
-  if (extraction.signals.needsStartupScaleRecommendation) {
-    discarded.add("needsStartupScaleRecommendation");
-  }
-  if (extraction.signals.wantsHuman) discarded.add("wantsHuman");
-  if (extraction.signals.possiblePrimaryFear) {
-    discarded.add("possiblePrimaryFear");
-  }
-  if (extraction.signals.possibleSecondaryFear) {
-    discarded.add("possibleSecondaryFear");
-  }
-
-  const contradictory = hasContradictoryConversationSignals(extraction);
-  if (contradictory && groundedQuestions.length > 0) {
-    discarded.add("questions");
-  }
-  return {
-    extraction: {
-      ...extraction,
-      signals: {
-        ...extraction.signals,
-        questions: contradictory ? [] : groundedQuestions,
-        objections: groundedObjections,
-        possiblePrimaryFear: null,
-        possibleSecondaryFear: null,
-        wantsHuman: false,
-        resolvedQuestion: "",
-        contextualReference: false,
-        questionKind: "NONE",
-        needsStartupScaleRecommendation: false,
-        knowledgeEntryIds: [],
-      },
-      uncertainty: [],
-    },
-    discardedSignalFields: [...discarded],
-  };
 }
 
 function conservativeExtraction(currentMessage: string): ExtractedMessage {
@@ -542,43 +415,6 @@ function conservativeExtraction(currentMessage: string): ExtractedMessage {
     confidence: null,
     uncertainty: [],
   };
-}
-
-function explicitlyAcceptsManagementInteraction(text: string): boolean {
-  const normalized = text.trim().toLocaleLowerCase("ru-RU");
-  if (/\bне\s+готов/u.test(normalized)) return false;
-  return (
-    normalized.includes("готов") &&
-    ["управляющ", "команд", "компани", "запуск"].some((term) =>
-      normalized.includes(term)
-    ) &&
-    ["работ", "взаимодейств", "сотруднич"].some((term) =>
-      normalized.includes(term),
-    )
-  );
-}
-
-function explicitlyHasNoLaunchCapital(text: string): boolean {
-  const normalized = text.trim().toLocaleLowerCase("ru-RU");
-  return (
-    /(?:денег|средств|капитала|вложений)\s+(?:вообще\s+)?нет/u.test(
-      normalized,
-    ) ||
-    /(?:нет|не\s+имею)\s+(?:вообще\s+)?(?:денег|средств|капитала|вложений)(?!\s+на(?:\s|$))/u.test(
-      normalized,
-    ) ||
-    /ни\s+рубля/u.test(normalized)
-  );
-}
-
-function isPureManagementAcceptance(text: string): boolean {
-  const normalized = text.trim().toLocaleLowerCase("ru-RU");
-  return (
-    explicitlyAcceptsManagementInteraction(normalized) &&
-    ![" но ", "сомнев", "не уверен", "дорог", "проблем", "возраж"].some(
-      (term) => normalized.includes(term),
-    )
-  );
 }
 
 export function extractPhoneNumberFromText(text: string): string | null {
@@ -665,7 +501,7 @@ export function createMessageExtractor({
         jsonSchema,
         cache: { stableFields: ["APPROVED_CITY_NAMES", "APPROVED_KNOWLEDGE"], ttl: "5m", systemPrefix: systemPrompt },
         metadata: { ...(typeof input === "string" ? {} : input.llmContext), stage: "EXTRACTION", attempt: usage.totals.calls + 1,
-          promptVersion: llmProvider.promptProfile === "compact-v1" ? "extraction-compact-v6" : "extraction-context-v4" },
+          promptVersion: llmProvider.promptProfile === "compact-v1" ? "extraction-autonomy-v1" : "extraction-context-v5" },
       }).catch(error => { if (error instanceof Error) Object.assign(error, { llmUsage: usage.totals }); throw error; });
     const parseExtraction = (response: LlmTextResponse): ExtractedMessage => {
       const parsed = extractedMessageSchema.safeParse(
@@ -682,7 +518,7 @@ export function createMessageExtractor({
     };
 
     const failureReasons: ExtractionFailureReason[] = [];
-    let discardedSignalFields: string[] = [];
+    const discardedSignalFields: string[] = [];
     let response: LlmTextResponse | null = null;
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
@@ -698,15 +534,10 @@ export function createMessageExtractor({
       totalInputTokens += response.inputTokens;
       totalOutputTokens += response.outputTokens;
       try {
-        const candidate = keepContextualSurfaceSeparateFromReferent(
-          parseExtraction(response),
-          validatedText,
-          typeof input !== "string" && (input.recentMessages ?? []).some(message => message.direction === "OUTBOUND"),
-        );
+        const candidate = parseExtraction(response);
         lastStructurallyValid = candidate;
         const signalReasons = invalidConversationSignalReasons(
           candidate,
-          validatedText,
         );
         if (signalReasons.length === 0) {
           await llmProvider.annotateCall?.(response.callId, "ACCEPTED");
@@ -735,12 +566,13 @@ export function createMessageExtractor({
     if (parsedData === null) {
       degraded = true;
       if (lastStructurallyValid !== null) {
-        const sanitized = sanitizeUntrustedConversationSignals(
-          lastStructurallyValid,
-          validatedText,
-        );
-        parsedData = sanitized.extraction;
-        discardedSignalFields = sanitized.discardedSignalFields;
+        // Keep structurally valid semantic observations. The conversation brain
+        // receives the original message/history and resolves ambiguous references.
+        parsedData = { ...lastStructurallyValid, signals: {
+          ...lastStructurallyValid.signals,
+          contextualReference: Boolean(lastStructurallyValid.signals.resolvedQuestion?.trim()) &&
+            lastStructurallyValid.signals.contextualReference,
+        } };
       } else {
         parsedData = conservativeExtraction(validatedText);
       }
@@ -760,13 +592,8 @@ export function createMessageExtractor({
       parsedData.facts.additionalLaunchCapital < 0 &&
       (parsedData.facts.capitalScope === "UNKNOWN" ||
         parsedData.facts.capitalScope === "ENTRY_ONLY");
-    const hasStructurallyValidExtraction = lastStructurallyValid !== null;
-    const acceptsManagementInteraction =
-      hasStructurallyValidExtraction &&
-      explicitlyAcceptsManagementInteraction(validatedText);
-    const hasNoLaunchCapital =
-      hasStructurallyValidExtraction &&
-      explicitlyHasNoLaunchCapital(validatedText);
+    const hasNoLaunchCapital = parsedData.facts.availableCapital === 0 &&
+      parsedData.facts.availableCapitalConfirmed && parsedData.facts.capitalScope === "TOTAL_LIMIT";
     const deterministicPhone = extractPhoneNumberFromText(validatedText);
     const llmPhone = parsedData.facts.phoneNumber === null
       ? null
@@ -837,9 +664,6 @@ export function createMessageExtractor({
           parsedData.facts.scalingPotentialUnits === 0
             ? null
             : parsedData.facts.scalingPotentialUnits,
-        managementReadiness: acceptsManagementInteraction
-          ? "READY"
-          : parsedData.facts.managementReadiness,
       },
       signals: {
         ...parsedData.signals,
@@ -847,9 +671,7 @@ export function createMessageExtractor({
         // IDs are discarded without losing otherwise valid facts or intent.
         knowledgeEntryIds: [...new Set(parsedData.signals.knowledgeEntryIds ?? [])]
           .filter((id) => PARTNER_KNOWLEDGE_BASE.some((entry) => entry.id === id)),
-        objections: parsedData.signals.objections.filter(
-          (objection) => !isPureManagementAcceptance(objection),
-        ),
+        objections: parsedData.signals.objections,
       },
     };
 

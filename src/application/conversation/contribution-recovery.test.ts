@@ -87,6 +87,7 @@ describe("semantic recovery of customer contributions", () => {
         feedback: "Клиент спросил про необходимое время, а ответ ушёл в географию." }),
       JSON.stringify({ answerText: "На запуске ориентир — около 3–4 часов в день для просмотров, договоров и решений.",
         qualificationQuestion: "", nextInformationNeed: null, interpretedQuestionKind: "BUSINESS_INFORMATION",
+        qualificationMoveDecision: "DEFER", qualificationMoveRationale: "Сначала отвечаю на вопрос о времени.",
         usedKnowledgeEntryIds: ["partner-time"] }), review({ currentTurnKind: "REQUEST" }),
     ]);
     const result = await createNaturalResponseGenerator({ llmProvider: llm })({
@@ -98,6 +99,6 @@ describe("semantic recovery of customer contributions", () => {
     expect(result.text).toContain("3–4 часов");
     expect(result.nextInformationNeed).toBeNull();
     expect(JSON.parse(llm.requests[2].userMessage)).toMatchObject({ answerRecovery: true,
-      reviewedTurnKind: "REQUEST", allowedQualificationMoves: [], currentTurnRequiresAnswer: true });
+      reviewedTurnKind: "REQUEST", allowedQualificationMoves: plan.allowedQualificationMoves, currentTurnRequiresAnswer: true });
   });
 });

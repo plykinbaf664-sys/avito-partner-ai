@@ -14,6 +14,43 @@ describe("natural response generation", () => {
   const supportedReview = JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
     optionalQuestionAppropriate: true, feedback: "" });
 
+  it("lets semantic understanding close an exchange despite stale qualification flags", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({ replyAction: "NO_REPLY", answerText: "", qualificationQuestion: "",
+      nextInformationNeed: null }), JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true,
+      optionalQuestionAppropriate: true, currentTurnKind: "CLOSING", feedback: "" })]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: createInitialLead("closing", "TEST", "closing", new Date()),
+      recentMessages: [{ direction: "INBOUND", content: "Спасибо, вернусь сам после отпуска." }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        knowledgeEntryIds: [], unresolvedQuestions: [], currentTurnRequiresAnswer: true,
+        qualificationProgressExpected: true, allowedNextInformationNeeds: ["GOAL"] } });
+    expect(result.replyAction).toBe("NO_REPLY");
+    expect(result.text).toBe("");
+    expect(llm.callCount).toBe(2);
+  });
+
+  it("keeps a semantically approved continuation after a recommendation", async () => {
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: "Начните с подбора объекта вместе с командой.",
+      qualificationQuestion: "Когда хотели бы запустить первый объект?", nextInformationNeed: "LAUNCH_TIMING", interpretedQuestionKind: "RECOMMENDATION" }), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: createInitialLead("free", "TEST", "free", new Date()),
+      recentMessages: [{ direction: "INBOUND", content: "С чего разумнее начать?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        currentQuestionKind: "RECOMMENDATION", allowedNextInformationNeeds: ["LAUNCH_TIMING"], knowledgeEntryIds: [], unresolvedQuestions: [] } });
+    expect(result.nextInformationNeed).toBe("LAUNCH_TIMING");
+    expect(result.qualificationQuestion).toContain("Когда");
+  });
+
+  it("accepts a semantically reviewed income caveat without a phrase whitelist", async () => {
+    const answer = "Ориентир дохода — 20 000 ₽ с объекта; гарантия не даётся, результат зависит от объекта.";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: answer, qualificationQuestion: "", interpretedQuestionKind: "BUSINESS_INFORMATION" }), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: createInitialLead("caveat", "TEST", "caveat", new Date()),
+      recentMessages: [{ direction: "INBOUND", content: "Сколько приносит квартира?" }],
+      plan: { text: "Доход — ориентир, не гарантия.", nextInformationNeed: null, asksUserQuestion: false, useNaturalAdaptation: true,
+        currentTurnRequiresAnswer: true, knowledgeEntryIds: [], unresolvedQuestions: [] } });
+    expect(result.answerText).toBe(answer);
+    expect(llm.callCount).toBe(2);
+  });
+
   it("answers who owns a geographic check without treating the role explanation as an unsolicited handoff", async () => {
     const answer = "Это уточняет менеджер нашей команды, от Вас отдельная проверка не нужна. Возможность запуска пока не подтверждена.";
     const llm = new FakeLLMProvider([JSON.stringify({ answerText: answer, qualificationQuestion: "Какой бюджет рассматриваете?",
@@ -45,11 +82,13 @@ describe("natural response generation", () => {
   });
 
   it.each([
-    ["income caveat", "Ориентир дохода — 20 000 ₽ с объекта, гарантия не даётся.", "Ориентир дохода — 20 000 ₽ с объекта, без гарантии."],
+    ["income caveat", "Доход — 20 000 ₽ с объекта.", "Ориентир дохода — 20 000 ₽ с объекта, без гарантии."],
     ["corrupted script", "Команда поможет с подбором: 方便ный формат.", "Команда поможет с подбором объекта."],
   ])("repairs %s without discarding a useful qualification continuation", async (_kind, draft, corrected) => {
     const llm = new FakeLLMProvider([
       JSON.stringify({ answerText: draft, qualificationQuestion: "Когда планируете запуск?", nextInformationNeed: "LAUNCH_TIMING", interpretedQuestionKind: "BUSINESS_INFORMATION" }),
+      ...(_kind === "income caveat" ? [JSON.stringify({ answerIsSupported: false, answersCurrentRequest: true,
+        optionalQuestionAppropriate: true, feedback: "Не обозначена негарантированная доходность." })] : []),
       JSON.stringify({ answerText: corrected, qualificationQuestion: "Когда планируете запуск?", nextInformationNeed: "LAUNCH_TIMING", interpretedQuestionKind: "BUSINESS_INFORMATION" }),
       supportedReview,
     ]);
@@ -61,7 +100,7 @@ describe("natural response generation", () => {
     expect(result.answerText).toBe(corrected);
     expect(result.nextInformationNeed).toBe("LAUNCH_TIMING");
     expect(JSON.parse(llm.requests[1].userMessage).answerRecovery).toBe(false);
-    expect(llm.callCount).toBe(3);
+    expect(llm.callCount).toBe(_kind === "income caveat" ? 4 : 3);
   });
 
   it("requires explicit completeness and continuation review from a real provider", async () => {
@@ -417,12 +456,13 @@ describe("natural response generation", () => {
     expect(llm.callCount).toBe(2);
   });
 
-  it("keeps a practical recommendation self-contained despite a suggested CRM question", async () => {
+  it("keeps a practical recommendation self-contained when semantic review rejects its optional question", async () => {
     const answerText = "Начните с подбора объекта при помощи команды, затем лично посетите просмотр и заключите договор.";
     const llm = new FakeLLMProvider([JSON.stringify({ text: "", answerText,
       qualificationQuestion: "Когда планируете запуск?", nextInformationNeed: "LAUNCH_TIMING",
       interpretedQuestionKind: "RECOMMENDATION", qualificationMoveDecision: "ADVANCE",
-      qualificationMoveRationale: "Уточнить срок." }), supportedReview]);
+      qualificationMoveRationale: "Уточнить срок." }), JSON.stringify({ answerIsSupported: true,
+        answersCurrentRequest: true, optionalQuestionAppropriate: false, feedback: "Тема уже отложена." })]);
     const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: {} as Lead,
       recentMessages: [{ direction: "INBOUND", content: "С чего начать?" }],
       plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
@@ -691,7 +731,7 @@ describe("natural response generation", () => {
     expect(result.text).toContain("3–4");
     expect(llm.callCount).toBe(3);
     expect(llm.requests[0]!.maxTokens).toBeGreaterThanOrEqual(2000);
-    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-compact-v12");
+    expect(llm.requests[0]!.metadata?.promptVersion).toBe("conversation-autonomy-v1");
     expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
     expect(JSON.stringify(llm.requests)).not.toContain("operations-after-capital-correction");
   });
@@ -807,8 +847,8 @@ describe("natural response generation", () => {
     expect(result.text).toMatch(/подбора объекта/iu);
     const repair = JSON.parse(llm.requests[2]!.userMessage);
     expect(repair.rejectedAnswer).toBe(rejectedAnswer);
-    expect(repair).not.toHaveProperty("missingCriticalFacts");
-    expect(repair).not.toHaveProperty("missingOptionalFacts");
+    expect(repair.missingCriticalFacts).toEqual(["CITY"]);
+    expect(repair.missingOptionalFacts).toEqual(["LAUNCH_TIMING"]);
     expect(repair.qualificationProgressExpected).toBe(false);
     expect(repair.allowedQualificationMoves).toEqual([]);
   });
@@ -852,9 +892,7 @@ describe("natural response generation", () => {
     expect(result.text).toMatch(/подбора объекта/iu);
     expect(result.text).not.toMatch(/телефон|созвон/iu);
     expect(JSON.parse(llm.requests[1]!.userMessage).answerRecovery).toBe(true);
-    expect(llm.requests[1]!.jsonSchema).toMatchObject({ properties: {
-      text: { const: "" }, qualificationQuestion: { const: "" }, nextInformationNeed: { type: "null" },
-    } });
+    expect(llm.requests[1]!.jsonSchema).toEqual(llm.requests[0]!.jsonSchema);
   });
 
   it("repairs an invented mandatory meeting before offering practical launch advice", async () => {
@@ -1029,10 +1067,10 @@ describe("natural response generation", () => {
     expect(result.text).toMatch(/подобрать объект/iu);
     expect(llm.callCount).toBe(2);
     expect(JSON.parse(llm.requests[1]!.userMessage)).toMatchObject({
-      answerRecovery: true, qualificationMoveAvailable: false,
-      qualificationProgressExpected: false, allowedQualificationMoves: [],
+      answerRecovery: true, qualificationMoveAvailable: true,
+      qualificationProgressExpected: true, allowedQualificationMoves: [{ need: "GOAL", objective: "понять цель" }],
     });
-    expect(llm.requests[1]!.jsonSchema).toMatchObject({ properties: { nextInformationNeed: { type: "null" } } });
+    expect(llm.requests[1]!.jsonSchema).toEqual(llm.requests[0]!.jsonSchema);
   });
 
   const offerPlan: ConversationResponsePlan = {
@@ -1133,8 +1171,8 @@ describe("natural response generation", () => {
     };
     expect(sentContext.recentMessages).toHaveLength(4);
     expect(llm.requests[0]?.systemPrompt).toContain("SECURITY BOUNDARY");
-    expect(llm.requests[0]?.systemPrompt).toContain("Не заменяй известный ответ");
-    expect(llm.requests[0]?.systemPrompt).toContain("не более одного направления");
+    expect(llm.requests[0]?.systemPrompt).toContain("do not replace an answer with discovery");
+    expect(llm.requests[0]?.systemPrompt).toContain("separate optional next request");
     expect(JSON.parse(llm.requests[0]!.userMessage)).toMatchObject({
       qualificationMoveAvailable: true, unresolvedQuestions: [],
       currentFacts: {

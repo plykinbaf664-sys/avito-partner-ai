@@ -1,3 +1,4 @@
+import { customerVisibleHistory } from "../conversation/customer-visible-history";
 import { assessInformationNeeds } from "@/domain/conversation/information-needs";
 import { PARTNER_KNOWLEDGE_BASE } from "@/domain/knowledge/knowledge-base";
 import { settleLlmUsage, type LlmUsageTotals } from "../observability/llm-usage";
@@ -126,11 +127,13 @@ export function createDueFollowUpsProcessor({
           });
           return null;
         }
-        const history = await repositories.messages.listByConversationId(
+        const storedHistory = await repositories.messages.listByConversationId(
           conversation.id,
         );
+        const visibleContext = customerVisibleHistory(storedHistory, !outboundProvider);
+        const history = visibleContext.messages;
         if (
-          history.some(
+          storedHistory.some(
             (message) =>
               message.direction === "OUTBOUND" &&
               message.deliveryStatus === "PENDING",
@@ -166,6 +169,7 @@ export function createDueFollowUpsProcessor({
                 created: false,
                 plan: null,
                 history,
+                notesReliable: visibleContext.notesReliable,
               }
             : null;
         }
@@ -177,6 +181,7 @@ export function createDueFollowUpsProcessor({
           created: false,
           plan: buildFollowUpPlan(lead),
           history,
+          notesReliable: visibleContext.notesReliable,
         };
       });
       if (!prepared) continue;
@@ -184,6 +189,8 @@ export function createDueFollowUpsProcessor({
       let selected: { message: Message; created: boolean };
       let generationUsage: LlmUsageTotals | undefined;
       let generationFallback = false;
+      let conversationNotes: string | undefined;
+      let selectedInformationNeed: InformationNeed | null = null;
       const settleUsage = (outcome: Parameters<typeof settleLlmUsage>[2]) => settleLlmUsage(persistence.llmUsage,
         generationUsage?.callIds ?? [], outcome, () => logger.error("llm.usage_settlement_failed", { conversationId: candidate.id }));
       if (prepared.message) {
@@ -196,16 +203,15 @@ export function createDueFollowUpsProcessor({
             .reverse()
             .find((message) => message.direction === "OUTBOUND")?.content ?? null,
         );
-        let selectedInformationNeed = prepared.plan!.nextInformationNeed;
+        selectedInformationNeed = prepared.plan!.nextInformationNeed;
         let noReply = false;
-        let conversationNotes: string | undefined;
         if (generateNaturalResponse) {
           try {
             const natural = await generateNaturalResponse({
               llmContext: { requestId: generateId(), conversationId: prepared.conversation.id, leadId: prepared.lead.id,
                 source: prepared.lead.source, operation: "FOLLOW_UP" },
               lead: prepared.lead,
-              conversationMemory: readConversationalNotes(prepared.conversation.summary),
+              conversationMemory: prepared.notesReliable ? readConversationalNotes(prepared.conversation.summary) : undefined,
               plan: prepared.plan!,
               triggerType: "FOLLOW_UP_DUE",
               followUpStage: prepared.conversation.followUpCount + 1,
@@ -318,8 +324,8 @@ export function createDueFollowUpsProcessor({
           if (!inserted) return null;
           await repositories.conversations.update({
             ...conversation,
-            summary: mergeConversationalNotes(conversation.summary, conversationNotes),
-            pendingInformationNeed: selectedInformationNeed,
+            summary: outboundProvider ? conversation.summary : mergeConversationalNotes(conversation.summary, conversationNotes),
+            pendingInformationNeed: outboundProvider ? conversation.pendingInformationNeed : selectedInformationNeed,
             updatedAt: now,
           });
           return { message: followUp, created: true };
@@ -404,6 +410,8 @@ export function createDueFollowUpsProcessor({
           await repositories.conversations.update({
             ...conversation,
             lastOutboundAt: delivered.sentAt ?? now,
+            summary: mergeConversationalNotes(conversation.summary, selected.created ? conversationNotes : undefined),
+            pendingInformationNeed: selected.created ? selectedInformationNeed : conversation.pendingInformationNeed,
             followUpAnchorAt: anchor,
             followUpEligibleAt: nextSilenceDeadline(anchor, count, sentAt),
             followUpCount: count,

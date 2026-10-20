@@ -979,7 +979,10 @@ export function createIncomingEventProcessor({
         extracted.extraction.intent !== "QUESTION" && extracted.extraction.intent !== "COMPLAINT" &&
         !extracted.extraction.signals.requiresSubstantiveAnswer && extracted.extraction.signals.questions.length === 0 &&
         extracted.extraction.signals.previousQuestionResponse === "ANSWERED";
-      const phoneFulfillsRecentStep = phoneReceived && (
+      const phoneFulfillsRecentStep = phoneReceived &&
+        !extracted.extraction.signals.requiresSubstantiveAnswer &&
+        extracted.extraction.signals.questions.length === 0 &&
+        extracted.extraction.intent !== "QUESTION" && extracted.extraction.intent !== "COMPLAINT" && (
         currentConversation.pendingInformationNeed === "PHONE_NUMBER" ||
         phoneFulfillsManagerStep
       );
@@ -1044,7 +1047,8 @@ export function createIncomingEventProcessor({
       const decision = evaluateQualification(evaluatedLead, qualificationContextForLead(evaluatedLead, {
         wantsHuman: extracted.extraction.signals.wantsHuman &&
           extracted.extraction.signals.questionKind !== "AGENT_IDENTITY",
-        unknownBusinessQuestion: knowledge.unresolvedQuestions.length > 0,
+        // Retrieval is a hint, not authority to declare a question unanswerable.
+        unknownBusinessQuestion: !generateNaturalResponse && knowledge.unresolvedQuestions.length > 0,
       }));
       evaluatedLead = {
         ...evaluatedLead,
@@ -1195,8 +1199,7 @@ export function createIncomingEventProcessor({
           wantsHuman: extracted.extraction.signals.wantsHuman &&
             extracted.extraction.signals.questionKind !== "AGENT_IDENTITY",
           unknownBusinessQuestion:
-            knowledge.unresolvedQuestions.length > 0 ||
-            responseLlm?.answerCoverage === "UNKNOWN",
+            responseLlm ? responseLlm.answerCoverage === "UNKNOWN" : !generateNaturalResponse && knowledge.unresolvedQuestions.length > 0,
         }));
         transactionLead = {
           ...transactionLead,
@@ -1233,28 +1236,18 @@ export function createIncomingEventProcessor({
           callbackPreferenceCaptured: callbackPreference !== null,
           extractionQuality: extracted.diagnostics?.status ?? "VALID",
         });
-        // If the conversation model is unavailable or rejected by policy, keep
-        // the sales workflow alive with the existing deterministic safe draft.
-        // This fallback is exceptional: during normal operation Claude chooses
-        // freely among every allowed qualification direction.
-        if (
-          responseLlm === null &&
-          transactionResponsePlan.qualificationProgressExpected === true &&
-          !transactionResponsePlan.currentTurnRequiresAnswer
-        ) {
-          transactionNextInformationNeed =
-            transactionNeeds.suggestedNextInformationNeed;
+        // Compatibility for intentional draft-only callers, never a fallback
+        // for an unavailable configured conversation brain.
+        if (!generateNaturalResponse && responseLlm === null &&
+            transactionResponsePlan.qualificationProgressExpected === true &&
+            !transactionResponsePlan.currentTurnRequiresAnswer) {
+          transactionNextInformationNeed = transactionNeeds.suggestedNextInformationNeed;
           transactionResponsePlan = buildConversationResponse({
-            lead: transactionLead,
-            extraction: extracted.extraction,
-            decision: transactionDecision,
-            nextInformationNeed: transactionNextInformationNeed,
-            knowledge,
-            informationNeeds: transactionNeeds,
+            lead: transactionLead, extraction: extracted.extraction,
+            decision: transactionDecision, nextInformationNeed: transactionNextInformationNeed,
+            knowledge, informationNeeds: transactionNeeds,
             previouslyExplainedKnowledgeEntryIds: previouslyExplainedKnowledge,
-            deferredInformationNeeds:
-              deferredInformationNeeds,
-            guidanceNeed,
+            deferredInformationNeeds, guidanceNeed,
             callbackPreferenceCaptured: callbackPreference !== null,
             extractionQuality: extracted.diagnostics?.status ?? "VALID",
           });
@@ -1284,8 +1277,9 @@ export function createIncomingEventProcessor({
         // The conversation generator validates whether this turn needs an
         // answer. Extraction defaults and repeated known facts are not new
         // conversational content and must not turn NO_REPLY into draft copy.
+        const responseUnavailable = responseFailureCode !== null && !responseSuppressed;
         const noAiReply =
-          responseLlm?.replyAction === "NO_REPLY" ||
+          responseUnavailable || responseLlm?.replyAction === "NO_REPLY" ||
           (phoneFulfillsManagerStep && !transactionDecision.shouldHandoffToManager);
         const shouldSendOutbound = !responseSuppressed && !noAiReply;
         if (shouldSendOutbound && !transactionOutboundText.trim()) throw new RetryableInfrastructureError("EMPTY_OUTBOUND_DRAFT");
@@ -1491,26 +1485,28 @@ export function createIncomingEventProcessor({
 
         const updatedConversation: Conversation = {
           ...storedConversation,
-          state: nextState,
-          summary: responseSuppressed ? storedConversation.summary : JSON.stringify(updatedConversationMemory),
-          pendingInformationNeed: responseSuppressed
+          state: responseUnavailable || (outboundProvider && shouldSendOutbound)
+            ? storedConversation.state : nextState,
+          summary: responseSuppressed || responseUnavailable || (outboundProvider && shouldSendOutbound)
+            ? storedConversation.summary : JSON.stringify(updatedConversationMemory),
+          pendingInformationNeed: responseSuppressed || responseUnavailable || (outboundProvider && shouldSendOutbound)
             ? storedConversation.pendingInformationNeed
             : qualificationCompleted
               ? null
               : transactionNextInformationNeed,
-          awaitingUserReply: responseSuppressed
+          awaitingUserReply: responseSuppressed || responseUnavailable || (outboundProvider && shouldSendOutbound)
             ? storedConversation.awaitingUserReply
             : shouldSendOutbound && (responseLlm?.awaitingUserReply ?? transactionNextInformationNeed !== null),
           qualificationCompleted,
           followUpEligibleAt: responseSuppressed
             ? storedConversation.followUpEligibleAt
             : null,
-          lastAppliedInboundSequence: Math.max(
+          lastAppliedInboundSequence: responseUnavailable ? storedConversation.lastAppliedInboundSequence : Math.max(
             storedConversation.lastAppliedInboundSequence,
             prepared.inboundSequence ?? 0,
           ),
           updatedAt: now,
-          closedAt: responseSuppressed
+          closedAt: responseSuppressed || responseUnavailable
             ? storedConversation.closedAt
             : transactionDecision.status === "NO_FIT"
               ? now
@@ -1518,7 +1514,7 @@ export function createIncomingEventProcessor({
         };
         await repositories.conversations.update(updatedConversation);
 
-        await repositories.incomingEvents.markProcessed(registration.event.id, {
+        if (!responseUnavailable) await repositories.incomingEvents.markProcessed(registration.event.id, {
           extraction: extracted.extraction,
           llmModel: extracted.llm.model,
           llmInputTokens: extracted.llm.inputTokens,
@@ -1530,6 +1526,10 @@ export function createIncomingEventProcessor({
 
         return {
           outOfOrderIgnored: false as const,
+          responseUnavailable,
+          deliveredState: nextState,
+          deliveredSummary: JSON.stringify(updatedConversationMemory),
+          deliveredNextInformationNeed: qualificationCompleted ? null : transactionNextInformationNeed,
           responseSuppressed,
           lead: updatedLead,
           conversation: updatedConversation,
@@ -1633,6 +1633,9 @@ export function createIncomingEventProcessor({
                 !conversation.qualificationCompleted;
               const updated: Conversation = {
                 ...conversation,
+                state: completed.deliveredState,
+                summary: completed.deliveredSummary,
+                pendingInformationNeed: completed.deliveredNextInformationNeed,
                 lastOutboundAt: delivered.sentAt,
                 awaitingUserReply,
                 followUpAnchorAt: awaitingUserReply ? delivered.sentAt : null,
@@ -1661,6 +1664,11 @@ export function createIncomingEventProcessor({
           now: clock,
           eventId: registration.event.id,
         })(completed.managerNotificationId);
+      }
+
+      if (completed.responseUnavailable) {
+        throw Object.assign(new RetryableInfrastructureError("CONVERSATION_RESPONSE_UNAVAILABLE"),
+          { llmUsage: responseFailureUsage });
       }
 
       logger.info("qualification.updated", {

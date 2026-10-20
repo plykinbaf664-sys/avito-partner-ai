@@ -76,8 +76,8 @@ function extractionReply(
   });
 }
 
-function naturalReply(text = "Спасибо, продолжим.", nextInformationNeed: string | null = null): string {
-  return JSON.stringify({ replyAction: "SEND_REPLY", text, nextInformationNeed });
+function naturalReply(text = "Спасибо, продолжим.", nextInformationNeed: string | null = null, usedKnowledgeEntryIds: string[] = []): string {
+  return JSON.stringify({ replyAction: "SEND_REPLY", text, nextInformationNeed, usedKnowledgeEntryIds });
 }
 
 const at = (hours: number) => new Date(Date.parse("2026-09-18T10:00:00.000Z") + hours * 60 * 60 * 1_000);
@@ -227,12 +227,13 @@ describe("isolated Test Chat Lab workflow", () => {
     expect(llm.requests.filter((request) => JSON.parse(request.userMessage).purpose === "ANSWER_SEMANTIC_REVIEW")).toHaveLength(3);
   });
 
-  it("answers every known part of a compound request when generation is unavailable", async () => {
+  it("answers every known part of a compound request through the conversation brain", async () => {
     const text = "Своей квартиры нет, я смогу видеть брони и сколько времени это будет отнимать?";
     const llm = new FakeLLMProvider([
       extractionReply({}, { questions: [text], requiresSubstantiveAnswer: true,
         knowledgeEntryIds: ["property-not-required", "crm-visibility", "partner-time"] }, "QUESTION"),
-      new Error("MODEL_UNAVAILABLE"),
+      naturalReply("Своя квартира не обязательна. В CRM видны брони и работа объекта. Ориентир участия — около 3–4 часов в день.", null,
+        ["property-not-required", "crm-visibility", "partner-time"]),
     ]);
     const lab = createTestChatLabService({ persistence, llmProvider: llm,
       outboundProvider: new FakeOutboundProvider(), managerNotificationProvider: new FakeManagerNotificationProvider() });
@@ -255,13 +256,14 @@ describe("isolated Test Chat Lab workflow", () => {
       extractionReply({}, { questions: ["Как вести объект?", "Как найти объект?", "Как найти клиентов?"],
         previousQuestionResponse: "CHANGED_TOPIC", requiresSubstantiveAnswer: true,
         knowledgeEntryIds: ["company-responsibilities", "operations-guests"] }, "QUESTION"),
-      rejectedMove, rejectedMove,
+      rejectedMove, naturalReply("Команда помогает подобрать объект, размещает объявления, а администратор ведёт бронирования и гостей.", null,
+        ["company-responsibilities", "operations-guests"]),
       extractionReply({}, { questions: ["С чего начать"], requiresSubstantiveAnswer: true,
         knowledgeEntryIds: ["launch-process"] }, "QUESTION"),
-      rejectedReferral, rejectedReferral,
+      rejectedReferral, naturalReply("Сначала команда поможет подобрать объект.", null, ["launch-process"]),
       extractionReply({}, { questions: ["А гости сами будут мне звонить?"], requiresSubstantiveAnswer: true,
         knowledgeEntryIds: ["operations-guests"] }, "QUESTION"),
-      new Error("MODEL_UNAVAILABLE"),
+      naturalReply("С гостями общается администратор.", null, ["operations-guests"]),
     ]);
     const notifications = new FakeManagerNotificationProvider();
     const outbound = new FakeOutboundProvider();
@@ -485,6 +487,7 @@ describe("isolated Test Chat Lab workflow", () => {
       extractionReply(),
       extractionReply({ city: "Нижний Новгород" }),
       extractionReply({ city: "Нижний Новгород", availableCapital: 100_000, availableCapitalConfirmed: true }),
+      naturalReply("По предварительному ориентиру запуск одного объекта стоит около 150 000 ₽; точная смета зависит от объекта."),
     ]);
     const lab = createTestChatLabService({
       persistence,
@@ -615,7 +618,7 @@ describe("isolated Test Chat Lab workflow", () => {
       extractionReply({}, {
         questions: ["Расскажите подробнее"],
         previousQuestionResponse: "DECLINED_TO_ANSWER",
-        requiresSubstantiveAnswer: true,
+        requiresSubstantiveAnswer: false,
       }, "QUESTION"),
       extractionReply({ city: "Москва" }, {
         questions: [],

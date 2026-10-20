@@ -96,6 +96,24 @@ it("normalizes obvious Russian phone formats deterministically", () => {
 });
 
 describe("message extraction schema", () => {
+  it("preserves semantic refusal instead of overriding it from overlapping words", async () => {
+    const output = JSON.parse(structuredExtractionReply({ objections: ["Не готов работать с компанией"] }));
+    output.facts.managementReadiness = "NOT_READY";
+    const llm = new FakeLLMProvider([JSON.stringify(output)]);
+    const result = await createMessageExtractor({ llmProvider: llm })("Не готов работать с компанией");
+    expect(result.extraction.facts.managementReadiness).toBe("NOT_READY");
+    expect(result.extraction.signals.objections).toEqual(["Не готов работать с компанией"]);
+  });
+
+  it("retains a semantic paraphrase and human request without lexical-overlap retries", async () => {
+    const output = JSON.parse(structuredExtractionReply({ intent: "QUESTION", questions: ["Каковы стартовые расходы?"], requiresSubstantiveAnswer: true }));
+    output.signals.wantsHuman = true;
+    const llm = new FakeLLMProvider([JSON.stringify(output), JSON.stringify(output)]);
+    const result = await createMessageExtractor({ llmProvider: llm })("Сколько придётся вложить? И можно поговорить с человеком?");
+    expect(result.extraction.signals.questions).toEqual(["Каковы стартовые расходы?"]);
+    expect(result.extraction.signals.wantsHuman).toBe(true);
+    expect(llm.callCount).toBe(1);
+  });
   it("provides approved semantic sources and discards invented source IDs without losing the question", async () => {
     const output = JSON.parse(structuredExtractionReply({
       intent: "QUESTION", questions: ["С чего начать"], requiresSubstantiveAnswer: true,
@@ -162,10 +180,10 @@ describe("message extraction schema", () => {
   it("does not turn an unspecified amount or scale into a confirmed zero", async () => {
     const output = JSON.parse(structuredExtractionReply({ intent: "QUESTION" }));
     output.facts.budget = 0;
-    output.facts.budgetConfirmed = true;
+    output.facts.budgetConfirmed = false;
     output.facts.availableCapital = 0;
-    output.facts.availableCapitalConfirmed = true;
-    output.facts.capitalScope = "TOTAL_LIMIT";
+    output.facts.availableCapitalConfirmed = false;
+    output.facts.capitalScope = "UNKNOWN";
     output.facts.calculationUnits = 0;
     const result = await createMessageExtractor({
       llmProvider: new FakeLLMProvider([JSON.stringify(output)]),
@@ -210,7 +228,7 @@ describe("message extraction schema", () => {
   it("keeps the raw surface of a contextual question separate from its expanded referent", async () => {
     const expanded = JSON.parse(structuredExtractionReply({
       intent: "QUESTION",
-      questions: ["какой размер капитала требуется для запуска бизнеса в Москве?"],
+      questions: ["Не знаю, а какой надо?"],
       requiresSubstantiveAnswer: true,
     }));
     expanded.signals.contextualReference = true;
@@ -236,7 +254,7 @@ describe("message extraction schema", () => {
   it("preserves a resolved follow-on question without a pending CRM question or QUESTION intent", async () => {
     const expanded = JSON.parse(structuredExtractionReply({
       intent: "QUESTION",
-      questions: ["Какие действия нужны для подбора и запуска объекта?"],
+      questions: ["Отлично, что для этого надо."],
       requiresSubstantiveAnswer: true,
     }));
     expanded.intent = "CONFIRMATION";
@@ -304,15 +322,19 @@ describe("message extraction schema", () => {
     expect(result.extraction.signals.questions).toEqual([]);
   });
 
-  it("keeps valid facts but discards ungrounded semantic signals after repair", async () => {
-    const ungrounded = structuredExtractionReply({
+  it("keeps valid facts and repairs structurally contradictory conversation signals", async () => {
+    const contradictory = JSON.parse(structuredExtractionReply({
       intent: "QUESTION",
       city: "Москва",
       questions: ["Какая юридическая гарантия прибыли закреплена договором?"],
       objections: ["Пользователь отказывается оплачивать услугу"],
       requiresSubstantiveAnswer: true,
-    });
-    const llm = new FakeLLMProvider([ungrounded, ungrounded]);
+    }));
+    contradictory.signals.previousQuestionResponse = "ANSWERED";
+    contradictory.signals.requiresSubstantiveAnswer = false;
+    const repaired = structuredExtractionReply({ city: "Москва", intent: "QUESTION",
+      questions: ["Сколько времени нужно уделять проекту?"], requiresSubstantiveAnswer: true });
+    const llm = new FakeLLMProvider([JSON.stringify(contradictory), repaired]);
 
     const result = await createMessageExtractor({ llmProvider: llm })({
       text: "А сколько нужно?",
@@ -325,14 +347,14 @@ describe("message extraction schema", () => {
 
     expect(llm.callCount).toBe(2);
     expect(result.diagnostics).toMatchObject({
-      status: "DEGRADED",
+      status: "RECOVERED",
       attempts: 2,
-      failureReasons: ["UNGROUNDED_SIGNALS", "UNGROUNDED_SIGNALS"],
-      discardedSignalFields: expect.arrayContaining(["questions", "objections"]),
+      failureReasons: ["CONTRADICTORY_SIGNALS"],
+      discardedSignalFields: [],
     });
     expect(result.extraction.facts.city).toBe("Москва");
     expect(result.extraction.signals).toMatchObject({
-      questions: [],
+      questions: ["Сколько времени нужно уделять проекту?"],
       objections: [],
       requiresSubstantiveAnswer: true,
     });
@@ -589,13 +611,13 @@ describe("message extraction schema", () => {
           desiredIncome: null,
           primaryGoal: "UNKNOWN",
           launchTiming: null,
-          managementReadiness: null,
+          managementReadiness: "READY",
           requiresGuaranteedIncome: null,
           rejectsBusinessModel: null,
         },
         signals: {
           questions: [],
-          objections: [statement],
+          objections: [],
           possiblePrimaryFear: null,
           possibleSecondaryFear: null,
           wantsHuman: false,
@@ -737,14 +759,14 @@ describe("message extraction schema", () => {
         objections: ["Мало времени"],
       },
     });
-    expect(envelope.RECENT_MESSAGES).toHaveLength(12);
-    expect(envelope.RECENT_MESSAGES[0]?.content).toBe("message-3");
+    expect(envelope.RECENT_MESSAGES).toHaveLength(15);
+    expect(envelope.RECENT_MESSAGES[0]?.content).toBe("message-0");
     expect(llm.requests[0]?.systemPrompt).toContain("«Понял», «ясно», «хорошо» сами по себе не подтверждают бюджет");
     expect(llm.requests[0]?.systemPrompt).toContain("COMPLAINT — раздражение");
     expect(llm.requests[0]?.systemPrompt).toContain("3–4 часов в день");
   });
 
-  it("retries ungrounded or contradictory conversation signals", async () => {
+  it("retries structurally contradictory conversation signals", async () => {
     const reply = (overrides: {
       city: string | null;
       questions: string[];
@@ -784,7 +806,7 @@ describe("message extraction schema", () => {
         city: null,
         questions: ["Расскажите подробнее"],
         previousQuestionResponse: "DECLINED_TO_ANSWER",
-        requiresSubstantiveAnswer: true,
+        requiresSubstantiveAnswer: false,
         intent: "QUESTION",
       }),
       reply({

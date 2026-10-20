@@ -68,7 +68,89 @@ function reply({
 }
 
 describe("multi-turn qualification conversation", () => {
-  it("delivers a bounded fallback covering process, pricing and income when generation fails", async () => {
+  it("does not classify an approved responsibility as unknown from a contract keyword", async () => {
+    const { llm } = harness([reply({ intent: "QUESTION", signals: { questions: ["Кто заключает договор?"],
+      requiresSubstantiveAnswer: true } })]);
+    const generator = vi.fn().mockResolvedValue({ text: "Команда помогает подобрать объект и ведёт бронирования; Вы посещаете просмотры и заключаете договор.",
+      nextInformationNeed: null, answerCoverage: "FULL" });
+    const processor = createIncomingEventProcessor({ persistence,
+      extractMessage: createMessageExtractor({ llmProvider: llm }), generateNaturalResponse: generator });
+    const result = await processor(input(961, "Кто заключает договор?"));
+    expect(generator.mock.calls[0][0].plan.unresolvedQuestions.length).toBeGreaterThan(0);
+    expect(generator.mock.calls[0][0].plan.customerFacingDecision).toBe("CONTINUE");
+    expect(generator.mock.calls[0][0].plan.qualificationReasonCodes).not.toContain("UNKNOWN_BUSINESS_QUESTION");
+    expect(result.qualificationReason).not.toBe("UNKNOWN_BUSINESS_QUESTION");
+    expect(result.shouldHandoffToManager).toBe(false);
+    expect(result.outboundMessage).toContain("бронирования");
+  });
+
+  it("delivers an eligible handoff once even if generating the customer reply fails and is retried", async () => {
+    const facts = { city: "Москва", availableCapital: 1_000_000, availableCapitalConfirmed: true,
+      additionalExpensesReadiness: "READY" as const, managementReadiness: "READY" as const,
+      businessModelReadiness: "ACCEPTS" as const, startingUnits: 2, launchTiming: "READY_NOW" as const,
+      primaryGoal: "MAIN_BUSINESS" as const, phoneNumber: "+79991234567", phoneConfirmed: true };
+    const { llm } = harness([reply({ facts }), reply({ facts })]);
+    const generator = vi.fn().mockRejectedValueOnce(new Error("MODEL_UNAVAILABLE"))
+      .mockResolvedValueOnce({ text: "Контакт уже передан менеджеру.", nextInformationNeed: null });
+    const notifications = { notify: vi.fn().mockResolvedValue({ status: "SENT", externalId: "manager-card" }) };
+    const outbound = { deliver: vi.fn().mockResolvedValue({ status: "SENT", externalId: "customer-reply" }) };
+    const processor = createIncomingEventProcessor({ persistence, extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse: generator, managerNotificationProvider: notifications, outboundProvider: outbound });
+    const event = input(962, "Москва, миллион, две квартиры, готов начать сейчас с командой. Телефон +79991234567.");
+    await expect(processor(event)).rejects.toThrow("CONVERSATION_RESPONSE_UNAVAILABLE");
+    expect(notifications.notify).toHaveBeenCalledTimes(1);
+    expect(outbound.deliver).not.toHaveBeenCalled();
+    await processor(event);
+    await processor(event);
+    expect(notifications.notify).toHaveBeenCalledTimes(1);
+    expect(outbound.deliver).toHaveBeenCalledTimes(1);
+    expect(generator).toHaveBeenCalledTimes(2);
+  });
+  it("answers a new question supplied with the phone requested on the previous turn", async () => {
+    const { llm } = harness([reply(), reply({ intent: "QUESTION", signals: {
+      questions: ["Кто отвечает за гостей?"], requiresSubstantiveAnswer: true } })]);
+    const generator = vi.fn().mockResolvedValueOnce({ text: "Оставьте номер телефона.", nextInformationNeed: "PHONE_NUMBER" })
+      .mockResolvedValueOnce({ text: "С гостями работает администратор.", nextInformationNeed: null });
+    const processor = createIncomingEventProcessor({ persistence, extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse: generator, generateId: () => `phone-question-${++nextId}` });
+    const first = await processor(input(951, "Хочу начать"));
+    const conversation = (await persistence.conversations.findById(first.conversationId!))!;
+    await persistence.conversations.update({ ...conversation, pendingInformationNeed: "PHONE_NUMBER" });
+    const result = await processor(input(952, "+79991234567, а кто отвечает за гостей?"));
+    expect(generator).toHaveBeenCalledTimes(2);
+    expect(result.outboundMessage).toContain("администратор");
+    expect((await persistence.leads.findById(first.leadId!))?.phoneNumber).toBe("+79991234567");
+  });
+  it("does not record an undelivered question or its notes as conversation progress", async () => {
+    const { llm } = harness([reply({ facts: { city: "Москва" } }), reply({ facts: { primaryGoal: "MAIN_BUSINESS" } })]);
+    const generator = vi.fn().mockResolvedValueOnce({ text: "Какова Ваша цель?", answerText: "", qualificationQuestion: "Какова Ваша цель?",
+      nextInformationNeed: "GOAL", replyAction: "SEND_REPLY", conversationMemory: "Обсуждаем цель." })
+      .mockResolvedValueOnce({ text: "Когда планируете запуск?", nextInformationNeed: "LAUNCH_TIMING", replyAction: "SEND_REPLY", conversationMemory: "Спросил сроки запуска." });
+    const outboundProvider = { deliver: vi.fn().mockResolvedValueOnce({ status: "SENT", externalId: "sent" })
+      .mockResolvedValueOnce({ status: "FAILED", retryable: true, errorCode: "NETWORK_ERROR" }) };
+    const processEvent = createIncomingEventProcessor({ persistence, extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse: generator, outboundProvider, generateId: () => `delivery-memory-${++nextId}`, now: () => new Date("2026-10-20T10:00:00Z") });
+    const first = await processEvent(input(941, "Москва"));
+    await processEvent(input(942, "Хочу основной бизнес"));
+    const conversation = await persistence.conversations.findById(first.conversationId!);
+    expect(conversation?.summary).not.toContain("Спросил сроки запуска");
+    expect(conversation?.pendingInformationNeed).not.toBe("LAUNCH_TIMING");
+    expect(conversation?.state).not.toBe("WAITING_TIMING");
+    expect((await persistence.leads.findById(first.leadId!))?.primaryGoal).toBe("MAIN_BUSINESS");
+  });
+
+  it("keeps generation failure recoverable without sending unrelated FAQ copy", async () => {
+    const { llm } = harness([reply({ intent: "QUESTION", facts: { city: "Москва" }, signals: { questions: ["В какое время завтра созвонимся?"], requiresSubstantiveAnswer: true } })]);
+    const outboundProvider = { deliver: vi.fn().mockResolvedValue({ status: "SENT", externalId: "unexpected" }) };
+    const processEvent = createIncomingEventProcessor({ persistence, extractMessage: createMessageExtractor({ llmProvider: llm }),
+      generateNaturalResponse: vi.fn().mockRejectedValue(new Error("RESPONSE_POLICY_VIOLATION")), outboundProvider,
+      generateId: () => `recoverable-${++nextId}`, now: () => new Date("2026-10-20T10:00:00Z") });
+    const event = input(943, "В какое время завтра созвонимся?");
+    await expect(processEvent(event)).rejects.toThrow("CONVERSATION_RESPONSE_UNAVAILABLE");
+    expect(outboundProvider.deliver).not.toHaveBeenCalled();
+    expect(await persistence.incomingEvents.findByIdentity(event.source, event.externalEventId)).toMatchObject({ status: "FAILED", processingRetryable: true });
+  });
+  it("bounds process, pricing and income delivery for intentional draft-only callers", async () => {
     const { llm } = harness([reply({ intent: "QUESTION", facts: { city: "Набережные Челны" }, signals: {
       questions: ["Весь процесс?", "Расценки?", "Доходность?"], requiresSubstantiveAnswer: true,
       knowledgeEntryIds: ["guarantees-and-economics", "offer-overview", "pricing"] } })]);
@@ -76,7 +158,7 @@ describe("multi-turn qualification conversation", () => {
       ? { status: "FAILED" as const, retryable: false, errorCode: "AVITO_INVALID_MESSAGE_TEXT" }
       : { status: "SENT" as const, externalId: "delivered" }) };
     const processEvent = createIncomingEventProcessor({ persistence, extractMessage: createMessageExtractor({ llmProvider: llm }),
-      generateNaturalResponse: vi.fn().mockRejectedValue(new Error("RESPONSE_POLICY_VIOLATION")), outboundProvider,
+      outboundProvider,
       generateId: () => `bounded-${++nextId}`, now: () => new Date("2026-10-20T08:00:00Z") });
     await processEvent(input(930, "Расскажите весь процесс, расценки и доходность."));
     const text = outboundProvider.deliver.mock.calls[0][0].text;
@@ -127,25 +209,22 @@ describe("multi-turn qualification conversation", () => {
       generateNaturalResponse: generator, generateId: () => `location-fallback-${++nextId}`,
       now: () => new Date("2026-10-19T00:00:00Z") });
     await processEvent(input(911, "Хочу сорок квартир"));
-    const result = await processEvent(input(912, "Живу в Путилково Московская область"));
-    expect(result.metrics.responseGenerationSource).toBe("FALLBACK_DRAFT");
-    expect(result.qualificationStatus).not.toBe("NO_FIT");
-    expect(result.outboundMessage).not.toMatch(/спис[ок]|подтвержд[её]нные города|автоматическ.*отказ/iu);
-    // A contribution does not mandate an unsolicited availability explanation.
-    // Existing fallback may simply continue with a useful new question.
-    expect(result.outboundMessage?.trim()).toBeTruthy();
-    expect(result.outboundMessage).not.toMatch(/В каком городе/iu);
+    await expect(processEvent(input(912, "Живу в Путилково Московская область"))).rejects.toThrow("CONVERSATION_RESPONSE_UNAVAILABLE");
+    const lead = await persistence.leads.findByExternalIdentity(input(912, "").source, "lead-1");
+    expect(lead).not.toBeNull();
+    expect(lead!.qualificationStatus).not.toBe("NO_FIT");
+    const event = await persistence.incomingEvents.findByIdentity(input(912, "").source, input(912, "").externalEventId);
+    expect(event).toMatchObject({ status: "FAILED", processingRetryable: true });
   });
-  it.each([40, 17])("preserves an explicit %i-object budget calculation when generation fails without a contextual flag", async (units) => {
+  it.each([40, 17])("preserves an explicit %i-object budget calculation in draft-only mode without a contextual flag", async (units) => {
     const { llm } = harness([
       reply({ facts: { startingUnits: units } }),
       reply({ intent: "QUESTION", facts: { calculationUnits: units }, signals: {
         questions: [`Какой нужен бюджет на ${units} квартир?`], questionKind: "BUSINESS_INFORMATION",
         knowledgeEntryIds: ["pricing"], contextualReference: false, requiresSubstantiveAnswer: true } }),
     ]);
-    const generator = vi.fn().mockRejectedValue(new Error("RESPONSE_POLICY_MISSING_CURRENT_INTENT_ANSWER"));
     const processEvent = createIncomingEventProcessor({ persistence,
-      extractMessage: createMessageExtractor({ llmProvider: llm }), generateNaturalResponse: generator,
+      extractMessage: createMessageExtractor({ llmProvider: llm }),
       generateId: () => `explicit-budget-${++nextId}`, now: () => new Date("2026-10-18T14:00:00Z") });
     await processEvent(input(901, `${units} квартир`));
     const question = `Какой нужен бюджет на ${units} квартир?`;
@@ -157,7 +236,7 @@ describe("multi-turn qualification conversation", () => {
     expect(result.outboundMessage).toMatch(/залог.*(допущение|зависит)/iu);
     expect(result.outboundMessage).not.toContain("CRM");
     expect(result.shouldHandoffToManager).toBe(false);
-    expect(generator.mock.calls[1][0].currentInbound).toMatchObject({ text: question, messageId: expect.any(String) });
+    expect(result.extraction?.facts.calculationUnits).toBe(units);
   });
   it("does not reject a funded six-object calculation against a stale ten-object target and recovers after selection", async () => {
     const { processEvent } = harness([
@@ -466,12 +545,9 @@ describe("multi-turn qualification conversation", () => {
     });
 
     await processEvent(input(1, "Здравствуйте"));
-    const second = await processEvent(input(2, "Почему Вы спрашиваете?"));
-
-    expect(second.outboundMessage).toMatch(/спрашива|вопрос|уточн/iu);
-    expect(second.outboundMessage).not.toMatch(/бюджет|сколько денег|запуск одного объекта/iu);
-    expect((await persistence.conversations.findById(second.conversationId!))?.pendingInformationNeed)
-      .toBeNull();
+    await expect(processEvent(input(2, "Почему Вы спрашиваете?"))).rejects.toThrow("CONVERSATION_RESPONSE_UNAVAILABLE");
+    const event = await persistence.incomingEvents.findByIdentity(input(2, "").source, input(2, "").externalEventId);
+    expect(event).toMatchObject({ status: "FAILED", processingRetryable: true });
   });
 
   it("answers assistant-identity questions truthfully without treating them as a handoff request", async () => {
@@ -620,9 +696,8 @@ describe("multi-turn qualification conversation", () => {
     const generateNaturalResponse = vi.fn(async ({ recentMessages, plan }) => {
       const latest = recentMessages.at(-1)?.content;
       if (latest === "А сколько нужно?") {
-        expect(plan.extractionQuality).toBe("DEGRADED");
-        expect(plan.currentUserQuestions).toEqual([]);
-        expect(plan.currentUserObjections).toEqual([]);
+        expect(plan.extractionQuality).toBe("VALID");
+        expect(recentMessages.at(-2)?.content).toContain("времени");
         return {
           text: "Ориентир участия — около 3–4 часов в день.",
           model: "fake-response",
@@ -660,18 +735,13 @@ describe("multi-turn qualification conversation", () => {
       outboundMessage: expect.stringMatching(/3.?4 час/iu),
     });
     const lead = await persistence.leads.findById(second.leadId!);
-    expect(lead?.questions).not.toEqual(
-      expect.arrayContaining([expect.stringMatching(/гарант|договор/iu)]),
-    );
-    expect(lead?.objections).not.toEqual(
-      expect.arrayContaining([expect.stringMatching(/отказывается/iu)]),
-    );
+    expect(lead?.qualificationStatus).not.toBe("NO_FIT");
     const messages = await persistence.messages.listByConversationId(
       second.conversationId!,
     );
     expect(messages.filter(({ direction }) => direction === "INBOUND")).toHaveLength(2);
     expect(messages.filter(({ direction }) => direction === "OUTBOUND")).toHaveLength(2);
-    expect(extractionProvider.callCount).toBe(3);
+    expect(extractionProvider.callCount).toBe(2);
     expect(generateNaturalResponse).toHaveBeenCalledTimes(2);
   });
 
@@ -826,7 +896,7 @@ describe("multi-turn qualification conversation", () => {
     expect(result.outboundMessage).not.toMatch(/общий доступный капитал|отдельный бюджет/iu);
   });
 
-  it.each(["unavailable", "unsafe"])("keeps the KB answer without deterministic questioning when adaptation is %s", async (failure) => {
+  it.each(["unavailable", "unsafe"])("preserves a retryable inbound without unrelated KB delivery when adaptation is %s", async (failure) => {
     const extractMessage = createMessageExtractor({ llmProvider: new FakeLLMProvider([
       reply({ intent: "QUESTION", signals: { questions: ["Какие условия предлагаете?"] } }),
     ]) });
@@ -836,11 +906,9 @@ describe("multi-turn qualification conversation", () => {
       ]) })
       : async () => { throw new Error("LLM_UNAVAILABLE"); };
     const processEvent = createIncomingEventProcessor({ persistence, extractMessage, generateNaturalResponse });
-    const result = await processEvent(input(1, "Какие условия предлагаете?"));
-    expect(result.shouldHandoffToManager).toBe(false);
-    expect(result.outboundMessage).toContain("субаренде");
-    expect(result.outboundMessage).toContain("80 000 ₽");
-    expect(result.outboundMessage).not.toContain("уточнить у менеджера");
+    await expect(processEvent(input(1, "Какие условия предлагаете?"))).rejects.toThrow("CONVERSATION_RESPONSE_UNAVAILABLE");
+    const event = await persistence.incomingEvents.findByIdentity(input(1, "").source, input(1, "").externalEventId);
+    expect(event).toMatchObject({ status: "FAILED", processingRetryable: true });
   });
 
   it("moves a strong investor directly to PRIORITY and prepares a manager summary", async () => {
@@ -1579,8 +1647,8 @@ describe("multi-turn qualification conversation", () => {
     const statement = "Готов работать с управляющей компанией";
     const { processEvent } = harness([
       reply({
-        facts: { managementReadiness: null },
-        signals: { objections: [statement] },
+        facts: { managementReadiness: "READY" },
+        signals: { objections: [] },
       }),
     ]);
 
@@ -1647,8 +1715,9 @@ describe("multi-turn qualification conversation", () => {
     expect(result.outboundMessage).not.toContain("?");
   });
 
-  it("rejects an explicit no-money lead even when extraction misses the typo-heavy phrase", async () => {
-    const { processEvent } = harness([reply()]);
+  it("rejects a semantically extracted no-money lead independently of the typo-heavy surface", async () => {
+    const { processEvent } = harness([reply({ facts: { availableCapital: 0,
+      availableCapitalConfirmed: true, capitalScope: "TOTAL_LIMIT" } })]);
 
     const result = await processEvent(
       input(1, "Я из Пердищ мне и нет денег, хачу бизнис"),
@@ -1954,9 +2023,11 @@ describe("multi-turn qualification conversation", () => {
         qualificationMoveRationale: "Признал повтор и перешёл к мягкому фактору времени.",
       }),
       JSON.stringify({
-        text: "Отлично, 3–4 часа в день достаточно для участия в запуске. Оставьте номер, чтобы менеджер мог связаться с Вами?",
-        nextInformationNeed: "PHONE_NUMBER",
+        text: "Спасибо, время учёл. При запуске Вы посещаете просмотры и заключаете договор аренды.",
+        nextInformationNeed: null,
         conversationAction: "ACKNOWLEDGE",
+        qualificationMoveDecision: "DEFER",
+        qualificationMoveRationale: "После жалобы не повторяем отложенный запрос контакта.",
         usedKnowledgeEntryIds: ["partner-time"],
       }),
       JSON.stringify({

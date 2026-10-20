@@ -152,7 +152,7 @@ describe("incoming partner event workflow", () => {
     };
   }
 
-  it("retains response API attempts and known tokens through fallback without reprocessing a duplicate", async () => {
+  it("retains failed response usage, retries the inbound, then suppresses a processed duplicate", async () => {
     const extracted = extractionResult({ city: "Москва" });
     extracted.extraction.intent = "QUESTION";
     Object.assign(extracted.extraction.signals, { questions: ["С чего начать?"], requiresSubstantiveAnswer: true,
@@ -164,16 +164,22 @@ describe("incoming partner event workflow", () => {
       { model: "test-response", inputTokens: 30, outputTokens: 3, text: JSON.stringify({ answerIsSupported: false,
         answersCurrentRequest: true, optionalQuestionAppropriate: true, feedback: "Исправьте неподтверждённое действие." }) },
       new Error("safe-provider-failure"),
+      JSON.stringify({ answerText: "Команда поможет подобрать объект.", qualificationQuestion: "",
+        interpretedQuestionKind: "RECOMMENDATION", usedKnowledgeEntryIds: ["launch-process"] }),
+      JSON.stringify({ answerIsSupported: true, answersCurrentRequest: true, optionalQuestionAppropriate: true, feedback: "" }),
     ]);
     const processEvent = createIncomingEventProcessor({ persistence, extractMessage: async () => extracted,
       generateNaturalResponse: createNaturalResponseGenerator({ llmProvider: llm }) });
     const event = input("cost-fallback-event", "С чего начать?");
+    await expect(processEvent(event)).rejects.toMatchObject({ message: "CONVERSATION_RESPONSE_UNAVAILABLE",
+      llmUsage: { calls: 3, inputTokens: 50, outputTokens: 5, complete: false } });
+    expect(await persistence.incomingEvents.findByIdentity(event.source, event.externalEventId))
+      .toMatchObject({ status: "FAILED", processingRetryable: true });
     const result = await processEvent(event);
-    expect(result.metrics).toMatchObject({ responseLlmCalls: 3, totalInputTokens: 60, totalOutputTokens: 15,
-      usageComplete: false, responseGenerationSource: "FALLBACK_DRAFT" });
+    expect(result.metrics.responseGenerationSource).toBe("LLM");
     const duplicate = await processEvent(event);
     expect(duplicate.duplicate).toBe(true);
-    expect(llm.callCount).toBe(3);
+    expect(llm.callCount).toBe(5);
   });
 
   it("persists semantic contact instructions before the first handoff and includes them in the card exactly once", async () => {
