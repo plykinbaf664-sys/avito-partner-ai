@@ -30,21 +30,40 @@ const review = (overrides = {}) => JSON.stringify({ answerIsSupported: true,
   currentTurnKind: "CONTRIBUTION", ...overrides });
 
 describe("semantic recovery of customer contributions", () => {
-  it("provides independent geographic policy to semantic review, even when the plan omits it", async () => {
+  it("offers a manager call to discuss an unconfirmed city without asking the customer to clarify availability", async () => {
     const llm = new FakeLLMProvider([
-      JSON.stringify({ answerText: "Возможность запуска в этом городе нужно уточнить.",
+      JSON.stringify({ answerText: "Возможность запуска в Твери можно будет обсудить на созвоне с менеджером — он подтвердит, сможем ли мы работать в этом городе.",
         qualificationQuestion: "Какую цель Вы ставите перед запуском?", nextInformationNeed: "GOAL",
         interpretedQuestionKind: "NONE", usedKnowledgeEntryIds: ["supported-cities"] }), review(),
     ]);
-    await createNaturalResponseGenerator({ llmProvider: llm })({
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
       lead: { ...createInitialLead("geography", "TEST", "synthetic", new Date()), city: "Тверь" },
-      plan: { ...plan, currentTurnRequiresAnswer: false, groundedAnswerRequired: false },
+      plan: { ...plan, currentTurnRequiresAnswer: false, groundedAnswerRequired: false,
+        serviceabilityStatus: "NEEDS_REVIEW" },
       recentMessages: [{ direction: "OUTBOUND", actor: "MANAGER", content: "Какой город рассматриваете?" },
         { direction: "INBOUND", actor: "USER", content: "Тверь" }],
     });
+    expect(result.text).toContain("на созвоне");
+    expect(result.text).not.toContain("нужно уточнить");
+    expect(llm.requests[0].systemPrompt).toContain("Do not tell the customer to clarify or check our geography themselves");
     expect(JSON.parse(llm.requests[1].userMessage)).toMatchObject({
       serviceabilityStatus: "NEEDS_REVIEW", currentFacts: { serviceability: "NEEDS_REVIEW" },
     });
+  });
+
+  it("allows the city-specific call offer through the legacy manager-referral guard", async () => {
+    const llm = new FakeLLMProvider([
+      JSON.stringify({ text: "Возможность запуска в Твери можно будет обсудить на созвоне с менеджером." }),
+    ]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({
+      lead: { ...createInitialLead("geography-legacy", "TEST", "synthetic", new Date()), city: "Тверь" },
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false,
+        knowledgeEntryIds: [], unresolvedQuestions: [], useNaturalAdaptation: true,
+        serviceabilityStatus: "NEEDS_REVIEW" },
+      recentMessages: [{ direction: "INBOUND", actor: "USER", content: "Тверь" }],
+    });
+    expect(result.text).toContain("на созвоне");
+    expect(result.text).toContain("Твери");
   });
 
   it("lets reviewed conversation understanding override a mistaken mandatory-answer flag", async () => {
