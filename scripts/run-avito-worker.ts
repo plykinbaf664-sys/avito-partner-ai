@@ -33,10 +33,14 @@ async function main() {
       try {
         const incoming = await runtime.processPendingIncomingEvents(25, recoveryStartedAt);
         await runtime.deliverPendingManagerNotifications();
-        const followUps = await runtime.processDueFollowUps(new Date());
+        const followUps = await runtime.processDueFollowUps(new Date(), recoveryStartedAt);
+        const tickFailed = incoming.failed > 0 || followUps.failed.length > 0;
+        await runtime.observeWorker(tickFailed ? "DEGRADED" : "OK",
+          tickFailed ? "AVITO_WORKER_TICK_PARTIAL" : null, new Date());
         console.log(`AVITO_WORKER=PASS recovered=${incoming.processed} inbound_failed=${incoming.failed} inbound_skipped=${incoming.skipped} followups_sent=${followUps.sent.length} followups_failed=${followUps.failed.length}`);
       } catch (error) {
         // Never print provider response bodies or conversation content.
+        await runtime.observeWorker("DEGRADED", "AVITO_WORKER_TICK_FAILED", new Date()).catch(() => undefined);
         console.error(JSON.stringify({ level: "error", event: "avito.worker.tick_failed",
           errorCode: externalErrorCode(error) }));
       }

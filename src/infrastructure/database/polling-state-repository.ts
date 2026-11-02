@@ -7,6 +7,12 @@ import * as schema from "./schema";
 export class DrizzlePollingStateRepository implements PollingStateRepository {
   constructor(private readonly database: LibSQLDatabase<typeof schema>) {}
 
+  async find(key: string) {
+    const [state] = await this.database.select().from(schema.pollingStates)
+      .where(eq(schema.pollingStates.key, key));
+    return state ?? null;
+  }
+
   async initialize(key: string, startedAt: Date) {
     await this.database.insert(schema.pollingStates).values({ key, startedAt })
       .onConflictDoNothing();

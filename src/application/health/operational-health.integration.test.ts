@@ -23,6 +23,33 @@ describe("operational safety with real SQLite", () => {
     await persistence.operations.observe("AVITO_MESSENGER", "BLOCKED", "AVITO_UNAUTHORIZED", at);
   }
 
+  it("uses the webhook worker heartbeat and activation boundary instead of stale poll/backlog health", async () => {
+    const activation = new Date(at.getTime() - 60_000);
+    await persistence.pollingStates.initialize("avito-webhook-recovery-v1", activation);
+    await persistence.operations.observe("AVITO_POLLING", "OK", null, new Date(at.getTime() - 10 * 60_000));
+    await persistence.operations.observe("AVITO_MESSENGER", "OK", null, new Date(at.getTime() - 10 * 60_000));
+    await persistence.operations.observe("AVITO_WORKER", "OK", null, at);
+    const accept = createIncomingEventAcceptor({ persistence });
+    await accept({ ...input, externalEventId: "historical-before-worker", receivedAt: new Date(activation.getTime() - 1) });
+    await accept({ ...input, externalEventId: "new-after-worker", receivedAt: new Date(activation.getTime() + 1) });
+
+    const result = await readOperationalStatus(persistence, new Date(at.getTime() + 60_000));
+
+    expect(result.backlog.pendingInbound).toBe(1);
+    expect(result.issues).not.toContain("AVITO_POLLING_STALE");
+    expect(result.issues).not.toContain("AVITO_MESSENGER_STALE");
+    expect(result.issues).not.toContain("INBOUND_BACKLOG_STALE");
+  });
+
+  it("reports a webhook worker that stops sending successful heartbeats", async () => {
+    await persistence.pollingStates.initialize("avito-webhook-recovery-v1", at);
+    await persistence.operations.observe("AVITO_WORKER", "OK", null, at);
+
+    const result = await readOperationalStatus(persistence, new Date(at.getTime() + 6 * 60_000));
+
+    expect(result.issues).toContain("AVITO_WORKER_STALE");
+  });
+
   it("keeps brief network failures and their recovery silent but reports a sustained outage", async () => {
     await authorizeTwoManagers();
     await persistence.operations.observe("AVITO_MESSENGER", "OK", null, at);

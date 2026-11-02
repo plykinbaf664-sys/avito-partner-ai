@@ -175,13 +175,14 @@ class DrizzleConversationRepository implements ConversationRepository {
     await this.database.insert(schema.conversations).values(conversation);
   }
 
-  async listDueFollowUps(now: Date, limit: number): Promise<Conversation[]> {
+  async listDueFollowUps(now: Date, limit: number, followUpAnchorAfter?: Date): Promise<Conversation[]> {
     return this.database
       .select()
       .from(schema.conversations)
       .where(
         and(
           lte(schema.conversations.followUpEligibleAt, now),
+          followUpAnchorAfter ? gte(schema.conversations.followUpAnchorAt, followUpAnchorAfter) : undefined,
           eq(schema.conversations.awaitingUserReply, true),
           eq(schema.conversations.qualificationCompleted, false),
           lte(schema.conversations.followUpCount, 2),

@@ -69,17 +69,19 @@ export async function createRuntimeAvitoPolling(options: { chatId?: string } = {
         result.status === "PASS" ? "OK" : "DEGRADED", result.status === "PASS" ? null : "AVITO_POLL_FAILED", new Date());
       return result;
     },
-    processDueFollowUps: async (now: Date) => {
+    processDueFollowUps: async (now: Date, followUpAnchorAfter?: Date) => {
       if ((await persistence.operations.list()).some(row => row.component === "AVITO_MESSENGER" && row.state === "BLOCKED")) {
         return { scanned: 0, created: [], sent: [], failed: [], skipped: 0 };
       }
-      return followUps(now);
+      return followUps(now, followUpAnchorAfter);
     },
     activateWebhookRecovery: async (now = new Date()) => {
       const state = await persistence.pollingStates.initialize("avito-webhook-recovery-v1", now);
       return state.startedAt;
     },
     processPendingIncomingEvents,
+    observeWorker: async (state: "OK" | "DEGRADED", code: string | null, now: Date) =>
+      persistence.operations!.observe("AVITO_WORKER", state, code, now),
     deliverPendingManagerNotifications: managerNotificationProvider
       ? createPendingManagerNotificationDelivery({
           persistence,

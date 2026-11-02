@@ -100,8 +100,9 @@ export function createDueFollowUpsProcessor({
 }: ProcessDueFollowUpsDependencies) {
   return async function processDueFollowUps(
     now: Date,
+    followUpAnchorAfter?: Date,
   ): Promise<ProcessDueFollowUpsResult> {
-    const candidates = await persistence.conversations.listDueFollowUps(now, limit);
+    const candidates = await persistence.conversations.listDueFollowUps(now, limit, followUpAnchorAfter);
     const created: Message[] = [];
     const sent: Message[] = [];
     const failed: Message[] = [];

@@ -7,6 +7,7 @@ export interface PollingState {
 }
 
 export interface PollingStateRepository {
+  find(key: string): Promise<PollingState | null>;
   initialize(key: string, startedAt: Date): Promise<PollingState>;
   acquire(key: string, owner: string, now: Date, until: Date): Promise<boolean>;
   renew(key: string, owner: string, now: Date, until: Date): Promise<boolean>;

@@ -7,7 +7,7 @@ import type { ProviderDeliveryResult } from "../ports/channels";
 export const HEALTHY_ALERT_FINGERPRINT = createHash("sha256").update("[]").digest("hex");
 export const OUTAGE_ALERT_FINGERPRINT = createHash("sha256").update("production-incident-v1").digest("hex");
 
-export type HealthComponent = "AVITO_POLLING" | "AVITO_MESSENGER" | "AVITO_OUTBOUND" | "APPLICATION_HTTP";
+export type HealthComponent = "AVITO_POLLING" | "AVITO_WORKER" | "AVITO_MESSENGER" | "AVITO_OUTBOUND" | "APPLICATION_HTTP";
 export interface HealthObservation {
   component: HealthComponent;
   state: "OK" | "DEGRADED" | "BLOCKED";
@@ -23,7 +23,7 @@ export interface OperationalHealthRepository {
   finishAlert(component: HealthComponent, owner: string, fingerprint: string, sent: boolean, at: Date): Promise<void>;
   claimRecipientAlert(component: HealthComponent, recipientId: string, fingerprint: string, at: Date, options?: { recovery?: boolean }): Promise<string | null>;
   finishRecipientAlert(component: HealthComponent, recipientId: string, owner: string, fingerprint: string, delivery: ProviderDeliveryResult, at: Date): Promise<void>;
-  backlog(at: Date): Promise<{ pendingInbound: number; oldestPendingAt: number | null; failedInbound: number;
+  backlog(at: Date, inboundReceivedAfter?: Date): Promise<{ pendingInbound: number; oldestPendingAt: number | null; failedInbound: number;
     failedOutbound: number; unresolvedOutbound: number; unverifiedInbound: number }>;
 }
 export interface OperationalStatus {
@@ -37,17 +37,30 @@ export const POLLING_STALE_MS = 5 * 60_000;
 export const ACCESS_BLOCK_CODES = new Set(["AVITO_MESSENGER_ACCESS_PAYMENT_REQUIRED", "AVITO_INVALID_CREDENTIALS",
   "AVITO_UNAUTHORIZED"]);
 
-export async function readOperationalStatus(persistence: Persistence, at: Date): Promise<OperationalStatus> {
+export async function readOperationalStatus(persistence: Persistence & {
+  pollingStates?: import("@/application/ports/polling-state").PollingStateRepository;
+}, at: Date): Promise<OperationalStatus> {
   if (!persistence.operations) throw new Error("OPERATIONAL_HEALTH_UNAVAILABLE");
   const observations = await persistence.operations.list();
-  const backlog = await persistence.operations.backlog(at);
+  const webhookWorker = observations.find(row => row.component === "AVITO_WORKER");
+  const workerMode = webhookWorker !== undefined;
+  const workerActivation = workerMode
+    ? await persistence.pollingStates?.find("avito-webhook-recovery-v1") ?? null
+    : null;
+  const backlog = await persistence.operations.backlog(at, workerActivation?.startedAt);
   const issues: string[] = [];
   const polling = observations.find(row => row.component === "AVITO_POLLING");
-  if (!polling || at.getTime() - polling.checkedAt.getTime() > POLLING_STALE_MS) issues.push("AVITO_POLLING_STALE");
+  if (workerMode) {
+    if (!workerActivation) issues.push("AVITO_WORKER_ACTIVATION_UNVERIFIED");
+    if (!webhookWorker || at.getTime() - webhookWorker.checkedAt.getTime() > POLLING_STALE_MS) issues.push("AVITO_WORKER_STALE");
+  } else if (!polling || at.getTime() - polling.checkedAt.getTime() > POLLING_STALE_MS) issues.push("AVITO_POLLING_STALE");
   const messenger = observations.find(row => row.component === "AVITO_MESSENGER");
-  if (!messenger) issues.push("AVITO_MESSENGER_UNVERIFIED");
-  else if (at.getTime() - messenger.checkedAt.getTime() > POLLING_STALE_MS) issues.push("AVITO_MESSENGER_STALE");
+  if (!workerMode) {
+    if (!messenger) issues.push("AVITO_MESSENGER_UNVERIFIED");
+    else if (at.getTime() - messenger.checkedAt.getTime() > POLLING_STALE_MS) issues.push("AVITO_MESSENGER_STALE");
+  }
   for (const row of observations) {
+    if (workerMode && row.component === "AVITO_POLLING") continue;
     if (row.state === "BLOCKED" || row.state === "DEGRADED" && row.consecutiveFailures >= 3) {
       issues.push(`${row.component}:${row.errorCode ?? "UNAVAILABLE"}`);
     }

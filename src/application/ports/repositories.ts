@@ -43,7 +43,7 @@ export interface LeadRepository {
 export interface ConversationRepository {
   findById(id: string): Promise<Conversation | null>;
   findOpenByLeadId(leadId: string): Promise<Conversation | null>;
-  listDueFollowUps(now: Date, limit: number): Promise<Conversation[]>;
+  listDueFollowUps(now: Date, limit: number, followUpAnchorAfter?: Date): Promise<Conversation[]>;
   insert(conversation: Conversation): Promise<void>;
   update(conversation: Conversation): Promise<void>;
   updateState(

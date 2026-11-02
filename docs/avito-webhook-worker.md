@@ -14,8 +14,13 @@ same `DATABASE_URL`:
 npm run worker:avito -- --interval-ms 60000
 ```
 
-Keep it under the host's process supervisor (for example, systemd with
-`Restart=always`). Run one supervised instance. If an accidental duplicate is
+The systemd unit template is `ops/avito-follow-up-worker.service`. Install it
+as `/etc/systemd/system/avito-follow-up-worker.service`, then enable and start
+it. Install the matching drop-ins from
+`ops/avito-follow-up-worker.service.d/` under
+`/etc/systemd/system/avito-follow-up-worker.service.d/`. It is separate from
+`avito-polling.service`; do not enable account-wide
+polling as part of this webhook worker rollout. Run one supervised instance. If an accidental duplicate is
 started, event claims and follow-up idempotency prevent duplicate processing or
 delivery. The process performs one sequential tick at a time; pending inbound
 recovery runs before follow-ups so a new customer reply cancels a stale reminder.
@@ -38,6 +43,9 @@ Operational checks:
   recovery boundary.
 - `AVITO_WORKER=PASS` reports recovered/failed inbound counts and follow-up
   delivery counts for each tick.
+- A durable `AVITO_WORKER` health heartbeat keeps readiness aligned with
+  webhook mode. Readiness filters pre-activation inbound backlog while still
+  reporting new pending events and failed deliveries.
 - `avito.worker.tick_failed` reports a sanitized error code, without message
   content or provider response bodies.
 - The webhook and worker must share storage. Separate SQLite files break

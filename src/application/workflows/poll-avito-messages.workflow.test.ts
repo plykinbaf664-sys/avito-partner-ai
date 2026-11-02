@@ -165,7 +165,7 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     const repository = persistence.pollingStates;
     const poll = createAvitoMessagePoller({ client: h.client, persistence, processIncomingEvent: h.processIncomingEvent,
       clock: () => current, coalescingDelayMs: 0, logger: h.logger,
-      stateRepository: { initialize: (...args) => repository.initialize(...args), acquire: (...args) => repository.acquire(...args),
+      stateRepository: { find: (...args) => repository.find(...args), initialize: (...args) => repository.initialize(...args), acquire: (...args) => repository.acquire(...args),
         renew: (...args) => repository.renew(...args), complete: (...args) => repository.complete(...args),
         release: vi.fn().mockRejectedValueOnce(new Error("private query and parameters", {
           cause: Object.assign(new Error("private details"), { code: "SQLITE_BUSY" }),
@@ -184,7 +184,7 @@ describe("Avito polling through SQLite, Conversation Engine and Avito outbound",
     const repository = persistence.pollingStates;
     const poll = createAvitoMessagePoller({ client: h.client, persistence, processIncomingEvent: h.processIncomingEvent,
       clock: () => current, coalescingDelayMs: 0, logger: h.logger,
-      stateRepository: { initialize: (...args) => repository.initialize(...args), acquire: (...args) => repository.acquire(...args),
+      stateRepository: { find: (...args) => repository.find(...args), initialize: (...args) => repository.initialize(...args), acquire: (...args) => repository.acquire(...args),
         renew: (...args) => repository.renew(...args), complete: (...args) => repository.complete(...args),
         release: vi.fn().mockRejectedValueOnce(Object.assign(new Error("private lock details"), { code: "SQLITE_BUSY" }))
           .mockImplementation((...args: Parameters<typeof repository.release>) => repository.release(...args)) },

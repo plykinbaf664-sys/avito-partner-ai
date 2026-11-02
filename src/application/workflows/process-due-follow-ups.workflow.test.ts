@@ -568,6 +568,19 @@ describe("due qualification follow-ups workflow", () => {
       .toBe(true);
     expect(outboundProvider.requests[0]?.text).toContain("Returning");
   });
+
+  it("does not revive a pre-activation silence episode when a worker starts", async () => {
+    const { processEvent, processDue, outboundProvider } = harness([extractionReply()]);
+    await processEvent(input("pre-worker-activation", "Р—РґСЂР°РІСЃС‚РІСѓР№С‚Рµ"));
+    const boundary = new Date("2026-09-03T10:00:00.000Z");
+    currentTime = new Date("2026-09-04T10:00:00.000Z");
+
+    const result = await processDue(currentTime, boundary);
+
+    expect(result).toMatchObject({ scanned: 0, sent: [], created: [], failed: [] });
+    expect(outboundProvider.requests).toHaveLength(0);
+  });
+
   it("rechecks state after selection and skips when an inbound arrived", async () => {
     const { processEvent } = harness([extractionReply()]);
     const first = await processEvent(input("event-race", "Здравствуйте"));

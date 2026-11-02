@@ -77,13 +77,14 @@ export class DrizzleOperationalHealthRepository implements OperationalHealthRepo
         CASE WHEN ${!sent && !delivery.retryable} THEN 21600000 ELSE min(1800000,60000*(1 << min(failures,5))) END END
       WHERE component=${component} AND recipient_id=${recipientId} AND lease_owner=${owner}`);
   }
-  async backlog(at: Date) {
+  async backlog(at: Date, inboundReceivedAfter?: Date) {
+    const inboundBoundary = inboundReceivedAfter?.getTime() ?? 0;
     const [row] = await this.database.all<{pendingInbound:number;oldestPendingAt:number|null;failedInbound:number;failedOutbound:number;unresolvedOutbound:number;unverifiedInbound:number}>(sql`
       SELECT
-      (SELECT count(*) FROM incoming_events WHERE upper(source)='AVITO' AND status IN ('RECEIVED','PROCESSING')) AS pendingInbound,
-      (SELECT count(*) FROM incoming_events WHERE upper(source)='AVITO' AND status='RECEIVED' AND error='AVITO_PREVIEW_UNVERIFIED') AS unverifiedInbound,
-      (SELECT min(received_at) FROM incoming_events WHERE upper(source)='AVITO' AND status IN ('RECEIVED','PROCESSING')) AS oldestPendingAt,
-      (SELECT count(*) FROM incoming_events WHERE upper(source)='AVITO' AND status='FAILED' AND received_at>=${at.getTime()-86_400_000}) AS failedInbound,
+      (SELECT count(*) FROM incoming_events WHERE upper(source)='AVITO' AND status IN ('RECEIVED','PROCESSING') AND received_at>=${inboundBoundary}) AS pendingInbound,
+      (SELECT count(*) FROM incoming_events WHERE upper(source)='AVITO' AND status='RECEIVED' AND error='AVITO_PREVIEW_UNVERIFIED' AND received_at>=${inboundBoundary}) AS unverifiedInbound,
+      (SELECT min(received_at) FROM incoming_events WHERE upper(source)='AVITO' AND status IN ('RECEIVED','PROCESSING') AND received_at>=${inboundBoundary}) AS oldestPendingAt,
+      (SELECT count(*) FROM incoming_events WHERE upper(source)='AVITO' AND status='FAILED' AND received_at>=max(${at.getTime()-86_400_000},${inboundBoundary})) AS failedInbound,
       (SELECT count(*) FROM messages m JOIN leads l ON l.id=m.lead_id WHERE upper(l.source)='AVITO'
         AND m.direction='OUTBOUND' AND m.actor='AI' AND m.delivery_status='FAILED' AND m.created_at>=${at.getTime()-86_400_000}) AS failedOutbound,
       (SELECT count(*) FROM messages m JOIN leads l ON l.id=m.lead_id WHERE upper(l.source)='AVITO'
