@@ -5,7 +5,7 @@ After=network.target avito-partner-ai.service
 [Service]
 Type=simple
 WorkingDirectory=/opt/avito-partner-ai
-ExecStart=/usr/bin/npm run worker:avito -- --interval-ms 60000
+ExecStart=/usr/bin/node --env-file-if-exists=.env.local --import tsx scripts/run-avito-worker.ts --interval-ms 60000
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production

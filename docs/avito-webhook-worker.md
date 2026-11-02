@@ -11,7 +11,7 @@ Run it beside the web app with the same production environment and the exact
 same `DATABASE_URL`:
 
 ```sh
-npm run worker:avito -- --interval-ms 60000
+node --env-file-if-exists=.env.local --import tsx scripts/run-avito-worker.ts --interval-ms 60000
 ```
 
 The systemd unit template is `ops/avito-follow-up-worker.service`. Install it
