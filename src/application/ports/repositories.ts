@@ -125,6 +125,7 @@ export interface IncomingEventRepository {
     maxAttempts: number,
     limit: number,
     source?: string,
+    receivedAfter?: Date,
   ): Promise<IncomingEvent[]>;
   findByIdentity(
     source: string,

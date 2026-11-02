@@ -5,6 +5,7 @@ import {
   count,
   desc,
   eq,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -698,6 +699,7 @@ class DrizzleIncomingEventRepository implements IncomingEventRepository {
     maxAttempts: number,
     limit: number,
     source?: string,
+    receivedAfter?: Date,
   ): Promise<IncomingEvent[]> {
     return this.database
       .select()
@@ -705,6 +707,7 @@ class DrizzleIncomingEventRepository implements IncomingEventRepository {
       .where(
         and(
           lte(schema.incomingEvents.receivedAt, now),
+          receivedAfter ? gte(schema.incomingEvents.receivedAt, receivedAfter) : undefined,
           source ? eq(schema.incomingEvents.source, source) : undefined,
           lt(
             schema.incomingEvents.processingAttempts,

@@ -95,4 +95,27 @@ describe("durable webhook intake recovery", () => {
     const conversation = await persistence.conversations.findOpenByLeadId(lead!.id);
     expect(await persistence.messages.listByConversationId(conversation!.id)).toHaveLength(2);
   });
+
+  it("recovers only Avito events at or after the persisted activation boundary", async () => {
+    const activation = new Date("2026-09-11T12:00:00.000Z");
+    const accept = createIncomingEventAcceptor({ persistence });
+    await accept({ source: "AVITO", externalEventId: "historical", externalLeadId: "chat-old",
+      messageId: "historical", text: "old", receivedAt: new Date(activation.getTime() - 1) });
+    await accept({ source: "AVITO", externalEventId: "new-inbound", externalLeadId: "chat-new",
+      messageId: "new-inbound", text: "new", receivedAt: activation });
+    await accept({ source: "TELEGRAM", externalEventId: "other-channel", externalLeadId: "chat-other",
+      messageId: "other-channel", text: "other", receivedAt: new Date(activation.getTime() + 1) });
+
+    const processed: string[] = [];
+    const recover = createPendingIncomingEventProcessor({
+      persistence,
+      processIncomingEvent: async input => { processed.push(input.externalEventId); },
+      now: () => new Date(activation.getTime() + 60_000),
+    });
+
+    await expect(recover(25, activation)).resolves.toEqual({ processed: 1, failed: 0, skipped: 0 });
+    expect(processed).toEqual(["new-inbound"]);
+    await expect(persistence.incomingEvents.findByIdentity("AVITO", "historical"))
+      .resolves.toMatchObject({ status: "RECEIVED" });
+  });
 });

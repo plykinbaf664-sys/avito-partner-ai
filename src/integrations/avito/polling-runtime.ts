@@ -13,6 +13,7 @@ import { AvitoApiClient } from "./avito-api-client";
 import { AvitoOutboundMessageProvider } from "./avito-outbound-message-provider";
 import { createAvitoRuntimeSafety } from "@/application/health/avito-runtime-safety";
 import { createChatOpeningWorkflow } from "@/application/workflows/process-chat-openings";
+import { createPendingIncomingEventProcessor } from "@/application/workflows/process-pending-incoming-events";
 
 export async function createRuntimeAvitoPolling(options: { chatId?: string } = {}) {
   const avito = readAvitoChannelEnvironment(process.env);
@@ -49,6 +50,10 @@ export async function createRuntimeAvitoPolling(options: { chatId?: string } = {
     logger,
   });
   const safety = createAvitoRuntimeSafety(persistence, processIncomingEvent);
+  const processPendingIncomingEvents = createPendingIncomingEventProcessor({
+    persistence,
+    processIncomingEvent: safety.processIncomingEvent,
+  });
   const chatOpenings = createChatOpeningWorkflow({ persistence, stateRepository: persistence.pollingStates,
     readHistory: chatId => client.listMessages(chatId, { limit: 100, offset: 0 }),
     generateNaturalResponse: naturalResponseGenerator, outboundProvider, logger });
@@ -70,6 +75,11 @@ export async function createRuntimeAvitoPolling(options: { chatId?: string } = {
       }
       return followUps(now);
     },
+    activateWebhookRecovery: async (now = new Date()) => {
+      const state = await persistence.pollingStates.initialize("avito-webhook-recovery-v1", now);
+      return state.startedAt;
+    },
+    processPendingIncomingEvents,
     deliverPendingManagerNotifications: managerNotificationProvider
       ? createPendingManagerNotificationDelivery({
           persistence,

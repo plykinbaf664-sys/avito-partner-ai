@@ -26,7 +26,7 @@ export function createPendingIncomingEventProcessor({
   now?: () => Date;
   staleAfterMs?: number;
 }) {
-  return async function processPendingIncomingEvents(limit = 25): Promise<{
+  return async function processPendingIncomingEvents(limit = 25, receivedAfter?: Date): Promise<{
     processed: number;
     failed: number;
     skipped: number;
@@ -37,6 +37,8 @@ export function createPendingIncomingEventProcessor({
       new Date(now.getTime() - staleAfterMs),
       MAX_INCOMING_PROCESSING_ATTEMPTS,
       limit,
+      "AVITO",
+      receivedAfter,
     );
     let processed = 0;
     let failed = 0;
