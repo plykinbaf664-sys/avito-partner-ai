@@ -1,0 +1,33 @@
+{
+  "id": "63f1f5da",
+  "sourceMessageId": "63f1f5da-605a-451c-9748-bc31224820a5",
+  "question": "А кто должен проверить вы или я",
+  "historyMessages": 4,
+  "seedFacts": {
+    "city": "Набережные Челны",
+    "primaryGoal": "ADDITIONAL_INCOME"
+  },
+  "processing": {
+    "outboundMessage": "Это наша ответственность — возможность работы в новом городе подтверждает менеджер компании, вам ничего проверять не нужно. Рассматриваете запуск в обозримом времени или пока изучаете формат?",
+    "replyAction": "SEND_REPLY",
+    "eventStatus": "PROCESSED",
+    "responseFailureCode": null,
+    "responseGenerationSource": "LLM"
+  },
+  "qualification": {
+    "status": "BORDERLINE",
+    "reason": "REGION_NEEDS_REVIEW",
+    "shouldHandoffToManager": false,
+    "nextAction": "CONTINUE_QUALIFICATION",
+    "knownFacts": [
+      "CITY",
+      "GOAL"
+    ],
+    "missingCriticalFacts": [
+      "AVAILABLE_CAPITAL",
+      "LAUNCH_TIMING"
+    ]
+  },
+  "fakeDeliveries": 1,
+  "fakeHandoffs": 0
+}

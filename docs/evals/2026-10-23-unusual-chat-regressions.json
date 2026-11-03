@@ -1,0 +1,30 @@
+[
+  {
+    "id": "why-not-yourselves",
+    "criteria": "Explain the company benefit using approved facts; do not invent profit shares, commissions or exclusivity. Address why the partner is needed, rather than ignore the objection. Do not assert unapproved facts about the company inability to finance objects or the impossibility of running this business alone. Do not repeat the prior team budget question after answering this objection.",
+    "steps": [
+      {
+        "actor": "MANAGER",
+        "text": "Отлично, дополнительный доход — как раз типичный сценарий: стартуете с одного объекта, разбираетесь в модели и уже по ходу наращиваете масштаб. Ориентир ~20 000 ₽/мес с объекта хорошо вписывается именно как добавка к текущему заработку, без необходимости полностью менять занятость. Подскажите, какой бюджет вы готовы заложить на запуск первого объекта?"
+      },
+      {
+        "actor": "USER",
+        "text": "Ага, а какой вам резон вообще так делать? Типа вы сами же можете сдавать объекты и получать весь доход"
+      }
+    ]
+  },
+  {
+    "id": "leaving-completely-referent",
+    "criteria": "Interpret the short clarification relative to the previous team question: leaving completely refers to leaving the current job and making this the main business, versus extra income. Explain that meaning naturally; do not confuse it with the company ceasing support or ignore the clarification. The goal question has already been asked by the team. After explaining the clarification, do not repeat that same qualification question, including paraphrases or asking it twice in one answer.",
+    "steps": [
+      {
+        "actor": "MANAGER",
+        "text": "Понимаю вопрос, но тут важно не путать: «нет гарантии» ≠ «дохода нет». Доход есть — ориентир ~20 000 ₽ с объекта в месяц — но он зависит от загрузки, сезона и конкретного объекта, то есть это не фиксированная сумма как зарплата. В любом бизнесе выручка колеблется. Разница в том, что модель проверена на собственных объектах компании, по ним есть реальные цифры. Рассматриваете как дополнительный доход или уходите полностью?"
+      },
+      {
+        "actor": "USER",
+        "text": "в смысле уходите полностью?"
+      }
+    ]
+  }
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "id": "why-not-yourselves",
+    "database": "data/test-chat-lab.db",
+    "rowid": 867,
+    "context": "Previous team response replayed as MANAGER; original was AI."
+  },
+  {
+    "id": "no-guarantee-is-not-no-income",
+    "database": "data/test-chat-lab.db",
+    "rowid": 912,
+    "context": "Previous team response replayed as MANAGER; original was AI."
+  },
+  {
+    "id": "are-you-a-bot",
+    "database": "data/test-chat-lab.db",
+    "rowid": 928,
+    "context": "Previous team response replayed as MANAGER; original was AI."
+  },
+  {
+    "id": "remote-launch",
+    "database": "data/test-chat-lab.db",
+    "rowid": 940,
+    "context": "Previous team response replayed as MANAGER; original was AI."
+  },
+  {
+    "id": "show-screenshots",
+    "database": "data/test-chat-lab.db",
+    "rowid": 863,
+    "context": "Previous team response replayed as MANAGER; original was AI."
+  },
+  {
+    "id": "leaving-completely-referent",
+    "database": "data/test-chat-lab.db",
+    "rowid": 926,
+    "context": "Previous team response replayed as MANAGER; original was AI."
+  }
+]

@@ -1,0 +1,36 @@
+{
+  "id": "56ba420a",
+  "sourceMessageId": "56ba420a-13f2-4606-b611-7dfe755431de",
+  "question": "Блин, вот этот момент странный, в случае, если вы берете всю операционную деятельность моей компании, почему вы просто сами не будете масштабировать количество своих объектов?",
+  "historyMessages": 20,
+  "seedFacts": {
+    "city": "Уфа",
+    "budget": 200000,
+    "budgetConfirmed": true,
+    "primaryGoal": "MAIN_BUSINESS"
+  },
+  "processing": {
+    "outboundMessage": "Вопрос по логике справедливый. Компания действительно уже ведёт собственные объекты — на их результатах и опираются ориентиры по доходу. Но масштабирование только своим капиталом ограничивает темпы: каждый новый объект требует аренды, залога и подготовки, и всё это ложится на одну организацию. Формат партнёрства позволяет расти быстрее: партнёр как владелец бизнеса вкладывает капитал в свой объект, а компания зарабатывает на услуге запуска и ведёт операционную работу. Плюс вы принимаете решения и несёте риски как предприниматель — это не наём, а именно ваш бизнес. Если это снимает вопрос по логике, есть ещё что-то, что останавливает от следующего шага?",
+    "replyAction": "SEND_REPLY",
+    "eventStatus": "PROCESSED",
+    "responseFailureCode": null,
+    "responseGenerationSource": "LLM"
+  },
+  "qualification": {
+    "status": "BORDERLINE",
+    "reason": "REGION_NEEDS_REVIEW",
+    "shouldHandoffToManager": false,
+    "nextAction": "CONTINUE_QUALIFICATION",
+    "knownFacts": [
+      "AVAILABLE_CAPITAL",
+      "ADDITIONAL_EXPENSES",
+      "CITY",
+      "GOAL"
+    ],
+    "missingCriticalFacts": [
+      "LAUNCH_TIMING"
+    ]
+  },
+  "fakeDeliveries": 1,
+  "fakeHandoffs": 0
+}

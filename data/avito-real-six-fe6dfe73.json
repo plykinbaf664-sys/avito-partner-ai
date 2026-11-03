@@ -1,0 +1,29 @@
+{
+  "id": "fe6dfe73",
+  "sourceMessageId": "fe6dfe73-d305-4ee0-aecb-676c03894889",
+  "question": "Договор растргнуть можно?!!",
+  "historyMessages": 2,
+  "seedFacts": {},
+  "processing": {
+    "outboundMessage": "Понимаю ваш вопрос — важно знать, как можно выйти из обязательств. Если речь о договоре с компанией на услугу запуска, его условия и порядок расторжения обсуждаются при подписании — это не «капкан», можно будет всё детально посмотреть до принятия решения.\n\nЕсли же вы про аренду с собственником — там условия определяет конкретный собственник и объект, но в типовых договорах субаренды обычно есть разумный срок уведомления.\n\nГлавное: вы не обязаны подписывать что-то вслепую. До запуска мы с вами и с менеджером проходим все документы, и вы принимаете решение, уже понимая каждую строку.",
+    "replyAction": "SEND_REPLY",
+    "eventStatus": "PROCESSED",
+    "responseFailureCode": null,
+    "responseGenerationSource": "LLM"
+  },
+  "qualification": {
+    "status": "BORDERLINE",
+    "reason": "ADDITIONAL_CAPITAL_UNCLEAR",
+    "shouldHandoffToManager": false,
+    "nextAction": "CONTINUE_QUALIFICATION",
+    "knownFacts": [
+      "AVAILABLE_CAPITAL"
+    ],
+    "missingCriticalFacts": [
+      "GOAL",
+      "LAUNCH_TIMING"
+    ]
+  },
+  "fakeDeliveries": 1,
+  "fakeHandoffs": 0
+}

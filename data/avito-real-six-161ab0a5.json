@@ -1,0 +1,28 @@
+{
+  "id": "161ab0a5",
+  "sourceMessageId": "161ab0a5-9163-4a95-9307-0f9e7037a4f0",
+  "question": "Здравствуйте, являюсь администратором доменного имени rental24.ru , хочу предложить  его  вашей компании, при  вашей заинтересованности в приобретении,  пишите в этом чате...",
+  "historyMessages": 0,
+  "seedFacts": {},
+  "processing": {
+    "outboundMessage": "Здравствуйте! Спасибо за предложение, но продажа доменных имён не входит в зону компетенции нашего чата — здесь мы отвечаем только по вопросам партнёрства в посуточной аренде. Если у вас есть вопросы о самом формате — буду рад помочь.",
+    "replyAction": "SEND_REPLY",
+    "eventStatus": "PROCESSED",
+    "responseFailureCode": null,
+    "responseGenerationSource": "LLM"
+  },
+  "qualification": {
+    "status": "NEEDS_MORE_INFO",
+    "reason": "CAPITAL_UNKNOWN",
+    "shouldHandoffToManager": false,
+    "nextAction": "CONTINUE_QUALIFICATION",
+    "knownFacts": [],
+    "missingCriticalFacts": [
+      "AVAILABLE_CAPITAL",
+      "GOAL",
+      "LAUNCH_TIMING"
+    ]
+  },
+  "fakeDeliveries": 1,
+  "fakeHandoffs": 0
+}

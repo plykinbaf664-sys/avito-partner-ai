@@ -1,0 +1,86 @@
+[
+  {
+    "id": "why-not-yourselves",
+    "criteria": "Explain the company benefit using approved facts; do not invent profit shares, commissions or exclusivity. Address why the partner is needed, rather than ignore the objection.",
+    "steps": [
+      {
+        "actor": "MANAGER",
+        "text": "Отлично, дополнительный доход — как раз типичный сценарий: стартуете с одного объекта, разбираетесь в модели и уже по ходу наращиваете масштаб. Ориентир ~20 000 ₽/мес с объекта хорошо вписывается именно как добавка к текущему заработку, без необходимости полностью менять занятость. Подскажите, какой бюджет вы готовы заложить на запуск первого объекта?"
+      },
+      {
+        "actor": "USER",
+        "text": "Ага, а какой вам резон вообще так делать? Типа вы сами же можете сдавать объекты и получать весь доход"
+      }
+    ]
+  },
+  {
+    "id": "no-guarantee-is-not-no-income",
+    "criteria": "Distinguish absence of guaranteed income from absence of income. Explain the approximate 20000 RUB per unit monthly reference without guaranteeing results; accept Moscow as intended launch city.",
+    "steps": [
+      {
+        "actor": "MANAGER",
+        "text": "Гарантированного дохода нет — и я это сразу проговариваю, потому что иначе вы получите нечестную картину. Но есть конкретика: ориентиры (~20 000 ₽ с объекта) основаны на реальных показателях собственных квартир компании в Подмосковье, и скриншоты по выручке можно посмотреть. Всё прозрачно: брони и площадки видны в CRM в реальном времени. По риску потери денег — вы как владелец контролируете свой объект, а не отдаёте кому-то деньги «в слепую».\n\nЧерез месяц — хороший горизонт. Подскажите, где именно рассматриваете запуск — Новгород, или другой город?"
+      },
+      {
+        "actor": "USER",
+        "text": "Как это гарантированного дохода нет, а зачем тогда заниматься этим. Вообще я думал про москву"
+      }
+    ]
+  },
+  {
+    "id": "are-you-a-bot",
+    "criteria": "Answer the identity question honestly without claiming to be human; acknowledge willingness to participate. Do not ignore the question to resume qualification.",
+    "steps": [
+      {
+        "actor": "MANAGER",
+        "text": "Извиняюсь за неясность. «Уходите полностью» — это значит: бросаете текущую работу и занимаетесь только этим бизнесом, или рассматриваете как дополнительный доход параллельно с основным делом? Формат подходит и для того, и для другого — просто от этого зависит, сколько времени сможете уделять на старте. Подскажите, как у вас сейчас с занятостью?"
+      },
+      {
+        "actor": "USER",
+        "text": "Да я готов заниматься полностью, а ты бот?"
+      }
+    ]
+  },
+  {
+    "id": "remote-launch",
+    "criteria": "Distinguish remote operations by the team from personal partner involvement in viewings and lease signing; do not promise fully remote launch or invent unsupported contractual terms.",
+    "steps": [
+      {
+        "actor": "MANAGER",
+        "text": "Через месяц — хороший горизонт: есть время спокойно подобрать объект и подготовиться. В каком городе планируете запуск?"
+      },
+      {
+        "actor": "USER",
+        "text": "Москва, а дистанционно можно?"
+      }
+    ]
+  },
+  {
+    "id": "show-screenshots",
+    "criteria": "Answer the request for screenshots: approved knowledge allows revenue screenshots. Do not fabricate images, links, verified cases or claim delivery without a tool action; a manager can supply actual evidence.",
+    "steps": [
+      {
+        "actor": "MANAGER",
+        "text": "Ориентир по доходу партнёров — около 20 000 ₽ с одного объекта в месяц. Это не гарантия: результат зависит от конкретного объекта, его расположения и загрузки. Компания может показать скриншоты выручки по собственным объектам в Московской области для ориентира. Рассматриваете запуск на несколько объектов или пока один?"
+      },
+      {
+        "actor": "USER",
+        "text": "Хорошо, можно скриншоты?"
+      }
+    ]
+  },
+  {
+    "id": "leaving-completely-referent",
+    "criteria": "Interpret the short clarification relative to the previous team question: leaving completely refers to leaving the current job and making this the main business, versus extra income. Explain that meaning naturally; do not confuse it with the company ceasing support or ignore the clarification.",
+    "steps": [
+      {
+        "actor": "MANAGER",
+        "text": "Понимаю вопрос, но тут важно не путать: «нет гарантии» ≠ «дохода нет». Доход есть — ориентир ~20 000 ₽ с объекта в месяц — но он зависит от загрузки, сезона и конкретного объекта, то есть это не фиксированная сумма как зарплата. В любом бизнесе выручка колеблется. Разница в том, что модель проверена на собственных объектах компании, по ним есть реальные цифры. Рассматриваете как дополнительный доход или уходите полностью?"
+      },
+      {
+        "actor": "USER",
+        "text": "в смысле уходите полностью?"
+      }
+    ]
+  }
+]

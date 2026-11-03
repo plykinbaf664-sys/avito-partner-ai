@@ -1,0 +1,35 @@
+{
+  "id": "a64c8ace",
+  "sourceMessageId": "a64c8ace-65fa-46d8-a1f3-e07e112403c2",
+  "question": "ТАк 275.000 это один объект или 3 как у вас в объявлении!!!",
+  "historyMessages": 8,
+  "seedFacts": {
+    "city": "Санкт-Петербург"
+  },
+  "processing": {
+    "outboundMessage": null,
+    "replyAction": "NO_REPLY",
+    "eventStatus": "FAILED",
+    "responseFailureCode": "RESPONSE_POLICY_UNAPPROVED_UNIT_COUNT",
+    "responseGenerationSource": "FAILED"
+  },
+  "qualification": {
+    "status": "BORDERLINE",
+    "reason": "ADDITIONAL_CAPITAL_UNCLEAR",
+    "shouldHandoffToManager": false,
+    "nextAction": "CONTINUE_QUALIFICATION",
+    "knownFacts": [
+      "CITY"
+    ],
+    "missingCriticalFacts": [
+      "AVAILABLE_CAPITAL",
+      "LAUNCH_TIMING",
+      "GOAL",
+      "ADDITIONAL_EXPENSES",
+      "MANAGEMENT_READINESS",
+      "PHONE_NUMBER"
+    ]
+  },
+  "fakeDeliveries": 0,
+  "fakeHandoffs": 0
+}

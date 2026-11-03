@@ -1,0 +1,36 @@
+{
+  "id": "638e1f57",
+  "sourceMessageId": "638e1f57-8511-4fec-884f-5fa75d898c2b",
+  "question": "А какая модель у тебя под капотом работает?",
+  "historyMessages": 20,
+  "seedFacts": {
+    "city": "Уфа",
+    "budget": 200000,
+    "budgetConfirmed": true
+  },
+  "processing": {
+    "outboundMessage": "Да, сейчас Вы общаетесь с AI-консультантом. Я помогу разобраться с вопросами о запуске, а если Вам удобнее разговор с человеком, передам обращение менеджеру.",
+    "replyAction": "SEND_REPLY",
+    "eventStatus": "PROCESSED",
+    "responseFailureCode": null,
+    "responseGenerationSource": "POLICY_REPLY"
+  },
+  "qualification": {
+    "status": "BORDERLINE",
+    "reason": "REGION_NEEDS_REVIEW",
+    "shouldHandoffToManager": false,
+    "nextAction": "CONTINUE_QUALIFICATION",
+    "knownFacts": [
+      "AVAILABLE_CAPITAL",
+      "ADDITIONAL_EXPENSES",
+      "CITY",
+      "BARRIER"
+    ],
+    "missingCriticalFacts": [
+      "GOAL",
+      "LAUNCH_TIMING"
+    ]
+  },
+  "fakeDeliveries": 1,
+  "fakeHandoffs": 0
+}
