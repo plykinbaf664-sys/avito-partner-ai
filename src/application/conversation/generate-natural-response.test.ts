@@ -761,6 +761,24 @@ describe("natural response generation", () => {
     expect(context.currentFacts.startingUnits ?? null).toBeNull();
   });
 
+  it("accepts deterministic per-object and subtotal amounts from an approved launch calculation", async () => {
+    const answer = "Предварительно запуск двух квартир в Москве — около 310 000 ₽: 50 000 ₽ за услугу один раз и 260 000 ₽ расходов по объектам, по 130 000 ₽ на каждую квартиру. Залог в расчёте принят за один месяц.";
+    const llm = new FakeLLMProvider([JSON.stringify({ answerText: answer, qualificationQuestion: "",
+      interpretedQuestionKind: "BUSINESS_INFORMATION", usedKnowledgeEntryIds: ["small-business-entry"] }), supportedReview]);
+    const result = await createNaturalResponseGenerator({ llmProvider: llm })({ lead: { city: "Москва", startingUnits: null } as Lead,
+      recentMessages: [{ direction: "INBOUND", content: "Сколько потребуется на запуск двух квартир?" }],
+      plan: { text: "", nextInformationNeed: null, asksUserQuestion: false, knowledgeEntryIds: [],
+        unresolvedQuestions: [], useNaturalAdaptation: true, currentTurnRequiresAnswer: true,
+        economicsContext: buildApprovedEconomicsContext({ city: "Москва", requestedUnits: 2 }),
+        approvedFacts: PARTNER_KNOWLEDGE_BASE.map(({ id, category, answer: fact }) => ({ id, category, answer: fact })),
+      },
+    });
+
+    expect(result.text).toContain("260 000 ₽");
+    expect(result.text).toContain("130 000 ₽");
+    expect(llm.callCount).toBe(2);
+  });
+
   it("lets semantic review distinguish an unknown condition from an unsupported promise", async () => {
     const llm = new FakeLLMProvider([JSON.stringify({ answerText:
       "Объявления и гостей ведёт администратор команды. Утверждённой информации об условиях страхования нет, эту часть нужно уточнить.",

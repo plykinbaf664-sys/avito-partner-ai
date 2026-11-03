@@ -129,6 +129,15 @@ function referencedUnitCounts(text: string): number[] {
 function approvedEconomicsMoneyValues(plan: ConversationResponsePlan): Set<number> {
   const context = plan.economicsContext;
   if (!context) return new Set();
+  const requestedLaunchOptions = context.scenarios.flatMap((scenario) =>
+    scenario.requestedUnitsLaunch ? [scenario.requestedUnitsLaunch] : [],
+  );
+  const derivedLaunchAmounts = requestedLaunchOptions.flatMap((launch) => {
+    if (!Number.isInteger(launch.units) || launch.units <= 0) return [];
+    const objectCostsMin = launch.totalMin - context.launchFee;
+    const objectCostsMax = launch.totalMax - context.launchFee;
+    return [objectCostsMin, objectCostsMax, objectCostsMin / launch.units, objectCostsMax / launch.units];
+  });
   const values = [
     context.availableCapital,
     context.launchFee,
@@ -150,6 +159,7 @@ function approvedEconomicsMoneyValues(plan: ConversationResponsePlan): Set<numbe
       ...[...(scenario.nearbyLaunchCosts ?? []), ...(scenario.affordableLaunchCosts ?? [])].flatMap(launch => [launch.totalMin, launch.totalMax,
         launch.estimatedMonthlyIncome, launch.remainingCapital, launch.capitalShortfall]),
     ]),
+    ...derivedLaunchAmounts,
     context.requestedUnitsIncome?.estimatedMonthlyIncome,
   ];
   return new Set(values.filter((value): value is number =>
